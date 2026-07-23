@@ -2,12 +2,11 @@ package de.miraculixx.worlds.data
 
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
+import net.minecraft.client.Minecraft
 import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.ZipInputStream
-import kotlinx.serialization.encodeToString
-import net.minecraft.client.Minecraft
 
 /** Result of an install attempt. */
 sealed interface InstallResult {

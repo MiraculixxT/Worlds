@@ -1,15 +1,9 @@
 package de.miraculixx.worlds.data
 
 import de.miraculixx.worlds.Constants
-import de.miraculixx.worlds.api.GhMapEntry
-import de.miraculixx.worlds.api.GhRequirement
-import de.miraculixx.worlds.api.GitHubIndex
-import de.miraculixx.worlds.api.Http
-import de.miraculixx.worlds.api.ModrinthApi
-import de.miraculixx.worlds.api.MrVersion
-import java.nio.file.Files
-import kotlinx.serialization.decodeFromString
+import de.miraculixx.worlds.api.*
 import net.minecraft.client.Minecraft
+import java.nio.file.Files
 
 /**
  * Central store that merges the two discovery sources (Modrinth reverse-dependency search + the

@@ -1,13 +1,13 @@
 package de.miraculixx.worlds.api
 
 import de.miraculixx.worlds.Constants
+import de.miraculixx.worlds.api.Http.json
+import kotlinx.serialization.json.Json
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.Json
 
 /**
  * Shared HTTP client + JSON parser. All calls are blocking and must run off the render thread

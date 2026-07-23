@@ -27,7 +27,7 @@ class MapListWidget(
 
     override fun scrollBarX(): Int = x + width - 8
 
-    inner class MapRow(val entry: MapEntry) : ObjectSelectionList.Entry<MapRow>() {
+    inner class MapRow(val entry: MapEntry) : Entry<MapRow>() {
         override fun getNarration(): Component = Component.literal(entry.title)
 
         override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
