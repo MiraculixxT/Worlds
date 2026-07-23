@@ -1,0 +1,25 @@
+[
+  {
+    "source": "modrinth",
+    "slug": "example-adventure-map"
+  },
+  {
+    "source": "manual",
+    "id": "sky-islands",
+    "name": "Sky Islands",
+    "description": "A floating-island parkour adventure.",
+    "readme": "# Sky Islands\n\nLeap between **floating islands** and reach the summit.\n\n- 12 parkour stages\n- Hidden secrets\n\n![preview](https://example.com/sky-islands/preview.png)",
+    "icon": "https://example.com/sky-islands/icon.png",
+    "download": "https://example.com/sky-islands/world.zip",
+    "mc": ["26.2"],
+    "theme": "parkour",
+    "categories": ["parkour", "adventure"],
+    "website": "https://example.com/sky-islands",
+    "requiredMods": [
+      { "name": "Fabric API", "id": "fabric-api", "link": "https://modrinth.com/mod/fabric-api" }
+    ],
+    "requiredPacks": [
+      { "name": "Sky Textures", "link": "https://example.com/sky-pack", "download": "https://example.com/sky-islands/pack.zip" }
+    ]
+  }
+]
