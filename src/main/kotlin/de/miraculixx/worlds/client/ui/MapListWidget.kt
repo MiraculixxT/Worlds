@@ -23,6 +23,15 @@ class MapListWidget(
         replaceEntries(entries.map { MapRow(it) })
     }
 
+    /** Select and scroll to the first row whose entry matches [predicate]; fires onSelect. */
+    fun selectEntry(predicate: (MapEntry) -> Boolean): Boolean {
+        val row = children().firstOrNull { predicate(it.entry) } ?: return false
+        selected = row
+        scrollToEntry(row)
+        onSelect(row.entry)
+        return true
+    }
+
     override fun getRowWidth(): Int = width - 12
 
     override fun scrollBarX(): Int = x + width - 8

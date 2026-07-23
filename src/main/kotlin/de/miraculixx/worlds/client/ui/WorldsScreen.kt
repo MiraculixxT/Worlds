@@ -34,6 +34,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private var actionMessage: String? = null
 
     private var selected: MapEntry? = null
+    // Ids of maps already present in saves/ — used to disable Install in Browse.
+    private var installedIds: Set<String> = emptySet()
+    // After an install we switch to Installed and auto-select the map with this id.
+    private var pendingSelectId: String? = null
     private var readmeBlocks: List<MdBlock> = emptyList()
     private var readmeScroll = 0.0
     private var readmeContentHeight = 0
@@ -127,6 +131,15 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         )
 
         if (allEntries.isEmpty()) loadCurrentTab() else applyFilter()
+        refreshInstalledIds()
+    }
+
+    /** Refresh the set of installed map ids (async) so Browse can disable already-installed maps. */
+    private fun refreshInstalledIds() {
+        Constants.SCOPE.launch {
+            val ids = MapRepository.scanInstalled().map { it.meta.id }.toSet()
+            Minecraft.getInstance().execute { installedIds = ids }
+        }
     }
 
     private fun switchTab(newTab: Tab) {
@@ -183,6 +196,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                     if (loadingTab == Tab.INSTALLED) "No maps installed yet." else "No maps found."
                 } else null
                 applyFilter()
+                pendingSelectId?.let { id ->
+                    if (list.selectEntry { it.id == id }) pendingSelectId = null
+                }
             }
         }
     }
@@ -226,9 +242,15 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         Constants.SCOPE.launch {
             val result = MapInstaller.install(entry)
             Minecraft.getInstance().execute {
-                actionMessage = when (result) {
-                    is InstallResult.Success -> "Installed to saves/${result.saveFolder}"
-                    is InstallResult.Failure -> result.message
+                when (result) {
+                    is InstallResult.Success -> {
+                        actionMessage = "Installed to saves/${result.saveFolder}"
+                        refreshInstalledIds()
+                        // Jump to the Installed tab and select the freshly-installed map.
+                        pendingSelectId = entry.id
+                        switchTab(Tab.INSTALLED)
+                    }
+                    is InstallResult.Failure -> actionMessage = result.message
                 }
             }
         }
@@ -247,6 +269,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
         graphics.centeredText(font, title, width / 2, 8, -1)
         graphics.fill(rightLeft - 6, listTop, rightLeft - 5, listBottom, 0x40FFFFFF)
+
+        // Push the readme down when a status line sits under the buttons, so they don't clip.
+        readmeTop = buttonsY + 26 + if (actionMessage != null) 10 else 0
 
         val entry = selected
         if (entry == null) {
@@ -276,7 +301,17 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         websiteButton.visible = entry != null && !entry.linkUrl().isNullOrBlank()
         trailerButton.visible = entry != null && !entry.trailerUrl.isNullOrBlank()
         if (entry != null) {
-            primaryButton.message = Component.literal(if (entry.installedFolder != null) "Play" else "Install")
+            val isInstalledEntry = entry.installedFolder != null
+            val alreadyInstalled = isInstalledEntry || entry.id in installedIds
+            primaryButton.message = Component.literal(
+                when {
+                    isInstalledEntry -> "Play"
+                    alreadyInstalled -> "Installed"
+                    else -> "Install"
+                }
+            )
+            // Play stays clickable; a Browse map already in saves/ is disabled.
+            primaryButton.active = isInstalledEntry || !alreadyInstalled
         }
     }
 
