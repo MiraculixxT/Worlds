@@ -13,7 +13,7 @@
     "download": "https://dl.minecraftmaps.com/geometry-dash-in-minecraft-52577.zip",
     "website": "https://www.minecraftmaps.com/52577-geometry-dash-in-minecraft",
     "trailer": "https://www.youtube.com/watch?v=1175Fi9DCLY",
-    "mc",: ["26.2"],
+    "mc": ["26.2"],
     "categories": ["parkour"],
     "requiredMods": [
       { "name": "Fabric API", "id": "fabric-api", "link": "https://modrinth.com/mod/fabric-api" }
