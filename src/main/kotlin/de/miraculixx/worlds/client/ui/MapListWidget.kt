@@ -43,18 +43,19 @@ class MapListWidget(
             hovered: Boolean,
             partialTick: Float,
         ) {
-            val x = getContentX()
-            val y = getContentY()
-            val right = getContentRight()
+            val x = contentX
+            val y = contentY
+            val right = contentRight
+            val bottom = contentBottom // row height minus the inter-entry margin
             val selected = this@MapListWidget.selected === this
             if (selected) {
-                graphics.fill(x - 2, y - 2, right + 2, y + ROW_HEIGHT - 6, 0xA0FFFFFF.toInt())
-                graphics.fill(x - 1, y - 1, right + 1, y + ROW_HEIGHT - 7, 0xFF101010.toInt())
+                graphics.fill(x - 2, y - 2, right + 2, bottom + 2, 0xA0FFFFFF.toInt())
+                graphics.fill(x - 1, y - 1, right + 1, bottom + 1, 0xFF101010.toInt())
             } else if (hovered) {
-                graphics.fill(x - 2, y - 2, right + 2, y + ROW_HEIGHT - 6, 0x40FFFFFF)
+                graphics.fill(x - 2, y - 2, right + 2, bottom + 2, 0x40FFFFFF)
             }
 
-            val iconSize = ROW_HEIGHT - 12
+            val iconSize = ROW_HEIGHT - 4
             val icon = MapTextures.get(entry.iconUrl)
             if (icon != null) {
                 graphics.blit(
@@ -67,12 +68,16 @@ class MapListWidget(
 
             val font = minecraft.font
             val textX = x + iconSize + 6
-            graphics.text(font, trim(entry.title, right - textX, font), textX, y + 1, -1)
-            graphics.text(font, trim(entry.description, right - textX, font), textX, y + 13, 0xFFA0A0A0.toInt())
+            // Main category as a colored pill right of the title (ModMenu-style tag).
             val category = entry.categories.firstOrNull()
+            val badgeW = if (category != null) CategoryBadge.width(font, category) + 4 else 0
+            val title = trim(entry.title, right - textX - badgeW, font)
+            graphics.text(font, title, textX, y + 1, -1)
             if (category != null) {
-                graphics.text(font, trim(category, right - textX, font), textX, y + 24, 0xFF6699FF.toInt())
+                val badgeX = textX + font.width(title) + 4
+                if (badgeX + badgeW - 4 <= right) CategoryBadge.draw(graphics, font, category, badgeX, y + 1)
             }
+            graphics.text(font, trim(entry.description, right - textX, font), textX, y + 15, 0xFFA0A0A0.toInt())
         }
 
         private fun trim(text: String, maxWidth: Int, font: net.minecraft.client.gui.Font): String {

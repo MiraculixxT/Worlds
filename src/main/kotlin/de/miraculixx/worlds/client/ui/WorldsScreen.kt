@@ -36,6 +36,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private lateinit var search: EditBox
     private lateinit var browseTab: Button
     private lateinit var installedTab: Button
+    private lateinit var refreshButton: Button
+
+    // Refresh cooldown so we don't hammer the APIs.
+    private var lastRefresh = 0L
     private lateinit var primaryButton: Button
     private lateinit var websiteButton: Button
     private lateinit var sourceButton: Button
@@ -69,6 +73,11 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         installedTab = addRenderableWidget(
             Button.builder(Component.literal("Installed")) { switchTab(Tab.INSTALLED) }
                 .bounds(leftLeft + half + 4, 24, half, 20).build()
+        )
+
+        refreshButton = addRenderableWidget(
+            Button.builder(Component.literal("Refresh")) { onRefresh() }
+                .bounds(rightRight - 70, 24, 70, 20).build()
         )
 
         search = EditBox(font, leftLeft, 46, leftWidth, 16, Component.literal("Search"))
@@ -116,14 +125,24 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         loadCurrentTab()
     }
 
-    private fun loadCurrentTab() {
+    /** Re-fetch the current tab, bypassing caches. No-op while the cooldown is active. */
+    private fun onRefresh() {
+        if (System.currentTimeMillis() - lastRefresh < REFRESH_COOLDOWN_MS) return
+        lastRefresh = System.currentTimeMillis()
+        selected = null
+        readmeBlocks = emptyList()
+        MapRepository.invalidate()
+        loadCurrentTab(force = true)
+    }
+
+    private fun loadCurrentTab(force: Boolean = false) {
         status = "Loading…"
         allEntries = emptyList()
         list.setEntries(emptyList())
         val loadingTab = tab
         Constants.SCOPE.launch {
             val entries = when (loadingTab) {
-                Tab.BROWSE -> MapRepository.loadBrowse()
+                Tab.BROWSE -> MapRepository.loadBrowse(force)
                 Tab.INSTALLED -> MapRepository.scanInstalled().map { installed ->
                     MapEntry(
                         id = installed.meta.id,
@@ -220,7 +239,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             drawReadme(graphics, mouseX, mouseY)
         }
 
-        status?.let { graphics.text(font, it, leftLeft, listTop - 12, 0xFFA0A0A0.toInt()) }
+        status?.let { graphics.text(font, it, leftLeft + 4, listTop + 12, 0xFFA0A0A0.toInt()) }
         actionMessage?.let { graphics.text(font, it, rightLeft, buttonsY + 22, 0xFFFFE066.toInt()) }
     }
 
@@ -228,6 +247,14 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         val entry = selected
         browseTab.active = tab != Tab.BROWSE
         installedTab.active = tab != Tab.INSTALLED
+        val remaining = REFRESH_COOLDOWN_MS - (System.currentTimeMillis() - lastRefresh)
+        if (remaining > 0) {
+            refreshButton.active = false
+            refreshButton.message = Component.literal("${remaining / 1000 + 1}s")
+        } else {
+            refreshButton.active = true
+            refreshButton.message = Component.literal("Refresh")
+        }
         primaryButton.visible = entry != null
         websiteButton.visible = entry != null && !entry.website.isNullOrBlank()
         sourceButton.visible = entry != null && !entry.sourceUrl.isNullOrBlank()
@@ -250,8 +277,12 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         val textX = rightLeft + iconSize + 8
         graphics.text(font, Component.literal(entry.title).withStyle { it.withBold(true) }, textX, listTop + 2, -1)
         graphics.textWithWordWrap(font, Component.literal(entry.description), textX, listTop + 14, rightRight - textX, 0xFFB0B0B0.toInt())
-        val tag = entry.categories.firstOrNull() ?: entry.source.name.lowercase()
-        graphics.text(font, tag, rightLeft, listTop + iconSize + 2, 0xFF6699FF.toInt())
+        val category = entry.categories.firstOrNull()
+        if (category != null) {
+            CategoryBadge.draw(graphics, font, category, rightLeft, listTop + iconSize + 2)
+        } else {
+            graphics.text(font, entry.source.name.lowercase(), rightLeft, listTop + iconSize + 2, 0xFF6699FF.toInt())
+        }
     }
 
     private fun drawReadme(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
@@ -329,5 +360,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
     override fun onClose() {
         minecraft.gui.setScreen(parent)
+    }
+
+    private companion object {
+        const val REFRESH_COOLDOWN_MS = 10_000L
     }
 }

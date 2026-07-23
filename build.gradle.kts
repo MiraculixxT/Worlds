@@ -42,6 +42,19 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.+")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.+")
 
+    // Pure-Java WebP decoder (TwelveMonkeys ImageIO) — Modrinth serves icons as WebP, which STB
+    // (NativeImage.read) can't decode. Bundled into the jar via Fabric's jar-in-jar (include).
+    val twelvemonkeys = "3.12.0"
+    listOf(
+        "com.twelvemonkeys.imageio:imageio-webp:$twelvemonkeys",
+        "com.twelvemonkeys.imageio:imageio-core:$twelvemonkeys",
+        "com.twelvemonkeys.common:common-lang:$twelvemonkeys",
+        "com.twelvemonkeys.common:common-io:$twelvemonkeys",
+        "com.twelvemonkeys.common:common-image:$twelvemonkeys",
+    ).forEach {
+        implementation(it)
+        include(it)
+    }
 }
 
 val minecraftVersion = project.property("gameVersion") as String
