@@ -33,7 +33,7 @@ object Markdown {
     fun parse(markdown: String?): List<MdBlock> {
         if (markdown.isNullOrBlank()) return emptyList()
         val blocks = ArrayList<MdBlock>()
-        val lines = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        val lines = stripHtml(markdown).replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
         var i = 0
         val paragraph = StringBuilder()
@@ -88,6 +88,23 @@ object Markdown {
         }
         flushParagraph()
         return blocks
+    }
+
+    // --- HTML stripping ------------------------------------------------------
+
+    private val BR_TAG = Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE)
+    private val HTML_TAG = Regex("""<[^>]+>""")
+    private val ENTITIES = mapOf(
+        "&amp;" to "&", "&lt;" to "<", "&gt;" to ">", "&quot;" to "\"",
+        "&#39;" to "'", "&apos;" to "'", "&nbsp;" to " ",
+    )
+
+    /** Modrinth readmes often mix raw HTML (`<div>`, `<br>`, `<details>`…) into the Markdown; drop
+     * the tags (keeping inner text), turn `<br>` into a line break, and decode common entities. */
+    private fun stripHtml(text: String): String {
+        var s = text.replace(BR_TAG, "\n").replace(HTML_TAG, "")
+        for ((entity, ch) in ENTITIES) s = s.replace(entity, ch)
+        return s
     }
 
     // --- inline span parsing -------------------------------------------------

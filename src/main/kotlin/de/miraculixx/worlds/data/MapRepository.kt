@@ -169,15 +169,18 @@ object MapRepository {
     }
 
     private val YOUTUBE_REGEX = Regex(
-        """(?:https?://)?(?:www\.|m\.)?(?:youtube\.com/(?:watch\?[\w=&-]*v=|embed/|shorts/)|youtu\.be/)[\w-]{11}[^\s)"'<]*""",
+        """(?:https?://)?(?:www\.|m\.)?(?:youtube\.com/(?:watch\?[\w=&-]*v=|embed/|shorts/)|youtu\.be/)([\w-]{11})""",
         RegexOption.IGNORE_CASE,
     )
 
-    /** First YouTube URL found in a Modrinth readme body, normalized to an absolute https link. */
+    /**
+     * First YouTube URL found in a Modrinth readme body, normalized to a canonical watch link
+     * (embed/shorts/youtu.be all collapse to `https://www.youtube.com/watch?v=<id>`).
+     */
     private fun firstYoutubeLink(body: String?): String? {
         if (body.isNullOrBlank()) return null
-        val match = YOUTUBE_REGEX.find(body)?.value ?: return null
-        return if (match.startsWith("http", true)) match else "https://$match"
+        val id = YOUTUBE_REGEX.find(body)?.groupValues?.get(1) ?: return null
+        return "https://www.youtube.com/watch?v=$id"
     }
 
     private fun modrinthUrl(projectType: String?, slug: String): String =

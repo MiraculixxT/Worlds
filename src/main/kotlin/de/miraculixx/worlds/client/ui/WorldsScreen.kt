@@ -13,9 +13,15 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.screens.Screen
+import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.renderer.RenderPipelines
+import net.minecraft.locale.Language
+import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.Component
+import net.minecraft.network.chat.FormattedText
+import net.minecraft.network.chat.Style
 import net.minecraft.util.Util
+import java.util.Optional
 
 /** The in-game map browser: Browse / Installed tabs, list on the left, detail panel on the right. */
 class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worlds")) {
@@ -31,6 +37,12 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private var readmeBlocks: List<MdBlock> = emptyList()
     private var readmeScroll = 0.0
     private var readmeContentHeight = 0
+    private var scrollbarDragging = false
+    private var dragGrabOffset = 0.0
+
+    // Clickable link hit-boxes in the readme, rebuilt every frame (26.2 has no style-at-width test).
+    private data class LinkRect(val x1: Int, val y1: Int, val x2: Int, val y2: Int, val url: String)
+    private val linkRects = ArrayList<LinkRect>()
 
     private lateinit var list: MapListWidget
     private lateinit var search: EditBox
@@ -42,7 +54,6 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private var lastRefresh = 0L
     private lateinit var primaryButton: Button
     private lateinit var websiteButton: Button
-    private lateinit var sourceButton: Button
     private lateinit var trailerButton: Button
 
     // Layout (computed in init).
@@ -90,22 +101,19 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         list.updateSizeAndPosition(leftWidth, listBottom - listTop, leftLeft, listTop)
         addRenderableWidget(list)
 
-        val bw = ((rightRight - rightLeft - 12) / 4).coerceIn(44, 90)
+        val bw = ((rightRight - rightLeft - 8) / 3).coerceIn(50, 100)
         primaryButton = addRenderableWidget(
             Button.builder(Component.literal("Install")) { onPrimary() }
                 .bounds(rightLeft, buttonsY, bw, 20).build()
         )
+        // One link button: the source page (Modrinth/GitHub) is the website when present.
         websiteButton = addRenderableWidget(
-            Button.builder(Component.literal("Website")) { openUrl(selected?.website) }
+            Button.builder(Component.literal("Website")) { openUrl(selected?.linkUrl()) }
                 .bounds(rightLeft + bw + 4, buttonsY, bw, 20).build()
-        )
-        sourceButton = addRenderableWidget(
-            Button.builder(Component.literal("Source")) { openUrl(selected?.sourceUrl) }
-                .bounds(rightLeft + (bw + 4) * 2, buttonsY, bw, 20).build()
         )
         trailerButton = addRenderableWidget(
             Button.builder(Component.literal("Trailer")) { openUrl(selected?.trailerUrl) }
-                .bounds(rightLeft + (bw + 4) * 3, buttonsY, bw, 20).build()
+                .bounds(rightLeft + (bw + 4) * 2, buttonsY, bw, 20).build()
         )
 
         addRenderableWidget(
@@ -226,6 +234,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         }
     }
 
+    /** Preferred external link: the source page (Modrinth/GitHub) if set, else the website. */
+    private fun MapEntry.linkUrl(): String? = sourceUrl?.takeIf { it.isNotBlank() } ?: website
+
     private fun openUrl(url: String?) {
         if (!url.isNullOrBlank()) Util.getPlatform().openUri(url)
     }
@@ -262,8 +273,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             refreshButton.message = Component.literal("Refresh")
         }
         primaryButton.visible = entry != null
-        websiteButton.visible = entry != null && !entry.website.isNullOrBlank()
-        sourceButton.visible = entry != null && !entry.sourceUrl.isNullOrBlank()
+        websiteButton.visible = entry != null && !entry.linkUrl().isNullOrBlank()
         trailerButton.visible = entry != null && !entry.trailerUrl.isNullOrBlank()
         if (entry != null) {
             primaryButton.message = Component.literal(if (entry.installedFolder != null) "Play" else "Install")
@@ -294,9 +304,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
     private fun drawReadme(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
         val bottom = listBottom
+        linkRects.clear()
         graphics.enableScissor(rightLeft, readmeTop, rightRight, bottom)
         var y = readmeTop - readmeScroll.toInt()
-        val innerWidth = rightRight - rightLeft
+        val innerWidth = rightRight - rightLeft - (SCROLLBAR_W + 2)
         for (block in readmeBlocks) {
             y += renderBlock(graphics, block, rightLeft, y, innerWidth)
         }
@@ -306,6 +317,31 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         // Clamp scroll now that content height is known.
         val max = (readmeContentHeight - (bottom - readmeTop)).coerceAtLeast(0)
         readmeScroll = readmeScroll.coerceIn(0.0, max.toDouble())
+
+        // Draggable scrollbar when the readme overflows its viewport.
+        if (max > 0) {
+            val trackX = rightRight - SCROLLBAR_W
+            val thumbH = thumbHeight()
+            val thumbY = readmeTop + ((readmeViewportH() - thumbH) * (readmeScroll / max)).toInt()
+            graphics.fill(trackX, readmeTop, trackX + SCROLLBAR_W, bottom, 0x30FFFFFF)
+            val thumbColor = if (scrollbarDragging) 0xFFFFFFFF.toInt() else 0x90FFFFFF.toInt()
+            graphics.fill(trackX, thumbY, trackX + SCROLLBAR_W, thumbY + thumbH, thumbColor)
+        }
+    }
+
+    private fun readmeViewportH(): Int = listBottom - readmeTop
+
+    private fun thumbHeight(): Int {
+        val vh = readmeViewportH()
+        return (vh.toLong() * vh / readmeContentHeight.coerceAtLeast(1)).toInt().coerceIn(20, vh)
+    }
+
+    /** Map a desired thumb-top pixel [thumbTop] back to a scroll offset. */
+    private fun setScrollFromThumbTop(thumbTop: Double) {
+        val maxScroll = (readmeContentHeight - readmeViewportH()).coerceAtLeast(0)
+        val range = (readmeViewportH() - thumbHeight()).coerceAtLeast(1)
+        val frac = ((thumbTop - readmeTop) / range).coerceIn(0.0, 1.0)
+        readmeScroll = frac * maxScroll
     }
 
     /** Draw a block at (x,y); returns the vertical space it consumed. */
@@ -325,17 +361,11 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 pose.popMatrix()
                 (wrapped.size * lh * scale).toInt() + 3
             }
-            is MdBlock.Paragraph -> {
-                val wrapped = font.split(block.text, width)
-                wrapped.forEachIndexed { i, seq -> graphics.text(font, seq, x, y + i * lh, 0xFFDDDDDD.toInt()) }
-                wrapped.size * lh + 2
-            }
+            is MdBlock.Paragraph -> drawWrappedWithLinks(graphics, block.text, x, y, width, 0xFFDDDDDD.toInt()) + 2
             is MdBlock.ListItem -> {
                 val indent = 10
                 graphics.text(font, block.bullet, x, y, 0xFFDDDDDD.toInt())
-                val wrapped = font.split(block.text, width - indent)
-                wrapped.forEachIndexed { i, seq -> graphics.text(font, seq, x + indent, y + i * lh, 0xFFDDDDDD.toInt()) }
-                wrapped.size * lh + 1
+                drawWrappedWithLinks(graphics, block.text, x + indent, y, width - indent, 0xFFDDDDDD.toInt()) + 1
             }
             is MdBlock.Code -> {
                 val wrapped = font.split(block.text, width)
@@ -356,6 +386,76 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         }
     }
 
+    /**
+     * Draw a word-wrapped [text] at (x,y), preserving inline styles, and record hit-boxes for any
+     * spans carrying an [ClickEvent.OpenUrl] so [mouseClicked] can open them. Returns height used.
+     */
+    private fun drawWrappedWithLinks(
+        graphics: GuiGraphicsExtractor, text: Component, x: Int, y: Int, width: Int, color: Int,
+    ): Int {
+        val lh = font.lineHeight + 1
+        val lines: List<FormattedText> = font.splitIgnoringLanguage(text, width)
+        lines.forEachIndexed { i, line ->
+            val ly = y + i * lh
+            var cx = x
+            line.visit({ style: Style, segment: String ->
+                val w = font.width(segment)
+                val click = style.clickEvent
+                if (click is ClickEvent.OpenUrl) {
+                    linkRects.add(LinkRect(cx, ly - 1, cx + w, ly + font.lineHeight, click.uri().toString()))
+                }
+                cx += w
+                Optional.empty<Unit>()
+            }, Style.EMPTY)
+            graphics.text(font, Language.getInstance().getVisualOrder(line), x, ly, color)
+        }
+        return lines.size * lh
+    }
+
+    override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
+        val mx = event.x()
+        val my = event.y()
+        if (event.button() == 0 && selected != null) {
+            // Scrollbar: grab the thumb to drag, or click the track to jump.
+            val maxScroll = (readmeContentHeight - readmeViewportH()).coerceAtLeast(0)
+            if (maxScroll > 0 && mx >= rightRight - SCROLLBAR_W && mx <= rightRight &&
+                my >= readmeTop && my <= listBottom
+            ) {
+                val thumbH = thumbHeight()
+                val thumbY = readmeTop + ((readmeViewportH() - thumbH) * (readmeScroll / maxScroll)).toInt()
+                if (my >= thumbY && my <= thumbY + thumbH) {
+                    dragGrabOffset = my - thumbY
+                } else {
+                    setScrollFromThumbTop(my - thumbH / 2.0)
+                    dragGrabOffset = thumbH / 2.0
+                }
+                scrollbarDragging = true
+                return true
+            }
+            if (mx >= rightLeft && mx <= rightRight && my >= readmeTop && my <= listBottom) {
+                val hit = linkRects.firstOrNull { mx >= it.x1 && mx <= it.x2 && my >= it.y1 && my <= it.y2 }
+                if (hit != null) {
+                    openUrl(hit.url)
+                    return true
+                }
+            }
+        }
+        return super.mouseClicked(event, doubleClick)
+    }
+
+    override fun mouseDragged(event: MouseButtonEvent, dragX: Double, dragY: Double): Boolean {
+        if (scrollbarDragging) {
+            setScrollFromThumbTop(event.y() - dragGrabOffset)
+            return true
+        }
+        return super.mouseDragged(event, dragX, dragY)
+    }
+
+    override fun mouseReleased(event: MouseButtonEvent): Boolean {
+        if (scrollbarDragging && event.button() == 0) scrollbarDragging = false
+        return super.mouseReleased(event)
+    }
+
     override fun mouseScrolled(mouseX: Double, mouseY: Double, scrollX: Double, scrollY: Double): Boolean {
         if (selected != null && mouseX >= rightLeft && mouseX <= rightRight && mouseY >= readmeTop && mouseY <= listBottom) {
             val max = (readmeContentHeight - (listBottom - readmeTop)).coerceAtLeast(0)
@@ -371,5 +471,6 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
     private companion object {
         const val REFRESH_COOLDOWN_MS = 10_000L
+        const val SCROLLBAR_W = 4
     }
 }
