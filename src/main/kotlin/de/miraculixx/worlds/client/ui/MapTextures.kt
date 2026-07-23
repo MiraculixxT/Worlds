@@ -67,8 +67,17 @@ object MapTextures {
      * WebP, which Modrinth uses for icons — those are routed through ImageIO (TwelveMonkeys WebP
      * plugin) and copied pixel-by-pixel into a NativeImage.
      */
-    private fun decode(bytes: ByteArray): NativeImage =
-        if (isWebp(bytes)) readViaImageIO(bytes) else NativeImage.read(bytes)
+    private fun decode(bytes: ByteArray): NativeImage {
+        if (isWebp(bytes)) return readViaImageIO(bytes)
+        // STB is strict and rejects some otherwise-valid PNG/JPEG ("bad png sig", odd chunks);
+        // fall back to the more lenient ImageIO decoder before giving up.
+        return try {
+            NativeImage.read(bytes)
+        } catch (e: Exception) {
+            Constants.LOG.warn("STB decode failed ({}); retrying via ImageIO", e.message)
+            readViaImageIO(bytes)
+        }
+    }
 
     private fun isWebp(b: ByteArray): Boolean =
         b.size >= 12 &&
