@@ -41,6 +41,7 @@ class MapEntry(
     val categories: List<String>,
     var website: String? = null,
     var sourceUrl: String? = null,
+    var trailerUrl: String? = null,
 ) {
     @Volatile var detailLoaded: Boolean = false
     @Volatile var readmeMarkdown: String? = null
@@ -64,6 +65,7 @@ data class InstalledMeta(
     val title: String,
     val icon: String? = null,
     val website: String? = null,
+    val trailer: String? = null,
     val requiredMods: List<MapRequirement> = emptyList(),
     val requiredPacks: List<MapRequirement> = emptyList(),
     val installedAt: Long = System.currentTimeMillis(),

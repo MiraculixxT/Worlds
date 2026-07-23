@@ -24,6 +24,8 @@ data class GhMapEntry(
     @SerialName("mc") val mcVersions: List<String> = emptyList(),
     val categories: List<String> = emptyList(),
     val website: String? = null,
+    /** Optional trailer video URL (e.g. YouTube). */
+    val trailer: String? = null,
     val requiredMods: List<GhRequirement> = emptyList(),
     val requiredPacks: List<GhRequirement> = emptyList(),
 )

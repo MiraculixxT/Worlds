@@ -43,6 +43,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private lateinit var primaryButton: Button
     private lateinit var websiteButton: Button
     private lateinit var sourceButton: Button
+    private lateinit var trailerButton: Button
 
     // Layout (computed in init).
     private var leftLeft = 8
@@ -89,7 +90,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         list.updateSizeAndPosition(leftWidth, listBottom - listTop, leftLeft, listTop)
         addRenderableWidget(list)
 
-        val bw = ((rightRight - rightLeft - 8) / 3).coerceIn(50, 100)
+        val bw = ((rightRight - rightLeft - 12) / 4).coerceIn(44, 90)
         primaryButton = addRenderableWidget(
             Button.builder(Component.literal("Install")) { onPrimary() }
                 .bounds(rightLeft, buttonsY, bw, 20).build()
@@ -101,6 +102,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         sourceButton = addRenderableWidget(
             Button.builder(Component.literal("Source")) { openUrl(selected?.sourceUrl) }
                 .bounds(rightLeft + (bw + 4) * 2, buttonsY, bw, 20).build()
+        )
+        trailerButton = addRenderableWidget(
+            Button.builder(Component.literal("Trailer")) { openUrl(selected?.trailerUrl) }
+                .bounds(rightLeft + (bw + 4) * 3, buttonsY, bw, 20).build()
         )
 
         addRenderableWidget(
@@ -154,6 +159,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                         mcVersions = emptyList(),
                         categories = emptyList(),
                         website = installed.meta.website,
+                        trailerUrl = installed.meta.trailer,
                     ).also {
                         it.installedFolder = installed.saveFolder
                         it.requiredMods = installed.meta.requiredMods
@@ -258,6 +264,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         primaryButton.visible = entry != null
         websiteButton.visible = entry != null && !entry.website.isNullOrBlank()
         sourceButton.visible = entry != null && !entry.sourceUrl.isNullOrBlank()
+        trailerButton.visible = entry != null && !entry.trailerUrl.isNullOrBlank()
         if (entry != null) {
             primaryButton.message = Component.literal(if (entry.installedFolder != null) "Play" else "Install")
         }

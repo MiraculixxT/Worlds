@@ -92,6 +92,7 @@ object MapRepository {
         val gh = manualById[entry.id] ?: return
         entry.readmeMarkdown = gh.readme ?: gh.description
         entry.downloadUrl = gh.download
+        entry.trailerUrl = gh.trailer
         entry.requiredMods = gh.requiredMods.map { it.toRequirement(RequirementKind.MOD) }
         entry.requiredPacks = gh.requiredPacks.map { it.toRequirement(RequirementKind.RESOURCE_PACK) }
     }
@@ -100,6 +101,7 @@ object MapRepository {
         val project = ModrinthApi.getProject(entry.id)
         entry.readmeMarkdown = project?.body?.ifBlank { entry.description } ?: entry.description
         entry.gallery = project?.gallery?.sortedByDescending { it.featured }?.map { it.url } ?: emptyList()
+        entry.trailerUrl = firstYoutubeLink(project?.body)
 
         val versions = ModrinthApi.getVersions(entry.id)
         val version = pickVersion(versions)
@@ -164,6 +166,18 @@ object MapRepository {
 
     fun invalidate() {
         browseCache = null
+    }
+
+    private val YOUTUBE_REGEX = Regex(
+        """(?:https?://)?(?:www\.|m\.)?(?:youtube\.com/(?:watch\?[\w=&-]*v=|embed/|shorts/)|youtu\.be/)[\w-]{11}[^\s)"'<]*""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** First YouTube URL found in a Modrinth readme body, normalized to an absolute https link. */
+    private fun firstYoutubeLink(body: String?): String? {
+        if (body.isNullOrBlank()) return null
+        val match = YOUTUBE_REGEX.find(body)?.value ?: return null
+        return if (match.startsWith("http", true)) match else "https://$match"
     }
 
     private fun modrinthUrl(projectType: String?, slug: String): String =
