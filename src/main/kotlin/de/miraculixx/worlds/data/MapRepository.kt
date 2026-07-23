@@ -36,7 +36,7 @@ object MapRepository {
                 description = gh.description ?: "",
                 iconUrl = gh.icon,
                 mcVersions = gh.mcVersions,
-                categories = if (gh.theme != null) listOf(gh.theme) + gh.categories else gh.categories,
+                categories = gh.categories,
                 website = gh.website,
             )
         }
@@ -105,21 +105,26 @@ object MapRepository {
         val version = pickVersion(versions)
         entry.downloadUrl = version?.primaryFile()?.url
 
-        val depIds = version?.dependencies
-            ?.filter { it.dependencyType == "required" && it.projectId != null }
-            ?.mapNotNull { it.projectId }
-            ?.distinct()
-            ?: emptyList()
-        if (depIds.isNotEmpty()) {
-            val deps = ModrinthApi.getProjects(depIds)
-            val reqs = deps.map { p ->
-                val kind = if (p.projectType == "resourcepack") RequirementKind.RESOURCE_PACK else RequirementKind.MOD
+        // `required` deps must be present; `embedded` deps ship inside the map download. We keep
+        // embedded deps only for resource packs (mark them "included"); an embedded mod is bundled
+        // in the map itself, so it must not trigger the missing-mod check.
+        val depTypeById = version?.dependencies
+            ?.filter { it.projectId != null && (it.dependencyType == "required" || it.dependencyType == "embedded") }
+            ?.associate { it.projectId!! to it.dependencyType }
+            ?: emptyMap()
+        if (depTypeById.isNotEmpty()) {
+            val deps = ModrinthApi.getProjects(depTypeById.keys.toList())
+            val reqs = deps.mapNotNull { p ->
+                val embedded = depTypeById[p.id] == "embedded"
+                val isPack = p.projectType == "resourcepack"
+                if (embedded && !isPack) return@mapNotNull null
                 MapRequirement(
                     name = p.title,
-                    kind = kind,
+                    kind = if (isPack) RequirementKind.RESOURCE_PACK else RequirementKind.MOD,
                     projectId = p.id,
                     modId = p.slug,
                     link = modrinthUrl(p.projectType, p.slug ?: p.id),
+                    included = embedded,
                 )
             }
             entry.requiredMods = reqs.filter { it.kind == RequirementKind.MOD }
@@ -171,5 +176,6 @@ object MapRepository {
         modId = id,
         link = link,
         download = download,
+        included = included && kind == RequirementKind.RESOURCE_PACK,
     )
 }

@@ -19,7 +19,7 @@ object Constants {
 
     /** Raw GitHub URL of the curated manual map index. */
     const val MAPS_JSON_URL =
-        "https://raw.githubusercontent.com/miraculixx/Worlds/main/maps.json"
+        "https://raw.githubusercontent.com/MiraculixxT/Worlds/refs/heads/main/maps.json"
 
     const val MODRINTH_API = "https://api.modrinth.com/v2"
 

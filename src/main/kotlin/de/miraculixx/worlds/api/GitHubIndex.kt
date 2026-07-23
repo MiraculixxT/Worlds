@@ -22,7 +22,6 @@ data class GhMapEntry(
     val icon: String? = null,
     val download: String? = null,
     @SerialName("mc") val mcVersions: List<String> = emptyList(),
-    val theme: String? = null,
     val categories: List<String> = emptyList(),
     val website: String? = null,
     val requiredMods: List<GhRequirement> = emptyList(),
@@ -35,6 +34,8 @@ data class GhRequirement(
     val id: String? = null,
     val link: String? = null,
     val download: String? = null,
+    /** For resource packs: bundled inside the map download — no separate download/toggle. */
+    val included: Boolean = false,
 )
 
 object GitHubIndex {

@@ -17,6 +17,12 @@ data class MapRequirement(
     val modId: String? = null,
     val link: String? = null,
     val download: String? = null,
+    /**
+     * True when the resource pack ships *inside* the map download (Modrinth `embedded` dep or manual
+     * `included: true`). No separate download or pack-toggle is needed — the entry is kept only to
+     * mark that the map uses a resource pack.
+     */
+    val included: Boolean = false,
 )
 
 /**
@@ -45,9 +51,6 @@ class MapEntry(
 
     /** Non-null when this entry represents an already-installed save (Installed tab). */
     @Volatile var installedFolder: String? = null
-
-    /** Theme label shown in the list — first category, if any. */
-    val theme: String? get() = categories.firstOrNull()
 }
 
 /**

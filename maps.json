@@ -1,25 +1,24 @@
 [
   {
     "source": "modrinth",
-    "slug": "example-adventure-map"
+    "slug": "waterworldpack"
   },
   {
     "source": "manual",
-    "id": "sky-islands",
-    "name": "Sky Islands",
-    "description": "A floating-island parkour adventure.",
-    "readme": "# Sky Islands\n\nLeap between **floating islands** and reach the summit.\n\n- 12 parkour stages\n- Hidden secrets\n\n![preview](https://example.com/sky-islands/preview.png)",
-    "icon": "https://example.com/sky-islands/icon.png",
-    "download": "https://example.com/sky-islands/world.zip",
+    "id": "goemetry-dash-in-mc",
+    "name": "Geometry Dash in Minecraft",
+    "description": "Play Geometry Dash in Minecraft",
+    "readme": "GEOMETRY DASH!!! Heck yeah this was a fun project! Hope you all enjoy this shorter dev like kinda content! It was kinda fun to make and heart destroying towards the end :'D",
+    "icon": "https://example.com/icon.png",
+    "download": "https://dl.minecraftmaps.com/geometry-dash-in-minecraft-52577.zip",
+    "website": "https://www.minecraftmaps.com/52577-geometry-dash-in-minecraft",
     "mc": ["26.2"],
-    "theme": "parkour",
-    "categories": ["parkour", "adventure"],
-    "website": "https://example.com/sky-islands",
+    "categories": ["parkour"],
     "requiredMods": [
       { "name": "Fabric API", "id": "fabric-api", "link": "https://modrinth.com/mod/fabric-api" }
     ],
     "requiredPacks": [
-      { "name": "Sky Textures", "link": "https://example.com/sky-pack", "download": "https://example.com/sky-islands/pack.zip" }
+      { "name": "Geometry Dash Textures", "included": true }
     ]
   }
 ]

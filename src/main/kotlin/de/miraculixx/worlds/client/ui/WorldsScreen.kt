@@ -250,7 +250,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         val textX = rightLeft + iconSize + 8
         graphics.text(font, Component.literal(entry.title).withStyle { it.withBold(true) }, textX, listTop + 2, -1)
         graphics.textWithWordWrap(font, Component.literal(entry.description), textX, listTop + 14, rightRight - textX, 0xFFB0B0B0.toInt())
-        val tag = entry.theme ?: entry.source.name.lowercase()
+        val tag = entry.categories.firstOrNull() ?: entry.source.name.lowercase()
         graphics.text(font, tag, rightLeft, listTop + iconSize + 2, 0xFF6699FF.toInt())
     }
 

@@ -69,9 +69,9 @@ class MapListWidget(
             val textX = x + iconSize + 6
             graphics.text(font, trim(entry.title, right - textX, font), textX, y + 1, -1)
             graphics.text(font, trim(entry.description, right - textX, font), textX, y + 13, 0xFFA0A0A0.toInt())
-            val theme = entry.theme
-            if (theme != null) {
-                graphics.text(font, trim(theme, right - textX, font), textX, y + 24, 0xFF6699FF.toInt())
+            val category = entry.categories.firstOrNull()
+            if (category != null) {
+                graphics.text(font, trim(category, right - textX, font), textX, y + 24, 0xFF6699FF.toInt())
             }
         }
 
