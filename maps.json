@@ -16,7 +16,8 @@
     "mc": ["26.2"],
     "categories": ["parkour"],
     "requiredMods": [
-      { "name": "Fabric API", "id": "fabric-api", "link": "https://modrinth.com/mod/fabric-api" }
+      { "name": "Fabric API", "id": "fabric-api", "link": "https://modrinth.com/mod/fabric-api" },
+      { "name": "Sodium", "id": "sodium", "link": "https://modrinth.com/mod/sodium" }
     ],
     "requiredPacks": [
       { "name": "Geometry Dash Textures", "included": true }
