@@ -56,6 +56,7 @@ object MapInstaller {
                 Files.write(dest, content)
             }
             writeMarker(target, entry)
+            downloadExternalPacks(target, entry)
         } catch (e: Exception) {
             Constants.LOG.error("Install failed for {}", entry.title, e)
             return InstallResult.Failure("Failed to write world: ${e.message}")
@@ -81,6 +82,7 @@ object MapInstaller {
             id = entry.id,
             source = entry.source,
             title = entry.title,
+            description = entry.description,
             icon = entry.iconUrl,
             website = entry.sourceUrl ?: entry.website,
             trailer = entry.trailerUrl,
@@ -88,6 +90,43 @@ object MapInstaller {
             requiredPacks = entry.requiredPacks,
         )
         Files.writeString(target.resolve(InstalledMeta.FILE_NAME), Http.json.encodeToString(meta))
+    }
+
+    /**
+     * Download every *external* required resource pack (not `included` in the world zip) into the
+     * save's own `resourcepacks/` folder so [WorldResourcePacks] can enable them on join. Best-effort:
+     * a pack that can't be resolved or fetched is logged and skipped, never failing the install.
+     */
+    private fun downloadExternalPacks(target: Path, entry: MapEntry) {
+        val external = entry.requiredPacks.filter { !it.included }
+        if (external.isEmpty()) return
+        val packsDir = target.resolve("resourcepacks")
+        for (pack in external) {
+            val url = pack.download ?: pack.projectId?.let { MapRepository.resolveModrinthDownload(it) }
+            if (url == null) {
+                Constants.LOG.warn("No download URL for required pack '{}'", pack.name)
+                continue
+            }
+            val bytes = Http.getBytes(url)
+            if (bytes == null) {
+                Constants.LOG.warn("Failed to download required pack '{}' from {}", pack.name, url)
+                continue
+            }
+            try {
+                Files.createDirectories(packsDir)
+                Files.write(packsDir.resolve(packFilename(pack, url)), bytes)
+            } catch (e: Exception) {
+                Constants.LOG.warn("Failed to save required pack '{}': {}", pack.name, e.message)
+            }
+        }
+    }
+
+    /** A `.zip` filename for a downloaded pack: prefer the URL's own name, else derive from title. */
+    private fun packFilename(pack: MapRequirement, url: String): String {
+        val fromUrl = url.substringAfterLast('/').substringBefore('?')
+        if (fromUrl.endsWith(".zip", ignoreCase = true)) return fromUrl
+        val base = pack.name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "pack" }
+        return "$base.zip"
     }
 
     private fun uniqueFolder(savesDir: Path, title: String): Path {

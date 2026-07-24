@@ -33,5 +33,7 @@ class WorldsClient : ClientModInitializer {
             }.bounds(bx, by, bw, 20).build()
             widgets.add(button)
         }
+        // Per-world resource-pack loading is handled by WorldOpenFlowsMixin (piggy-backs vanilla's
+        // bundled-pack load), so no join/disconnect hooks are needed here.
     }
 }

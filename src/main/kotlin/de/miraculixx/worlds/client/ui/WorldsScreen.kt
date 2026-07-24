@@ -7,6 +7,7 @@ import de.miraculixx.worlds.data.InstallResult
 import de.miraculixx.worlds.data.MapEntry
 import de.miraculixx.worlds.data.MapInstaller
 import de.miraculixx.worlds.data.MapRepository
+import de.miraculixx.worlds.data.WorldResourcePacks
 import kotlinx.coroutines.launch
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
@@ -175,8 +176,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                         source = installed.meta.source,
                         slug = null,
                         title = installed.meta.title,
-                        description = "Installed • ${installed.saveFolder}",
-                        iconUrl = installed.meta.icon,
+                        description = installed.meta.description?.takeIf { it.isNotBlank() }
+                            ?: "Installed • ${installed.saveFolder}",
+                        iconUrl = installed.localIcon ?: installed.meta.icon,
                         mcVersions = emptyList(),
                         categories = emptyList(),
                         website = installed.meta.website,
@@ -218,15 +220,24 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         selected = entry
         readmeScroll = 0.0
         actionMessage = null
-        readmeBlocks = Markdown.parse(entry.readmeMarkdown ?: entry.description)
+        readmeBlocks = Markdown.parse(readmeFor(entry))
         if (!entry.detailLoaded) {
             Constants.SCOPE.launch {
                 MapRepository.loadDetail(entry)
                 Minecraft.getInstance().execute {
-                    if (selected === entry) readmeBlocks = Markdown.parse(entry.readmeMarkdown ?: entry.description)
+                    if (selected === entry) readmeBlocks = Markdown.parse(readmeFor(entry))
                 }
             }
         }
+    }
+
+    /** Readme markdown, with the bundled resource packs appended as a list for installed maps. */
+    private fun readmeFor(entry: MapEntry): String {
+        val base = entry.readmeMarkdown ?: entry.description
+        val folder = entry.installedFolder ?: return base
+        val packs = WorldResourcePacks.listPackNames(folder)
+        if (packs.isEmpty()) return base
+        return base + "\n\n## Resource packs\n" + packs.joinToString("\n") { "- $it" }
     }
 
     private fun onPrimary() {

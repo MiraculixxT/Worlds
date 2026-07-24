@@ -63,6 +63,7 @@ data class InstalledMeta(
     val id: String,
     val source: MapSource,
     val title: String,
+    val description: String? = null,
     val icon: String? = null,
     val website: String? = null,
     val trailer: String? = null,
@@ -79,4 +80,9 @@ data class InstalledMeta(
 data class InstalledMap(
     val saveFolder: String,
     val meta: InstalledMeta,
+    /**
+     * Absolute path to the save's own `icon.png` when present. Preferred over [InstalledMeta.icon]
+     * so the Installed tab shows the world's actual thumbnail rather than the remote listing icon.
+     */
+    val localIcon: String? = null,
 )

@@ -5,6 +5,8 @@ import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
 import java.io.ByteArrayInputStream
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 import javax.imageio.ImageIO
@@ -39,7 +41,7 @@ object MapTextures {
         }
         cache[url] = Loading
         Constants.SCOPE.launch {
-            val bytes = Http.getBytes(url)
+            val bytes = loadBytes(url)
             if (bytes == null) {
                 cache[url] = Failed
                 return@launch
@@ -58,6 +60,20 @@ object MapTextures {
             }
         }
         return null
+    }
+
+    /**
+     * Fetch image bytes for [url]: HTTP(S) URLs go through [Http], anything else is treated as a
+     * local filesystem path (an installed save's own `icon.png`).
+     */
+    private fun loadBytes(url: String): ByteArray? {
+        if (url.startsWith("http://") || url.startsWith("https://")) return Http.getBytes(url)
+        return try {
+            Files.readAllBytes(Path.of(url))
+        } catch (e: Exception) {
+            Constants.LOG.warn("Local image read failed {}: {}", url, e.message)
+            null
+        }
     }
 
     @Volatile private var pluginsScanned = false

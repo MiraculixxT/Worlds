@@ -6,6 +6,7 @@
   "mixins": [
   ],
   "client": [
+    "WorldOpenFlowsMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -134,6 +134,10 @@ object MapRepository {
         }
     }
 
+    /** Best download URL for a Modrinth project's newest compatible version (used for pack deps). */
+    fun resolveModrinthDownload(projectId: String): String? =
+        pickVersion(ModrinthApi.getVersions(projectId))?.primaryFile()?.url
+
     /** Prefer the newest version compatible with the running MC version, else the newest overall. */
     private fun pickVersion(versions: List<MrVersion>): MrVersion? {
         if (versions.isEmpty()) return null
@@ -158,7 +162,9 @@ object MapRepository {
                     Constants.LOG.warn("Bad {} in {}: {}", InstalledMeta.FILE_NAME, dir, e.message)
                     continue
                 }
-                result.add(InstalledMap(dir.fileName.toString(), meta))
+                val iconFile = dir.resolve("icon.png")
+                val localIcon = if (Files.isRegularFile(iconFile)) iconFile.toString() else null
+                result.add(InstalledMap(dir.fileName.toString(), meta, localIcon))
             }
         }
         return result.sortedBy { it.meta.title.lowercase() }
