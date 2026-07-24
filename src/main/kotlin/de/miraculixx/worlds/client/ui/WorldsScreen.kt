@@ -7,8 +7,10 @@ import de.miraculixx.worlds.data.InstallResult
 import de.miraculixx.worlds.data.MapEntry
 import de.miraculixx.worlds.data.MapInstaller
 import de.miraculixx.worlds.data.MapRepository
+import de.miraculixx.worlds.data.MapRequirement
 import de.miraculixx.worlds.data.WorldResourcePacks
 import kotlinx.coroutines.launch
+import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
@@ -244,8 +246,11 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         val entry = selected ?: return
         val folder = entry.installedFolder
         if (folder != null) {
-            minecraft.createWorldOpenFlows().openWorld(folder) {
-                minecraft.gui.setScreen(this)
+            val missing = missingMods(entry)
+            if (missing.isEmpty()) {
+                playWorld(folder)
+            } else {
+                minecraft.gui.setScreen(MissingModsScreen(this, entry.title, missing) { playWorld(folder) })
             }
             return
         }
@@ -266,6 +271,20 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             }
         }
     }
+
+    /** Open an installed world, returning to this screen when the flow hands control back. */
+    private fun playWorld(folder: String) {
+        minecraft.createWorldOpenFlows().openWorld(folder) {
+            minecraft.gui.setScreen(this)
+        }
+    }
+
+    /** Required mods of [entry] that are not currently loaded. modId-less reqs can't be checked → skipped. */
+    private fun missingMods(entry: MapEntry): List<MapRequirement> =
+        entry.requiredMods.filter { req ->
+            val id = req.modId?.takeIf { it.isNotBlank() } ?: return@filter false
+            !FabricLoader.getInstance().isModLoaded(id)
+        }
 
     /** Preferred external link: the source page (Modrinth/GitHub) if set, else the website. */
     private fun MapEntry.linkUrl(): String? = sourceUrl?.takeIf { it.isNotBlank() } ?: website
