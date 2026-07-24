@@ -23,6 +23,7 @@ import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.FormattedText
 import net.minecraft.network.chat.Style
+import net.minecraft.resources.Identifier
 import net.minecraft.util.Util
 import java.util.Optional
 
@@ -51,11 +52,18 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private data class LinkRect(val x1: Int, val y1: Int, val x2: Int, val y2: Int, val url: String)
     private val linkRects = ArrayList<LinkRect>()
 
+    // Browse filters (applied in applyFilter, Browse tab only).
+    private var filterCategory: String? = null
+    private var versionMode = VersionMode.ALL
+    private var sortMode = SortMode.AZ
+    private var sortReverse = false
+
     private lateinit var list: MapListWidget
     private lateinit var search: EditBox
     private lateinit var browseTab: Button
     private lateinit var installedTab: Button
     private lateinit var refreshButton: Button
+    private lateinit var filterButton: Button
 
     // Refresh cooldown so we don't hammer the APIs.
     private var lastRefresh = 0L
@@ -99,10 +107,16 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 .bounds(rightRight - 70, 24, 70, 20).build()
         )
 
-        search = EditBox(font, leftLeft, 46, leftWidth, 16, Component.literal("Search"))
+        search = EditBox(font, leftLeft, 46, leftWidth - 22, 16, Component.literal("Search"))
         search.setHint(Component.literal("Search maps…"))
         search.setResponder { applyFilter() }
         addRenderableWidget(search)
+
+        // Icon-only filter toggle right of the search box; sprite swaps when a filter is active.
+        filterButton = addRenderableWidget(
+            Button.builder(Component.empty()) { openFilters() }
+                .bounds(leftLeft + leftWidth - 20, 44, 20, 20).build()
+        )
 
         list = MapListWidget(minecraft, leftWidth, listBottom - listTop, listTop, ::onSelect)
         list.updateSizeAndPosition(leftWidth, listBottom - listTop, leftLeft, listTop)
@@ -209,13 +223,72 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
     private fun applyFilter() {
         val query = if (::search.isInitialized) search.value.trim().lowercase() else ""
-        val filtered = if (query.isEmpty()) allEntries else allEntries.filter {
+        var filtered = if (query.isEmpty()) allEntries else allEntries.filter {
             it.title.lowercase().contains(query) ||
                 it.description.lowercase().contains(query) ||
                 it.categories.any { c -> c.lowercase().contains(query) }
         }
+        // Category / version / sort apply to Browse only (Installed entries carry no such metadata).
+        if (tab == Tab.BROWSE) {
+            filterCategory?.let { cat ->
+                filtered = filtered.filter { e -> e.categories.any { it.equals(cat, ignoreCase = true) } }
+            }
+            if (versionMode != VersionMode.ALL) {
+                filtered = filtered.filter { versionMatches(it) }
+            }
+            val byKey = when (sortMode) {
+                SortMode.AZ -> filtered.sortedBy { it.title.lowercase() }
+                SortMode.DOWNLOADS -> filtered.sortedByDescending { it.downloads }
+                SortMode.DATE -> filtered.sortedByDescending { it.dateEpoch }
+            }
+            filtered = if (sortReverse) byKey.reversed() else byKey
+        }
         list.setEntries(filtered)
         if (selected != null && selected !in filtered) selected = null
+    }
+
+    /** Distinct categories across the loaded Browse entries, for the filter dropdown. */
+    private fun availableCategories(): List<String> =
+        allEntries.flatMap { it.categories }.distinct().sortedBy { it.lowercase() }
+
+    /** True if any filter/sort differs from the default (drives the active-sprite swap). */
+    private fun isFilterActive(): Boolean =
+        filterCategory != null || versionMode != VersionMode.ALL || sortMode != SortMode.AZ || sortReverse
+
+    private fun openFilters() {
+        minecraft.gui.setScreen(
+            FilterScreen(this, availableCategories(), filterCategory ?: ALL_CATEGORIES, versionMode, sortMode, sortReverse)
+        )
+    }
+
+    /** Called back by [FilterScreen] when the popup closes. */
+    fun applyFilters(category: String?, version: VersionMode, sort: SortMode, reverse: Boolean) {
+        filterCategory = category
+        versionMode = version
+        sortMode = sort
+        sortReverse = reverse
+        applyFilter()
+    }
+
+    /** Whether [entry]'s supported game versions satisfy the current [versionMode]. */
+    private fun versionMatches(entry: MapEntry): Boolean {
+        val current = Minecraft.getInstance().launchedVersion
+        return when (versionMode) {
+            VersionMode.ALL -> true
+            VersionMode.EQUAL -> entry.mcVersions.any { it == current }
+            VersionMode.EQUAL_HIGHER -> entry.mcVersions.any { compareVersions(it, current) >= 0 }
+        }
+    }
+
+    /** Compare dotted numeric versions ("26.2" vs "26.1"); non-numeric parts count as 0. */
+    private fun compareVersions(a: String, b: String): Int {
+        val pa = a.split('.'); val pb = b.split('.')
+        for (i in 0 until maxOf(pa.size, pb.size)) {
+            val na = pa.getOrNull(i)?.toIntOrNull() ?: 0
+            val nb = pb.getOrNull(i)?.toIntOrNull() ?: 0
+            if (na != nb) return na.compareTo(nb)
+        }
+        return 0
     }
 
     private fun onSelect(entry: MapEntry) {
@@ -300,6 +373,11 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         graphics.centeredText(font, title, width / 2, 8, -1)
         graphics.fill(rightLeft - 6, listTop, rightLeft - 5, listBottom, 0x40FFFFFF)
 
+        if (filterButton.visible) {
+            val sprite = if (isFilterActive()) FILTER_ACTIVE else FILTER_INACTIVE
+            graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, filterButton.x + 2, filterButton.y + 2, 16, 16)
+        }
+
         // Push the readme down when a status line sits under the buttons, so they don't clip.
         readmeTop = buttonsY + 26 + if (actionMessage != null) 10 else 0
 
@@ -319,6 +397,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         val entry = selected
         browseTab.active = tab != Tab.BROWSE
         installedTab.active = tab != Tab.INSTALLED
+        filterButton.visible = tab == Tab.BROWSE
         val remaining = REFRESH_COOLDOWN_MS - (System.currentTimeMillis() - lastRefresh)
         if (remaining > 0) {
             refreshButton.active = false
@@ -370,14 +449,25 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private fun drawReadme(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
         val bottom = listBottom
         linkRects.clear()
+        // Soft black backing so the readme stays legible over bright title-screen backgrounds.
+        // Text is inset from the left; top/bottom get bevel lines like the world list (below).
+        graphics.fill(rightLeft, readmeTop, rightRight, bottom, 0x6D000000.toInt())
         graphics.enableScissor(rightLeft, readmeTop, rightRight, bottom)
+        val textX = rightLeft + READ_PAD_X
         var y = readmeTop - readmeScroll.toInt()
-        val innerWidth = rightRight - rightLeft - (SCROLLBAR_W + 2)
+        val innerWidth = rightRight - textX - (SCROLLBAR_W + 2)
         for (block in readmeBlocks) {
-            y += renderBlock(graphics, block, rightLeft, y, innerWidth)
+            y += renderBlock(graphics, block, textX, y, innerWidth)
         }
         readmeContentHeight = (y + readmeScroll.toInt()) - readmeTop
         graphics.disableScissor()
+
+        // Top/bottom limiter lines (outside the content box): outer bright, inner dark. Symmetric
+        // so neither clips the first/last text row.
+        graphics.fill(rightLeft, readmeTop - 2, rightRight, readmeTop - 1, 0x33FFFFFF)
+        graphics.fill(rightLeft, readmeTop - 1, rightRight, readmeTop, 0xFF000000.toInt())
+        graphics.fill(rightLeft, bottom + 1, rightRight, bottom + 2, 0x33FFFFFF)
+        graphics.fill(rightLeft, bottom, rightRight, bottom + 1, 0xFF000000.toInt())
 
         // Clamp scroll now that content height is known.
         val max = (readmeContentHeight - (bottom - readmeTop)).coerceAtLeast(0)
@@ -537,5 +627,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private companion object {
         const val REFRESH_COOLDOWN_MS = 10_000L
         const val SCROLLBAR_W = 4
+        const val READ_PAD_X = 4
+        val FILTER_INACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/inactive")
+        val FILTER_ACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/active")
     }
 }

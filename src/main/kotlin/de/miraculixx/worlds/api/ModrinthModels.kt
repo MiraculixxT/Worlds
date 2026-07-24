@@ -23,6 +23,8 @@ data class MrSearchHit(
     val categories: List<String> = emptyList(),
     @SerialName("display_categories") val displayCategories: List<String> = emptyList(),
     @SerialName("versions") val gameVersions: List<String> = emptyList(),
+    val downloads: Long = 0,
+    @SerialName("date_modified") val dateModified: String? = null,
     val gallery: List<String> = emptyList(),
 )
 
@@ -38,6 +40,8 @@ data class MrProject(
     @SerialName("icon_url") val iconUrl: String? = null,
     val categories: List<String> = emptyList(),
     @SerialName("game_versions") val gameVersions: List<String> = emptyList(),
+    val downloads: Long = 0,
+    val updated: String? = null,
     val gallery: List<MrGalleryImage> = emptyList(),
 )
 

@@ -57,6 +57,8 @@ object MapRepository {
                 iconUrl = hit.iconUrl,
                 mcVersions = hit.gameVersions,
                 categories = hit.displayCategories.ifEmpty { hit.categories },
+                downloads = hit.downloads,
+                dateEpoch = parseEpoch(hit.dateModified),
             ).also { it.sourceUrl = modrinthUrl(hit.projectType, hit.slug ?: hit.projectId) }
         } + extraProjects.map { p ->
             MapEntry(
@@ -68,6 +70,8 @@ object MapRepository {
                 iconUrl = p.iconUrl,
                 mcVersions = p.gameVersions,
                 categories = p.categories,
+                downloads = p.downloads,
+                dateEpoch = parseEpoch(p.updated),
             ).also { it.sourceUrl = modrinthUrl(p.projectType, p.slug ?: p.id) }
         }
 
@@ -191,6 +195,11 @@ object MapRepository {
 
     private fun modrinthUrl(projectType: String?, slug: String): String =
         "https://modrinth.com/${projectType ?: "project"}/$slug"
+
+    /** ISO-8601 timestamp → epoch millis; 0 when absent/unparseable (sorts last on Date). */
+    private fun parseEpoch(iso: String?): Long =
+        if (iso.isNullOrBlank()) 0L
+        else try { java.time.Instant.parse(iso).toEpochMilli() } catch (e: Exception) { 0L }
 
     private fun GhRequirement.toRequirement(kind: RequirementKind) = MapRequirement(
         name = name,

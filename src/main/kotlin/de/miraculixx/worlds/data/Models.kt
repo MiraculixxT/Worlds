@@ -39,6 +39,10 @@ class MapEntry(
     val iconUrl: String?,
     val mcVersions: List<String>,
     val categories: List<String>,
+    /** Total downloads (Modrinth). Manual GH entries have no data → 0, sorted last. */
+    val downloads: Long = 0,
+    /** Last-updated epoch millis (Modrinth). Manual GH entries have no data → 0, sorted last. */
+    val dateEpoch: Long = 0,
     var website: String? = null,
     var sourceUrl: String? = null,
     var trailerUrl: String? = null,
