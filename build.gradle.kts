@@ -6,20 +6,13 @@ plugins {
     kotlin("plugin.serialization") version "2.4.10"
     id("net.fabricmc.fabric-loom") version "1.17-SNAPSHOT"
     id("io.github.dexman545.outlet") version "1.8.+"
-
+    id("com.modrinth.minotaur") version "2.+"
 }
 
 version = project.property("version") as String
 group = "de.miraculixx"
 
 outlet.mcVersionRange = properties["fabricSupportedVersions"] as String
-
-
-val targetJavaVersion = 25
-java {
-    toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
-    withSourcesJar()
-}
 
 repositories {
     mavenCentral()
@@ -76,6 +69,40 @@ tasks.processResources {
             "kotlin_loader_version" to kotlinLoaderVersion
         )
     }
+}
+
+//
+// Publishing
+//
+
+modrinth {
+    token.set(properties["modrinthToken"] as? String ?: "")
+    projectId.set(properties["modrinthId"] as? String ?: properties["name"] as String)
+    loaders.add("fabric")
+    dependencies {
+        required.project("fabric-api")
+    }
+
+    uploadFile.set(tasks.jar)
+    versionName = "Worlds - $version"
+    outlet.mcVersionRange = properties["fabricSupportedVersions"] as String
+    versionNumber.set(version as String)
+    changelog.set(properties["changelog"] as String)
+    versionType.set("beta")
+
+
+    // Project sync
+    syncBodyFrom = rootProject.file("README.md").readText()
+}
+
+
+//
+// Random java stuff
+//
+val targetJavaVersion = 25
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    withSourcesJar()
 }
 
 tasks.withType<JavaCompile>().configureEach {

@@ -1,8 +1,25 @@
-# Worlds - Map Finder
-blablabla readme will follow
+# 🗺️ Worlds - Map Finder
+**#BringBackAdventureMaps**
 
+*Worlds* adds a world map browser to the SinglePlayer menu that allows browsing through all available Maps on Modrinth
+and outside*!<br>
+This is an attempt to use Modrinth to bring back the good times of adventure/custom Maps!
 
+![Preview](https://cdn.modrinth.com/data/RTVJw4FT/images/40ebfbdac808465040ce583049ce2629ba01d171.png)
 
+# 🌟 Features
+- World screen overhaul (inspired by [ModMenu](https://modrinth.com/mods/modmenu))
+- Ingame one-click world install
+  - Extracts worlds & resource-packs (multiple supported)
+  - Scans for other dependencies like mods
+  - Displays description, previews & trailer/source links
+- Loads all resourcepacks inside a worlds `resourcepacks` folder (vanilla: only `resources.zip`)
+- Displays useful information about installed worlds
+  - Bundled resourcepacks, datapacks & required mods
+  - Playtime, last played
+
+I'm glad over any feedback how to improve the flow for adventure maps even more!<br>
+What do you miss?
 
 # Creator Notice
 To add your World to the browse menu, there are two options:
@@ -13,7 +30,7 @@ All properties are auto-detected, adding a youtube trailer to your project readm
 
 Users are prompted to open the modrinth page on install, so you still receive revenue!
 
-### Manual List
+### *Manual List
 If you really don't want to upload your World to Modrinth, 
 you can edit `maps.json` in this repo to include your mod.
 See below for a guide to all fields:
