@@ -5,6 +5,17 @@ import kotlinx.serialization.Serializable
 
 enum class MapSource { MODRINTH, MANUAL }
 
+/** Compare dotted numeric versions ("26.2" vs "26.1"); non-numeric parts count as 0. */
+fun compareMcVersions(a: String, b: String): Int {
+    val pa = a.split('.'); val pb = b.split('.')
+    for (i in 0 until maxOf(pa.size, pb.size)) {
+        val na = pa.getOrNull(i)?.toIntOrNull() ?: 0
+        val nb = pb.getOrNull(i)?.toIntOrNull() ?: 0
+        if (na != nb) return na.compareTo(nb)
+    }
+    return 0
+}
+
 enum class RequirementKind { MOD, RESOURCE_PACK }
 
 /** A required mod or resource pack for a map. */
@@ -56,6 +67,9 @@ class MapEntry(
     @Volatile var requiredPacks: List<MapRequirement> = emptyList()
 
     @Volatile var installedFolder: String? = null
+
+    /** Newest supported MC version, shown on the list row's info line. */
+    val displayVersion: String? get() = mcVersions.maxWithOrNull(::compareMcVersions)
 }
 
 /**

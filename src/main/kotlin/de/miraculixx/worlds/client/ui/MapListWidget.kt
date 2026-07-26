@@ -6,9 +6,23 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.ObjectSelectionList
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.renderer.RenderPipelines
+import net.minecraft.client.gui.screens.worldselection.WorldSelectionList
+import net.minecraft.client.resources.sounds.SimpleSoundInstance
 import net.minecraft.network.chat.Component
+import net.minecraft.resources.Identifier
+import net.minecraft.sounds.SoundEvents
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 private const val ROW_HEIGHT = 36
+private const val ICON_SIZE = ROW_HEIGHT - 4
+
+private val JOIN_SPRITE = Identifier.withDefaultNamespace("world_list/join")
+private val JOIN_HIGHLIGHTED_SPRITE = Identifier.withDefaultNamespace("world_list/join_highlighted")
+
+private const val ICON_HOVER_OVERLAY = -1601138544
+private const val SUBTEXT_COLOR = -8355712
 
 /** Left-hand scrollable list of maps (ModMenu-style rows: icon + title + short description). */
 class MapListWidget(
@@ -17,6 +31,8 @@ class MapListWidget(
     height: Int,
     y: Int,
     private val onSelect: (MapEntry) -> Unit,
+    /** Double-click, or a click straight on the play overlay */
+    private val onActivate: (MapEntry) -> Unit = {},
 ) : ObjectSelectionList<MapListWidget.MapRow>(minecraft, width, height, y, ROW_HEIGHT) {
 
     fun setEntries(entries: List<MapEntry>) {
@@ -42,8 +58,19 @@ class MapListWidget(
         override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
             this@MapListWidget.setSelected(this)
             onSelect(entry)
+            if (canPlay() && (doubleClick || overIcon(event.x().toInt(), event.y().toInt()))) {
+                minecraft.soundManager.play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0f))
+                onActivate(entry)
+            }
             return true
         }
+
+        /** Only installed worlds can be entered */
+        private fun canPlay(): Boolean = entry.installedFolder != null
+
+        private fun overIcon(mouseX: Int, mouseY: Int): Boolean =
+            mouseX >= contentX && mouseX < contentX + ICON_SIZE &&
+                mouseY >= contentY && mouseY < contentY + ICON_SIZE
 
         override fun extractContent(
             graphics: GuiGraphicsExtractor,
@@ -64,7 +91,7 @@ class MapListWidget(
                 graphics.fill(x - 2, y - 2, right + 2, bottom + 2, 0x40FFFFFF)
             }
 
-            val iconSize = ROW_HEIGHT - 4
+            val iconSize = ICON_SIZE
             val icon = MapTextures.get(entry.iconUrl)
             if (icon != null) {
                 graphics.blit(
@@ -73,6 +100,12 @@ class MapListWidget(
                 )
             } else {
                 graphics.fill(x, y, x + iconSize, y + iconSize, 0xFF2A2A2A.toInt())
+            }
+
+            if (hovered && canPlay()) {
+                graphics.fill(x, y, x + iconSize, y + iconSize, ICON_HOVER_OVERLAY)
+                val sprite = if (overIcon(mouseX, mouseY)) JOIN_HIGHLIGHTED_SPRITE else JOIN_SPRITE
+                graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, iconSize, iconSize)
             }
 
             val font = minecraft.font
@@ -86,7 +119,35 @@ class MapListWidget(
                 val badgeX = textX + font.width(title) + 4
                 if (badgeX + badgeW - 4 <= right) CategoryBadge.draw(graphics, font, category, badgeX, y + 1)
             }
-            graphics.text(font, trim(entry.description, right - textX, font), textX, y + 15, 0xFFA0A0A0.toInt())
+            // Same three-row rhythm as vanilla's world list: name, then two gray detail rows.
+            graphics.text(font, trim(entry.description, right - textX, font), textX, y + 12, SUBTEXT_COLOR)
+            graphics.text(font, trim(infoLine(), right - textX, font), textX, y + 21, SUBTEXT_COLOR)
+        }
+
+        /**
+         * Second detail row: the supported/last-saved MC version, paired with the download count
+         * when browsing or the last-played date once the world is installed.
+         */
+        private fun infoLine(): String {
+            val version = entry.displayVersion ?: "?"
+            val tail = if (canPlay()) "Last: ${lastPlayed(entry.dateEpoch)}"
+            else "Downloads: ${downloads(entry.downloads)}"
+            return "Version: $version | $tail"
+        }
+
+        /** Localized short date, matching the vanilla world list. 0 means the world was never opened. */
+        private fun lastPlayed(epochMillis: Long): String {
+            if (epochMillis <= 0L) return "never"
+            return WorldSelectionList.DATE_FORMAT.format(
+                ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault())
+            )
+        }
+
+        /** Compact count, the way the numbers are shown on the listing sites themselves. */
+        private fun downloads(count: Long): String = when {
+            count >= 1_000_000 -> "%.1fM".format(count / 1_000_000.0)
+            count >= 1_000 -> "%.1fK".format(count / 1_000.0)
+            else -> count.toString()
         }
 
         private fun trim(text: String, maxWidth: Int, font: net.minecraft.client.gui.Font): String {

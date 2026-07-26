@@ -10,6 +10,7 @@ import de.miraculixx.worlds.data.MapInstaller
 import de.miraculixx.worlds.data.MapRepository
 import de.miraculixx.worlds.data.MapRequirement
 import de.miraculixx.worlds.data.MapSource
+import de.miraculixx.worlds.data.compareMcVersions
 import de.miraculixx.worlds.data.WorldResourcePacks
 import kotlinx.coroutines.launch
 import net.fabricmc.loader.api.FabricLoader
@@ -140,7 +141,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 .bounds(leftLeft + leftWidth - 20, searchY - 2, 20, 20).build()
         )
 
-        list = MapListWidget(minecraft, leftWidth, listBottom - listTop, listTop, ::onSelect)
+        list = MapListWidget(minecraft, leftWidth, listBottom - listTop, listTop, ::onSelect, ::onActivate)
         list.updateSizeAndPosition(leftWidth, listBottom - listTop, leftLeft, listTop)
         addRenderableWidget(list)
 
@@ -318,19 +319,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         return when (filters.version) {
             VersionMode.ALL -> true
             VersionMode.EQUAL -> entry.mcVersions.any { it == current }
-            VersionMode.EQUAL_HIGHER -> entry.mcVersions.any { compareVersions(it, current) >= 0 }
+            VersionMode.EQUAL_HIGHER -> entry.mcVersions.any { compareMcVersions(it, current) >= 0 }
         }
-    }
-
-    /** Compare dotted numeric versions ("26.2" vs "26.1"); non-numeric parts count as 0. */
-    private fun compareVersions(a: String, b: String): Int {
-        val pa = a.split('.'); val pb = b.split('.')
-        for (i in 0 until maxOf(pa.size, pb.size)) {
-            val na = pa.getOrNull(i)?.toIntOrNull() ?: 0
-            val nb = pb.getOrNull(i)?.toIntOrNull() ?: 0
-            if (na != nb) return na.compareTo(nb)
-        }
-        return 0
     }
 
     private fun onSelect(entry: MapEntry) {
@@ -346,6 +336,13 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 }
             }
         }
+    }
+
+    /**
+     * Double click to join
+     */
+    private fun onActivate(entry: MapEntry) {
+        if (entry.installedFolder != null) onPrimary()
     }
 
     /** Readme markdown, with the bundled resource packs appended as a list for installed maps. */
