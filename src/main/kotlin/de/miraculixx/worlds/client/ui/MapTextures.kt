@@ -3,6 +3,7 @@ package de.miraculixx.worlds.client.ui
 import com.mojang.blaze3d.platform.NativeImage
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
+import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.nio.file.Files
@@ -102,9 +103,8 @@ object MapTextures {
             b[8] == 'W'.code.toByte() && b[9] == 'E'.code.toByte() &&
             b[10] == 'B'.code.toByte() && b[11] == 'P'.code.toByte()
 
-    private fun readViaImageIO(bytes: ByteArray): NativeImage {
-        // TwelveMonkeys registers its reader via ServiceLoader; make sure IIORegistry saw the
-        // bundled plugin under Fabric's classloader before the first decode.
+    /** ImageIO decode with the bundled TwelveMonkeys WebP plugin registered. */
+    fun readBuffered(bytes: ByteArray): BufferedImage? {
         if (!pluginsScanned) {
             val prev = Thread.currentThread().contextClassLoader
             try {
@@ -115,8 +115,11 @@ object MapTextures {
             }
             pluginsScanned = true
         }
-        val buffered = ByteArrayInputStream(bytes).use { ImageIO.read(it) }
-            ?: throw IOException("No ImageIO reader for WebP")
+        return ByteArrayInputStream(bytes).use { ImageIO.read(it) }
+    }
+
+    private fun readViaImageIO(bytes: ByteArray): NativeImage {
+        val buffered = readBuffered(bytes) ?: throw IOException("No ImageIO reader for WebP")
         val w = buffered.width
         val h = buffered.height
         val image = NativeImage(NativeImage.Format.RGBA, w, h, false)

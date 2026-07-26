@@ -3,13 +3,17 @@ package de.miraculixx.worlds.data
 import com.mojang.serialization.Lifecycle
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
+import de.miraculixx.worlds.client.ui.MapTextures
 import net.minecraft.client.Minecraft
-import net.minecraft.data.registries.VanillaRegistries
+import net.minecraft.commands.Commands
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.NbtIo
 import net.minecraft.nbt.NbtOps
 import net.minecraft.nbt.NbtUtils
-import net.minecraft.resources.RegistryOps
+import net.minecraft.server.WorldLoader
+import net.minecraft.server.packs.repository.ServerPacksSource
+import net.minecraft.server.permissions.LevelBasedPermissionSet
+import net.minecraft.util.Util
 import net.minecraft.world.Difficulty
 import net.minecraft.world.flag.FeatureFlags
 import net.minecraft.world.level.DataPackConfig
@@ -19,11 +23,15 @@ import net.minecraft.world.level.WorldDataConfiguration
 import net.minecraft.world.level.levelgen.WorldGenSettings
 import net.minecraft.world.level.levelgen.WorldOptions
 import net.minecraft.world.level.levelgen.presets.WorldPresets
+import net.minecraft.world.level.storage.LevelStorageSource
 import net.minecraft.world.level.storage.PrimaryLevelData
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.ZipInputStream
+import javax.imageio.ImageIO
 
 /** Result of an install attempt. */
 sealed interface InstallResult {
@@ -122,9 +130,10 @@ object MapInstaller {
                 dataConfig,
             )
             Minecraft.getInstance().levelSource.createAccess(target.fileName.toString()).use { access ->
+                writeWorldGenSettings(target, access, dataConfig)
                 access.saveDataTag(PrimaryLevelData(settings, PrimaryLevelData.SpecialWorldProperty.NONE, Lifecycle.stable()))
             }
-            writeWorldGenSettings(target)
+            downloadIcon(target, entry)
             writeMarker(target, entry)
             downloadExternalPacks(target, entry)
         } catch (e: Exception) {
@@ -135,21 +144,52 @@ object MapInstaller {
     }
 
     /**
-     * Mirrors the private `LevelStorageSource.writeSavedData`, but against the standalone vanilla worldgen registries so
-     * no resource reload (and therefore no render thread) is needed. Dimensions from the datapack win
-     * over these defaults in `WorldDimensions.bake`.
+     * Prepare a new random world with datapack context, for map creation
      */
-    private fun writeWorldGenSettings(target: Path) {
-        val registries = VanillaRegistries.createLookup()
-        val genSettings = WorldGenSettings(
-            WorldOptions.defaultWithRandomSeed(), WorldPresets.createNormalWorldDimensions(registries)
-        )
-        val root = CompoundTag()
-        root.put("data", WorldGenSettings.CODEC.encodeStart(RegistryOps.create(NbtOps.INSTANCE, registries), genSettings).getOrThrow())
-        NbtUtils.addCurrentDataVersion(root)
-        val file = WorldGenSettings.TYPE.id().withSuffix(".dat").resolveAgainst(target.resolve("data"))
-        Files.createDirectories(file.parent)
-        NbtIo.writeCompressed(root, file)
+    private fun writeWorldGenSettings(target: Path, access: LevelStorageSource.LevelStorageAccess, dataConfig: WorldDataConfiguration) {
+        val packConfig = WorldLoader.PackConfig(ServerPacksSource.createPackRepository(access), dataConfig, false, false)
+        WorldLoader.load(
+            WorldLoader.InitConfig(packConfig, Commands.CommandSelection.INTEGRATED, LevelBasedPermissionSet.GAMEMASTER),
+            { context ->
+                WorldLoader.DataLoadOutput(
+                    WorldGenSettings(
+                        WorldOptions.defaultWithRandomSeed(), WorldPresets.createNormalWorldDimensions(context.datapackWorldgen())
+                    ),
+                    context.datapackDimensions()
+                )
+            },
+            { resources, _, registries, genSettings ->
+                resources.close()
+                val ops = registries.compositeAccess().createSerializationContext(NbtOps.INSTANCE)
+                val root = CompoundTag()
+                root.put("data", WorldGenSettings.CODEC.encodeStart(ops, genSettings).getOrThrow())
+                NbtUtils.addCurrentDataVersion(root)
+                val file = WorldGenSettings.TYPE.id().withSuffix(".dat").resolveAgainst(target.resolve("data"))
+                Files.createDirectories(file.parent)
+                NbtIo.writeCompressed(root, file)
+            },
+            Util.backgroundExecutor(),
+            Minecraft.getInstance(),
+        ).join()
+    }
+
+    /**
+     * Use datapack projects icon as world icon, re-encodes image into 64x64 png if possible
+     */
+    private fun downloadIcon(target: Path, entry: MapEntry) {
+        val bytes = entry.iconUrl?.let { Http.getBytes(it) } ?: return
+        try {
+            val source = MapTextures.readBuffered(bytes) ?: return
+            val icon = BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB)
+            icon.createGraphics().apply {
+                setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+                drawImage(source, 0, 0, 64, 64, null)
+                dispose()
+            }
+            ImageIO.write(icon, "png", target.resolve("icon.png").toFile())
+        } catch (e: Exception) {
+            Constants.LOG.warn("Failed to write world icon for '{}': {}", entry.title, e.message)
+        }
     }
 
     private fun writeMarker(target: Path, entry: MapEntry) {
