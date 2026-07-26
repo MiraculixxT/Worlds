@@ -29,7 +29,7 @@ object WorldActions {
     fun delete(folder: String, title: String, onDone: () -> Unit) {
         mc.gui.setScreen(
             ConfirmScreen(
-                BooleanConsumer { confirmed ->
+                { confirmed ->
                     if (confirmed) {
                         mc.gui.setScreen(ProgressScreen(true))
                         doDelete(folder)
@@ -68,10 +68,10 @@ object WorldActions {
             return
         }
         val screen = try {
-            EditWorldScreen.create(mc, access, BooleanConsumer {
+            EditWorldScreen.create(mc, access) {
                 access.safeClose()
                 onDone()
-            })
+            }
         } catch (e: Exception) {
             access.safeClose()
             SystemToast.onWorldAccessFailure(mc, folder)
@@ -94,12 +94,12 @@ object WorldActions {
                 )
                 context.validate()
                 val create = {
-                    CreateWorldScreen.createFromExisting(mc, Runnable { onDone() }, levelSettings, context, dataPackDir)
+                    CreateWorldScreen.createFromExisting(mc, { onDone() }, levelSettings, context, dataPackDir)
                 }
                 if (context.options().isOldCustomizedWorld) {
                     mc.gui.setScreen(
                         ConfirmScreen(
-                            BooleanConsumer { proceed -> mc.gui.setScreen(if (proceed) create() else parent) },
+                            { proceed -> mc.gui.setScreen(if (proceed) create() else parent) },
                             Component.translatable("selectWorld.recreate.customized.title"),
                             Component.translatable("selectWorld.recreate.customized.text"),
                             CommonComponents.GUI_PROCEED,

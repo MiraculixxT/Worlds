@@ -396,7 +396,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         applyFilter()
     }
 
-    /** Whether [entry]'s supported game versions satisfy the current [versionMode]. */
+    /** Whether [entry]'s supported game versions satisfy world version. */
     private fun versionMatches(entry: MapEntry): Boolean {
         val current = Minecraft.getInstance().launchedVersion
         return when (filters.version) {
@@ -731,7 +731,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         linkRects.clear()
         // Soft black backing so the readme stays legible over bright title-screen backgrounds.
         // Text is inset from the left; top/bottom get bevel lines like the world list (below).
-        graphics.fill(rightLeft, readmeTop, rightRight, bottom, 0x6D000000.toInt())
+        graphics.fill(rightLeft, readmeTop, rightRight, bottom, 0x6D000000)
         graphics.enableScissor(rightLeft, readmeTop, rightRight, bottom)
         val textX = rightLeft + READ_PAD_X
         var y = readmeTop - readmeScroll.toInt()

@@ -202,7 +202,7 @@ object MapRepository {
         return try {
             Files.walk(dir).use { paths ->
                 paths.filter { Files.isRegularFile(it) }
-                    .mapToLong { try { Files.size(it) } catch (e: Exception) { 0L } }
+                    .mapToLong { try { Files.size(it) } catch (_: Exception) { 0L } }
                     .sum()
             }
         } catch (e: Exception) {
@@ -269,7 +269,7 @@ object MapRepository {
     /** ISO-8601 timestamp → epoch millis; 0 when absent/unparseable (sorts last on Date). */
     private fun parseEpoch(iso: String?): Long =
         if (iso.isNullOrBlank()) 0L
-        else try { java.time.Instant.parse(iso).toEpochMilli() } catch (e: Exception) { 0L }
+        else try { java.time.Instant.parse(iso).toEpochMilli() } catch (_: Exception) { 0L }
 
     private fun GhRequirement.toRequirement(kind: RequirementKind) = MapRequirement(
         name = name,
