@@ -33,20 +33,42 @@ object CategoryBadge {
         "manual" to 0xFF455A64.toInt(),    // slate
     )
 
-    private const val PAD_X = 3
+    private const val PAD_X = 4
 
     fun color(category: String): Int = COLORS[category.lowercase()] ?: 0xFF5A5A5A.toInt()
 
     /** Pixel width a badge for [category] would occupy (so callers can reserve space / trim). */
     fun width(font: Font, category: String): Int = font.width(label(category)) + PAD_X * 2
 
-    /** Draw the pill at (x, y); returns the width consumed. */
+    /**
+     * Draw the pill at (x, y); returns the width consumed. A 1 px border in the category color with
+     * the four corner pixels left out (so it reads as rounded) around a darkened fill.
+     */
     fun draw(graphics: GuiGraphicsExtractor, font: Font, category: String, x: Int, y: Int): Int {
         val text = label(category)
         val w = font.width(text)
-        graphics.fill(x, y - 1, x + w + PAD_X * 2, y + font.lineHeight, color(category))
+        val border = color(category)
+        val fill = darken(border, 0.35f)
+        val left = x
+        val right = x + w + PAD_X * 2
+        val top = y - 2
+        val bottom = y + font.lineHeight + 1
+
+        graphics.fill(left + 1, top + 1, right - 1, bottom - 1, fill)
+        graphics.fill(left + 1, top, right - 1, top + 1, border)
+        graphics.fill(left + 1, bottom - 1, right - 1, bottom, border)
+        graphics.fill(left, top + 1, left + 1, bottom - 1, border)
+        graphics.fill(right - 1, top + 1, right, bottom - 1, border)
+
         graphics.text(font, text, x + PAD_X, y, 0xFFFFFFFF.toInt())
         return w + PAD_X * 2
+    }
+
+    private fun darken(argb: Int, factor: Float): Int {
+        val r = ((argb shr 16 and 0xFF) * factor).toInt()
+        val g = ((argb shr 8 and 0xFF) * factor).toInt()
+        val b = ((argb and 0xFF) * factor).toInt()
+        return (argb and 0xFF000000.toInt()) or (r shl 16) or (g shl 8) or b
     }
 
     private fun label(category: String): String = category.replaceFirstChar { it.uppercase() }
