@@ -1,8 +1,25 @@
 package de.miraculixx.worlds.data
 
+import com.mojang.serialization.Lifecycle
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
 import net.minecraft.client.Minecraft
+import net.minecraft.data.registries.VanillaRegistries
+import net.minecraft.nbt.CompoundTag
+import net.minecraft.nbt.NbtIo
+import net.minecraft.nbt.NbtOps
+import net.minecraft.nbt.NbtUtils
+import net.minecraft.resources.RegistryOps
+import net.minecraft.world.Difficulty
+import net.minecraft.world.flag.FeatureFlags
+import net.minecraft.world.level.DataPackConfig
+import net.minecraft.world.level.GameType
+import net.minecraft.world.level.LevelSettings
+import net.minecraft.world.level.WorldDataConfiguration
+import net.minecraft.world.level.levelgen.WorldGenSettings
+import net.minecraft.world.level.levelgen.WorldOptions
+import net.minecraft.world.level.levelgen.presets.WorldPresets
+import net.minecraft.world.level.storage.PrimaryLevelData
 import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.Path
@@ -34,15 +51,17 @@ object MapInstaller {
             return InstallResult.Failure("Not a valid archive: ${e.message}")
         }
 
+        val savesDir = Minecraft.getInstance().gameDirectory.toPath().resolve("saves")
+        Files.createDirectories(savesDir)
+
         // Locate the world root by the shallowest level.dat.
         val levelEntry = files.keys
             .filter { it == "level.dat" || it.endsWith("/level.dat") }
             .minByOrNull { it.count { c -> c == '/' } }
-            ?: return InstallResult.Failure("Archive contains no world (no level.dat found).")
+            ?: return if (isDatapack(files)) installDatapack(entry, bytes, savesDir)
+            else InstallResult.Failure("'${entry.title}' is neither a world nor a datapack.")
         val prefix = levelEntry.removeSuffix("level.dat") // "" or "world/" or "overrides/saves/world/"
 
-        val savesDir = Minecraft.getInstance().gameDirectory.toPath().resolve("saves")
-        Files.createDirectories(savesDir)
         val target = uniqueFolder(savesDir, entry.title)
 
         try {
@@ -77,12 +96,69 @@ object MapInstaller {
         return out
     }
 
+    private fun isDatapack(files: Map<String, ByteArray>) =
+        files.containsKey("pack.mcmeta") && files.keys.any { it.startsWith("data/") }
+
+    /**
+     * The download is a world-generation datapack, not a world -> create new world
+     * - random seed, no cheats, normal difficulty
+     */
+    private fun installDatapack(entry: MapEntry, zip: ByteArray, savesDir: Path): InstallResult {
+        val target = uniqueFolder(savesDir, entry.title)
+        val packName = "${target.fileName}.zip"
+        try {
+            val packsDir = target.resolve("datapacks")
+            Files.createDirectories(packsDir)
+            Files.write(packsDir.resolve(packName), zip)
+
+            val dataConfig = WorldDataConfiguration(
+                DataPackConfig(listOf("vanilla", "file/$packName"), emptyList()), FeatureFlags.DEFAULT_FLAGS
+            )
+            val settings = LevelSettings(
+                entry.title,
+                GameType.SURVIVAL,
+                LevelSettings.DifficultySettings(Difficulty.NORMAL, false, false),
+                false,
+                dataConfig,
+            )
+            Minecraft.getInstance().levelSource.createAccess(target.fileName.toString()).use { access ->
+                access.saveDataTag(PrimaryLevelData(settings, PrimaryLevelData.SpecialWorldProperty.NONE, Lifecycle.stable()))
+            }
+            writeWorldGenSettings(target)
+            writeMarker(target, entry)
+            downloadExternalPacks(target, entry)
+        } catch (e: Exception) {
+            Constants.LOG.error("Datapack world creation failed for {}", entry.title, e)
+            return InstallResult.Failure("Failed to create world: ${e.message}")
+        }
+        return InstallResult.Success(target.fileName.toString())
+    }
+
+    /**
+     * Mirrors the private `LevelStorageSource.writeSavedData`, but against the standalone vanilla worldgen registries so
+     * no resource reload (and therefore no render thread) is needed. Dimensions from the datapack win
+     * over these defaults in `WorldDimensions.bake`.
+     */
+    private fun writeWorldGenSettings(target: Path) {
+        val registries = VanillaRegistries.createLookup()
+        val genSettings = WorldGenSettings(
+            WorldOptions.defaultWithRandomSeed(), WorldPresets.createNormalWorldDimensions(registries)
+        )
+        val root = CompoundTag()
+        root.put("data", WorldGenSettings.CODEC.encodeStart(RegistryOps.create(NbtOps.INSTANCE, registries), genSettings).getOrThrow())
+        NbtUtils.addCurrentDataVersion(root)
+        val file = WorldGenSettings.TYPE.id().withSuffix(".dat").resolveAgainst(target.resolve("data"))
+        Files.createDirectories(file.parent)
+        NbtIo.writeCompressed(root, file)
+    }
+
     private fun writeMarker(target: Path, entry: MapEntry) {
         val meta = InstalledMeta(
             id = entry.id,
             source = entry.source,
             title = entry.title,
             description = entry.description,
+            readme = entry.readmeMarkdown,
             icon = entry.iconUrl,
             categories = entry.categories,
             downloads = entry.downloads,
