@@ -4,10 +4,12 @@ import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.client.ui.markdown.Markdown
 import de.miraculixx.worlds.client.ui.markdown.MdBlock
 import de.miraculixx.worlds.data.InstallResult
+import de.miraculixx.worlds.data.InstalledMap
 import de.miraculixx.worlds.data.MapEntry
 import de.miraculixx.worlds.data.MapInstaller
 import de.miraculixx.worlds.data.MapRepository
 import de.miraculixx.worlds.data.MapRequirement
+import de.miraculixx.worlds.data.MapSource
 import de.miraculixx.worlds.data.WorldResourcePacks
 import kotlinx.coroutines.launch
 import net.fabricmc.loader.api.FabricLoader
@@ -15,8 +17,13 @@ import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.EditBox
+import net.minecraft.client.gui.components.tabs.GridLayoutTab
+import net.minecraft.client.gui.components.tabs.MenuTabBar
+import net.minecraft.client.gui.components.tabs.TabManager
 import net.minecraft.client.gui.screens.Screen
+import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
+import net.minecraft.client.gui.components.tabs.Tab as GuiTab
 import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.locale.Language
 import net.minecraft.network.chat.ClickEvent
@@ -26,13 +33,26 @@ import net.minecraft.network.chat.Style
 import net.minecraft.resources.Identifier
 import net.minecraft.util.Util
 import java.util.Optional
+import java.util.function.Consumer
 
-/** The in-game map browser: Browse / Installed tabs, list on the left, detail panel on the right. */
+/** The in-game map browser: Installed / Browse tabs, list on the left, detail panel on the right. */
 class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worlds")) {
 
-    private enum class Tab { BROWSE, INSTALLED }
+    /** Ordinal doubles as the index in the [MenuTabBar] — Installed left, Browse right. */
+    private enum class Tab(val label: String) { INSTALLED("Installed"), BROWSE("Browse") }
 
-    private var tab = Tab.BROWSE
+    private var tab = Tab.INSTALLED
+
+    // Native tab header (same widget the world-creation screen uses). The tabs hold no widgets of
+    // their own — this screen owns the list/detail panel and only swaps its data source.
+    private val tabPages = Tab.entries.map { GridLayoutTab(Component.literal(it.label)) }
+    private val tabManager = TabManager(
+        { addRenderableWidget(it) },
+        { removeWidget(it) },
+        tabConsumer { page -> if (page != null) onTabSelected(page) },
+        tabConsumer { },
+    )
+    private lateinit var tabBar: MenuTabBar
     private var allEntries: List<MapEntry> = emptyList()
     private var status: String? = null
     private var actionMessage: String? = null
@@ -52,16 +72,22 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private data class LinkRect(val x1: Int, val y1: Int, val x2: Int, val y2: Int, val url: String)
     private val linkRects = ArrayList<LinkRect>()
 
-    // Browse filters (applied in applyFilter, Browse tab only).
-    private var filterCategory: String? = null
-    private var versionMode = VersionMode.ALL
-    private var sortMode = SortMode.AZ
-    private var sortReverse = false
+    /** Filter + sort selection of one tab. Each tab keeps its own — they never sync. */
+    private class FilterState {
+        var category: String? = null
+        var version = VersionMode.ALL
+        var sort = SortMode.AZ
+        var reverse = false
+
+        val isActive: Boolean
+            get() = category != null || version != VersionMode.ALL || sort != SortMode.AZ || reverse
+    }
+
+    private val filterStates = Tab.entries.associateWith { FilterState() }
+    private val filters: FilterState get() = filterStates.getValue(tab)
 
     private lateinit var list: MapListWidget
     private lateinit var search: EditBox
-    private lateinit var browseTab: Button
-    private lateinit var installedTab: Button
     private lateinit var refreshButton: Button
     private lateinit var filterButton: Button
 
@@ -85,29 +111,25 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         leftLeft = 8
         leftWidth = (width * 0.42).toInt().coerceIn(160, 320)
         val leftRight = leftLeft + leftWidth
-        listTop = 68
+        listTop = TAB_BAR_H + 28
         listBottom = height - 32
         rightLeft = leftRight + 12
         rightRight = width - 8
         buttonsY = listTop + 54
         readmeTop = buttonsY + 26
 
-        val half = (leftWidth - 4) / 2
-        browseTab = addRenderableWidget(
-            Button.builder(Component.literal("Browse")) { switchTab(Tab.BROWSE) }
-                .bounds(leftLeft, 24, half, 20).build()
+        tabBar = addRenderableWidget(
+            MenuTabBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
         )
-        installedTab = addRenderableWidget(
-            Button.builder(Component.literal("Installed")) { switchTab(Tab.INSTALLED) }
-                .bounds(leftLeft + half + 4, 24, half, 20).build()
-        )
+        tabBar.arrangeElements(width)
 
+        val searchY = TAB_BAR_H + 6
         refreshButton = addRenderableWidget(
             Button.builder(Component.literal("Refresh")) { onRefresh() }
-                .bounds(rightRight - 70, 24, 70, 20).build()
+                .bounds(rightRight - 70, searchY - 2, 70, 20).build()
         )
 
-        search = EditBox(font, leftLeft, 46, leftWidth - 22, 16, Component.literal("Search"))
+        search = EditBox(font, leftLeft, searchY, leftWidth - 22, 16, Component.literal("Search"))
         search.setHint(Component.literal("Search maps…"))
         search.setResponder { applyFilter() }
         addRenderableWidget(search)
@@ -115,7 +137,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         // Icon-only filter toggle right of the search box; sprite swaps when a filter is active.
         filterButton = addRenderableWidget(
             Button.builder(Component.empty()) { openFilters() }
-                .bounds(leftLeft + leftWidth - 20, 44, 20, 20).build()
+                .bounds(leftLeft + leftWidth - 20, searchY - 2, 20, 20).build()
         )
 
         list = MapListWidget(minecraft, leftWidth, listBottom - listTop, listTop, ::onSelect)
@@ -147,14 +169,32 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 .bounds(width - 108, height - 26, 100, 20).build()
         )
 
+        // Restores the header highlight after a re-init; no-ops (so no reload) if unchanged.
+        tabBar.selectTab(tab.ordinal, false)
+
         if (allEntries.isEmpty()) loadCurrentTab() else applyFilter()
         refreshInstalledIds()
+    }
+
+    /**
+     * A [TabManager] callback that tolerates a null page. `setCurrentTab` passes a null *previous*
+     * tab on the very first selection; the parameter is declared non-null, so a plain Kotlin SAM
+     * lambda would throw on its intrinsic null check and abort `init` before the first load runs.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun tabConsumer(action: (GuiTab?) -> Unit): Consumer<GuiTab> =
+        Consumer<GuiTab?> { action(it) } as Consumer<GuiTab>
+
+    /** [TabManager] callback — maps the selected page back onto [tab]. */
+    private fun onTabSelected(page: GuiTab) {
+        if (!::list.isInitialized) return
+        switchTab(Tab.entries[tabPages.indexOf(page).coerceAtLeast(0)])
     }
 
     /** Refresh the set of installed map ids (async) so Browse can disable already-installed maps. */
     private fun refreshInstalledIds() {
         Constants.SCOPE.launch {
-            val ids = MapRepository.scanInstalled().map { it.meta.id }.toSet()
+            val ids = MapRepository.scanInstalled().mapNotNull { it.meta?.id }.toSet()
             Minecraft.getInstance().execute { installedIds = ids }
         }
     }
@@ -187,22 +227,30 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             val entries = when (loadingTab) {
                 Tab.BROWSE -> MapRepository.loadBrowse(force)
                 Tab.INSTALLED -> MapRepository.scanInstalled().map { installed ->
+                    val meta = installed.meta
                     MapEntry(
-                        id = installed.meta.id,
-                        source = installed.meta.source,
+                        id = meta?.id ?: "local:${installed.saveFolder}",
+                        source = meta?.source ?: MapSource.MANUAL,
                         slug = null,
-                        title = installed.meta.title,
-                        description = installed.meta.description?.takeIf { it.isNotBlank() }
-                            ?: "Installed • ${installed.saveFolder}",
-                        iconUrl = installed.localIcon ?: installed.meta.icon,
-                        mcVersions = emptyList(),
-                        categories = emptyList(),
-                        website = installed.meta.website,
-                        trailerUrl = installed.meta.trailer,
+                        title = installed.title,
+                        description = meta?.description?.takeIf { it.isNotBlank() }
+                            ?: if (meta != null) "Installed • ${installed.saveFolder}"
+                            else "Local world • ${installed.saveFolder}",
+                        iconUrl = installed.localIcon ?: meta?.icon,
+                        // From level.dat, so the version filter works for unmanaged saves too.
+                        mcVersions = listOfNotNull(installed.mcVersion),
+                        // Worlds this mod didn't install carry no metadata — tag them as such.
+                        categories = meta?.categories ?: listOf(InstalledMap.MANUAL_CATEGORY),
+                        // Unmanaged worlds have no listing → 0 downloads, sorted last.
+                        downloads = meta?.downloads ?: 0,
+                        // "Date" on Installed means last played — available for every save.
+                        dateEpoch = installed.lastPlayed,
+                        website = meta?.website,
+                        trailerUrl = meta?.trailer,
                     ).also {
                         it.installedFolder = installed.saveFolder
-                        it.requiredMods = installed.meta.requiredMods
-                        it.requiredPacks = installed.meta.requiredPacks
+                        it.requiredMods = meta?.requiredMods ?: emptyList()
+                        it.requiredPacks = meta?.requiredPacks ?: emptyList()
                         it.detailLoaded = true
                     }
                 }
@@ -228,52 +276,46 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 it.description.lowercase().contains(query) ||
                 it.categories.any { c -> c.lowercase().contains(query) }
         }
-        // Category / version / sort apply to Browse only (Installed entries carry no such metadata).
-        if (tab == Tab.BROWSE) {
-            filterCategory?.let { cat ->
-                filtered = filtered.filter { e -> e.categories.any { it.equals(cat, ignoreCase = true) } }
-            }
-            if (versionMode != VersionMode.ALL) {
-                filtered = filtered.filter { versionMatches(it) }
-            }
-            val byKey = when (sortMode) {
-                SortMode.AZ -> filtered.sortedBy { it.title.lowercase() }
-                SortMode.DOWNLOADS -> filtered.sortedByDescending { it.downloads }
-                SortMode.DATE -> filtered.sortedByDescending { it.dateEpoch }
-            }
-            filtered = if (sortReverse) byKey.reversed() else byKey
+        val state = filters
+        state.category?.let { cat ->
+            filtered = filtered.filter { e -> e.categories.any { it.equals(cat, ignoreCase = true) } }
         }
+        if (state.version != VersionMode.ALL) {
+            filtered = filtered.filter { versionMatches(it) }
+        }
+        val byKey = when (state.sort) {
+            SortMode.AZ -> filtered.sortedBy { it.title.lowercase() }
+            SortMode.DOWNLOADS -> filtered.sortedByDescending { it.downloads }
+            SortMode.DATE -> filtered.sortedByDescending { it.dateEpoch }
+        }
+        filtered = if (state.reverse) byKey.reversed() else byKey
         list.setEntries(filtered)
         if (selected != null && selected !in filtered) selected = null
     }
 
-    /** Distinct categories across the loaded Browse entries, for the filter dropdown. */
-    private fun availableCategories(): List<String> =
-        allEntries.flatMap { it.categories }.distinct().sortedBy { it.lowercase() }
-
-    /** True if any filter/sort differs from the default (drives the active-sprite swap). */
-    private fun isFilterActive(): Boolean =
-        filterCategory != null || versionMode != VersionMode.ALL || sortMode != SortMode.AZ || sortReverse
-
     private fun openFilters() {
+        val state = filters
         minecraft.gui.setScreen(
-            FilterScreen(this, availableCategories(), filterCategory ?: ALL_CATEGORIES, versionMode, sortMode, sortReverse)
+            FilterScreen(
+                this, CategoryBadge.FILTER_CATEGORIES, state.category ?: ALL_CATEGORIES,
+                state.version, state.sort, state.reverse,
+            )
         )
     }
 
-    /** Called back by [FilterScreen] when the popup closes. */
+    /** Called back by [FilterScreen] when the popup closes — writes back to the current tab only. */
     fun applyFilters(category: String?, version: VersionMode, sort: SortMode, reverse: Boolean) {
-        filterCategory = category
-        versionMode = version
-        sortMode = sort
-        sortReverse = reverse
+        filters.category = category
+        filters.version = version
+        filters.sort = sort
+        filters.reverse = reverse
         applyFilter()
     }
 
     /** Whether [entry]'s supported game versions satisfy the current [versionMode]. */
     private fun versionMatches(entry: MapEntry): Boolean {
         val current = Minecraft.getInstance().launchedVersion
-        return when (versionMode) {
+        return when (filters.version) {
             VersionMode.ALL -> true
             VersionMode.EQUAL -> entry.mcVersions.any { it == current }
             VersionMode.EQUAL_HIGHER -> entry.mcVersions.any { compareVersions(it, current) >= 0 }
@@ -337,7 +379,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                         refreshInstalledIds()
                         // Jump to the Installed tab and select the freshly-installed map.
                         pendingSelectId = entry.id
-                        switchTab(Tab.INSTALLED)
+                        tabManager.setCurrentTab(tabPages[Tab.INSTALLED.ordinal], false)
                     }
                     is InstallResult.Failure -> actionMessage = result.message
                 }
@@ -370,13 +412,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         updateWidgets()
         super.extractRenderState(graphics, mouseX, mouseY, partialTick)
 
-        graphics.centeredText(font, title, width / 2, 8, -1)
         graphics.fill(rightLeft - 6, listTop, rightLeft - 5, listBottom, 0x40FFFFFF)
 
-        if (filterButton.visible) {
-            val sprite = if (isFilterActive()) FILTER_ACTIVE else FILTER_INACTIVE
-            graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, filterButton.x + 2, filterButton.y + 2, 16, 16)
-        }
+        val sprite = if (filters.isActive) FILTER_ACTIVE else FILTER_INACTIVE
+        graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, filterButton.x + 2, filterButton.y + 2, 16, 16)
 
         // Push the readme down when a status line sits under the buttons, so they don't clip.
         readmeTop = buttonsY + 26 + if (actionMessage != null) 10 else 0
@@ -395,9 +434,6 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
     private fun updateWidgets() {
         val entry = selected
-        browseTab.active = tab != Tab.BROWSE
-        installedTab.active = tab != Tab.INSTALLED
-        filterButton.visible = tab == Tab.BROWSE
         val remaining = REFRESH_COOLDOWN_MS - (System.currentTimeMillis() - lastRefresh)
         if (remaining > 0) {
             refreshButton.active = false
@@ -438,11 +474,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         val textX = rightLeft + iconSize + 8
         graphics.text(font, Component.literal(entry.title).withStyle { it.withBold(true) }, textX, listTop + 2, -1)
         graphics.textWithWordWrap(font, Component.literal(entry.description), textX, listTop + 14, rightRight - textX, 0xFFB0B0B0.toInt())
-        val category = entry.categories.firstOrNull()
-        if (category != null) {
+        // Only a real category earns a pill — the source (modrinth/manual) is an implementation
+        // detail and used to leak "manual" onto every curated map.
+        entry.categories.firstOrNull()?.let { category ->
             CategoryBadge.draw(graphics, font, category, rightLeft, listTop + iconSize + 2)
-        } else {
-            graphics.text(font, entry.source.name.lowercase(), rightLeft, listTop + iconSize + 2, 0xFF6699FF.toInt())
         }
     }
 
@@ -620,11 +655,17 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY)
     }
 
+    /** Ctrl+Tab / Ctrl+<digit> cycle the header tabs, as on the world-creation screen. */
+    override fun keyPressed(event: KeyEvent): Boolean =
+        tabBar.keyPressed(event) || super.keyPressed(event)
+
     override fun onClose() {
         minecraft.gui.setScreen(parent)
     }
 
     private companion object {
+        /** Height of [MenuTabBar] (its own private constant), needed to place the row below it. */
+        const val TAB_BAR_H = 24
         const val REFRESH_COOLDOWN_MS = 10_000L
         const val SCROLLBAR_W = 4
         const val READ_PAD_X = 4

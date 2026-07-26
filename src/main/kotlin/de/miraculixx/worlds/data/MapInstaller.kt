@@ -84,6 +84,8 @@ object MapInstaller {
             title = entry.title,
             description = entry.description,
             icon = entry.iconUrl,
+            categories = entry.categories,
+            downloads = entry.downloads,
             website = entry.sourceUrl ?: entry.website,
             trailer = entry.trailerUrl,
             requiredMods = entry.requiredMods,

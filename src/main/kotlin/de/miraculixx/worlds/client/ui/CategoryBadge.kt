@@ -1,10 +1,24 @@
 package de.miraculixx.worlds.client.ui
 
+import de.miraculixx.worlds.data.InstalledMap
 import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
 
 /** Renders a map's main category as a small colored pill (ModMenu-style tag next to the title). */
 object CategoryBadge {
+
+    /**
+     * The documented category taxonomy — kept in sync with the `categories` field described in
+     * README.md. These are the values a map may declare for itself.
+     */
+    val CATEGORIES: List<String> =
+        listOf("adventure", "parkour", "survival", "puzzle", "horror", "minigames", "build")
+
+    /**
+     * Values offered by the filter popup: the taxonomy plus [InstalledMap.MANUAL_CATEGORY], which no
+     * map declares but every unmanaged save is tagged with — so Installed can be narrowed to them.
+     */
+    val FILTER_CATEGORIES: List<String> = CATEGORIES + InstalledMap.MANUAL_CATEGORY
 
     /** Distinct color per known theme; anything else falls back to a neutral gray. */
     private val COLORS: Map<String, Int> = mapOf(
@@ -14,7 +28,9 @@ object CategoryBadge {
         "horror" to 0xFFB71C1C.toInt(),    // dark red
         "survival" to 0xFF00897B.toInt(),  // teal
         "minigames" to 0xFF2196F3.toInt(), // blue
-        "builds" to 0xFF795548.toInt(),    // brown
+        "build" to 0xFF795548.toInt(),     // brown
+        // Not a Modrinth category: marks a save this mod doesn't manage (no worlds.meta.json).
+        "manual" to 0xFF455A64.toInt(),    // slate
     )
 
     private const val PAD_X = 3

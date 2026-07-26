@@ -28,7 +28,8 @@ data class MapRequirement(
 /**
  * A browsable/installable map, merged from Modrinth search hits and the GitHub manual index.
  * Heavy fields ([readmeMarkdown], [downloadUrl], requirements, [gallery]) are filled lazily when
- * the entry is first opened in the detail panel — see MapRepository#loadDetail.
+ * the entry is first opened in the detail panel
+ * @see MapRepository.loadDetail
  */
 class MapEntry(
     val id: String,
@@ -39,9 +40,9 @@ class MapEntry(
     val iconUrl: String?,
     val mcVersions: List<String>,
     val categories: List<String>,
-    /** Total downloads (Modrinth). Manual GH entries have no data → 0, sorted last. */
+    /** Total downloads (Modrinth). Any other sources (manual, GH-external) have 0 */
     val downloads: Long = 0,
-    /** Last-updated epoch millis (Modrinth). Manual GH entries have no data → 0, sorted last. */
+    /** Last-updated/played epoch millis. Any other sources have 0 */
     val dateEpoch: Long = 0,
     var website: String? = null,
     var sourceUrl: String? = null,
@@ -54,7 +55,6 @@ class MapEntry(
     @Volatile var requiredMods: List<MapRequirement> = emptyList()
     @Volatile var requiredPacks: List<MapRequirement> = emptyList()
 
-    /** Non-null when this entry represents an already-installed save (Installed tab). */
     @Volatile var installedFolder: String? = null
 }
 
@@ -69,6 +69,9 @@ data class InstalledMeta(
     val title: String,
     val description: String? = null,
     val icon: String? = null,
+    val categories: List<String> = emptyList(),
+    /** Listing download count at install time */
+    val downloads: Long = 0,
     val website: String? = null,
     val trailer: String? = null,
     val requiredMods: List<MapRequirement> = emptyList(),
@@ -80,13 +83,29 @@ data class InstalledMeta(
     }
 }
 
-/** An installed map discovered by scanning the saves directory. */
+/** A world discovered by scanning the saves directory.
+ * Manual created/added worlds get tagged as well with data from the level.dat
+ */
 data class InstalledMap(
     val saveFolder: String,
-    val meta: InstalledMeta,
+    /**
+     * The `worlds.meta.json` marker, or `null` for a world this mod did not install (created
+     * in-game, or dropped into `saves/` by hand). Those are tagged [MANUAL_CATEGORY] instead.
+     */
+    val meta: InstalledMeta?,
     /**
      * Absolute path to the save's own `icon.png` when present. Preferred over [InstalledMeta.icon]
-     * so the Installed tab shows the world's actual thumbnail rather than the remote listing icon.
      */
     val localIcon: String? = null,
-)
+    val levelName: String = saveFolder,
+    val mcVersion: String? = null,
+    val lastPlayed: Long = 0,
+) {
+    /** Display title: the map's own title for managed worlds, else the world's name. */
+    val title: String get() = meta?.title ?: levelName
+
+    companion object {
+        /** Pseudo-category marking a world this mod does not manage (no `worlds.meta.json`). */
+        const val MANUAL_CATEGORY = "manual"
+    }
+}

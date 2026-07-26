@@ -6,17 +6,21 @@ import net.minecraft.client.gui.components.CycleButton
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
 
-/** How a map's `game_versions` are matched against the running MC version in Browse. */
+/** How a map's supported versions are matched against the running MC version. */
 enum class VersionMode(val label: String) { EQUAL("Equal"), EQUAL_HIGHER("Equal & higher"), ALL("All") }
 
-/** Browse sort key. Downloads/Date are descending by nature; [SortMode] pairs with a reverse toggle. */
+/**
+ * Sort key. Downloads/Date are descending by nature; [SortMode] pairs with a reverse toggle.
+ * On the Installed tab, Date means *last played* and unmanaged worlds count as 0 downloads.
+ */
 enum class SortMode(val label: String) { AZ("A → Z"), DOWNLOADS("Downloads"), DATE("Date") }
 
 /** Sentinel category meaning "no category filter". */
 const val ALL_CATEGORIES = "All"
 
 /**
- * Filter popup for the Browse tab: category (cycle), version match (cycle), sort key (cycle) and a reverse toggle.
+ * Filter popup: category (cycle), version match (cycle), sort key (cycle) and a reverse toggle.
+ * Stateless w.r.t. tabs — the caller hands in the active tab's selection and gets it back on close.
  */
 class FilterScreen(
     private val parent: WorldsScreen,

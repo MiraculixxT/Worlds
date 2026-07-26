@@ -3,6 +3,8 @@ package de.miraculixx.worlds.data
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.*
 import net.minecraft.client.Minecraft
+import net.minecraft.nbt.NbtAccounter
+import net.minecraft.nbt.NbtIo
 import java.nio.file.Files
 
 /**
@@ -150,7 +152,11 @@ object MapRepository {
         return sorted.firstOrNull { mc in it.gameVersions } ?: sorted.first()
     }
 
-    /** Scan `saves/` for folders carrying our [InstalledMeta.FILE_NAME] marker. */
+    /**
+     * Scan `saves/` for worlds (anything with a `level.dat`). Folders carrying our
+     * [InstalledMeta.FILE_NAME] marker were installed by this mod and keep their listing metadata;
+     * the rest are worlds the player made or dropped in, reported with a null `meta`.
+     */
     fun scanInstalled(): List<InstalledMap> {
         val savesDir = Minecraft.getInstance().gameDirectory.toPath().resolve("saves")
         if (!Files.isDirectory(savesDir)) return emptyList()
@@ -158,20 +164,51 @@ object MapRepository {
         Files.newDirectoryStream(savesDir).use { stream ->
             for (dir in stream) {
                 if (!Files.isDirectory(dir)) continue
+                if (!Files.isRegularFile(dir.resolve("level.dat"))) continue
                 val marker = dir.resolve(InstalledMeta.FILE_NAME)
-                if (!Files.isRegularFile(marker)) continue
-                val meta = try {
-                    Http.json.decodeFromString<InstalledMeta>(Files.readString(marker))
-                } catch (e: Exception) {
-                    Constants.LOG.warn("Bad {} in {}: {}", InstalledMeta.FILE_NAME, dir, e.message)
-                    continue
-                }
+                val meta = if (Files.isRegularFile(marker)) {
+                    try {
+                        Http.json.decodeFromString<InstalledMeta>(Files.readString(marker))
+                    } catch (e: Exception) {
+                        Constants.LOG.warn("Bad {} in {}: {}", InstalledMeta.FILE_NAME, dir, e.message)
+                        null
+                    }
+                } else null
                 val iconFile = dir.resolve("icon.png")
                 val localIcon = if (Files.isRegularFile(iconFile)) iconFile.toString() else null
-                result.add(InstalledMap(dir.fileName.toString(), meta, localIcon))
+                val folder = dir.fileName.toString()
+                val level = readLevelData(dir)
+                result.add(
+                    InstalledMap(
+                        saveFolder = folder,
+                        meta = meta,
+                        localIcon = localIcon,
+                        levelName = level?.name ?: folder,
+                        mcVersion = level?.mcVersion,
+                        lastPlayed = level?.lastPlayed ?: 0,
+                    )
+                )
             }
         }
-        return result.sortedBy { it.meta.title.lowercase() }
+        return result.sortedBy { it.title.lowercase() }
+    }
+
+    /** The bits of a save's `level.dat` the Installed tab shows or sorts by. */
+    private data class LevelData(val name: String?, val mcVersion: String?, val lastPlayed: Long)
+
+    /** Read `Data.{LevelName, Version.Name, LastPlayed}`, or null when `level.dat` is unreadable. */
+    private fun readLevelData(dir: java.nio.file.Path): LevelData? = try {
+        val data = NbtIo.readCompressed(dir.resolve("level.dat"), NbtAccounter.unlimitedHeap())
+            .getCompoundOrEmpty("Data")
+        LevelData(
+            name = data.getString("LevelName").orElse(null)?.takeIf { it.isNotBlank() },
+            mcVersion = data.getCompoundOrEmpty("Version").getString("Name").orElse(null)
+                ?.takeIf { it.isNotBlank() },
+            lastPlayed = data.getLongOr("LastPlayed", 0L),
+        )
+    } catch (e: Exception) {
+        Constants.LOG.warn("Unreadable level.dat in {}: {}", dir, e.message)
+        null
     }
 
     fun invalidate() {
