@@ -114,7 +114,7 @@ object Markdown {
 
     // --- inline span parsing -------------------------------------------------
 
-    private val INLINE = Regex("""(\*\*|__)(.+?)\1|(\*|_)(.+?)\3|`([^`]+?)`|\[(.+?)]\((\S+?)\)""")
+    private val INLINE = Regex("""(\*\*|__)(.+?)\1|([*_])(.+?)\3|`([^`]+?)`|\[(.+?)]\((\S+?)\)""")
 
     /** Parse a single line of inline Markdown into a styled [Component]. */
     fun inline(text: String): Component {
