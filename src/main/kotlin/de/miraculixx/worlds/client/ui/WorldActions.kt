@@ -1,7 +1,6 @@
 package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.worlds.Constants
-import it.unimi.dsi.fastutil.booleans.BooleanConsumer
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.components.toasts.SystemToast
 import net.minecraft.client.gui.screens.AlertScreen
