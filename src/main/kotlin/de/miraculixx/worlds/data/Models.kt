@@ -68,6 +68,12 @@ class MapEntry(
 
     @Volatile var installedFolder: String? = null
 
+    /** `level.dat` facts of the matching save; only set for Installed entries. */
+    @Volatile var worldInfo: WorldInfo? = null
+
+    /** Save size on disk, filled in the background when the entry is opened; -1 while unknown. */
+    @Volatile var worldSizeBytes: Long = -1
+
     /** Newest supported MC version, shown on the list row's info line. */
     val displayVersion: String? get() = mcVersions.maxWithOrNull(::compareMcVersions)
 }
@@ -82,6 +88,8 @@ data class InstalledMeta(
     val source: MapSource,
     val title: String,
     val description: String? = null,
+    /** Listing readme at install time, shown under the world facts in the Installed detail panel. */
+    val readme: String? = null,
     val icon: String? = null,
     val categories: List<String> = emptyList(),
     /** Listing download count at install time */
@@ -96,6 +104,19 @@ data class InstalledMeta(
         const val FILE_NAME = "worlds.meta.json"
     }
 }
+
+/** What a save's `level.dat` tells us about the world itself, for the Installed detail panel. */
+data class WorldInfo(
+    val mcVersion: String? = null,
+    val lastPlayed: Long = 0,
+    /** `Data.Time` — ticks the world has run, i.e. singleplayer playtime. */
+    val playTicks: Long = 0,
+    val difficulty: String? = null,
+    val hardcore: Boolean = false,
+    val allowCommands: Boolean = false,
+    /** Enabled data pack ids, `vanilla` dropped and the `file/` prefix stripped. */
+    val dataPacks: List<String> = emptyList(),
+)
 
 /** A world discovered by scanning the saves directory.
  * Manual created/added worlds get tagged as well with data from the level.dat
@@ -112,11 +133,12 @@ data class InstalledMap(
      */
     val localIcon: String? = null,
     val levelName: String = saveFolder,
-    val mcVersion: String? = null,
-    val lastPlayed: Long = 0,
+    val info: WorldInfo? = null,
 ) {
     /** Display title: the map's own title for managed worlds, else the world's name. */
     val title: String get() = meta?.title ?: levelName
+    val mcVersion: String? get() = info?.mcVersion
+    val lastPlayed: Long get() = info?.lastPlayed ?: 0
 
     companion object {
         /** Pseudo-category marking a world this mod does not manage (no `worlds.meta.json`). */

@@ -184,8 +184,7 @@ object MapRepository {
                         meta = meta,
                         localIcon = localIcon,
                         levelName = level?.name ?: folder,
-                        mcVersion = level?.mcVersion,
-                        lastPlayed = level?.lastPlayed ?: 0,
+                        info = level?.info,
                     )
                 )
             }
@@ -193,18 +192,52 @@ object MapRepository {
         return result.sortedBy { it.title.lowercase() }
     }
 
-    /** The bits of a save's `level.dat` the Installed tab shows or sorts by. */
-    private data class LevelData(val name: String?, val mcVersion: String?, val lastPlayed: Long)
+    /**
+     * Total bytes of a save folder. Walks every region/entity file, so it can take a moment on big
+     * worlds — call it off the render thread. Unreadable files are skipped, never fatal.
+     */
+    fun worldSize(saveFolder: String): Long {
+        val dir = Minecraft.getInstance().gameDirectory.toPath().resolve("saves").resolve(saveFolder)
+        if (!Files.isDirectory(dir)) return 0
+        return try {
+            Files.walk(dir).use { paths ->
+                paths.filter { Files.isRegularFile(it) }
+                    .mapToLong { try { Files.size(it) } catch (e: Exception) { 0L } }
+                    .sum()
+            }
+        } catch (e: Exception) {
+            Constants.LOG.warn("Could not size {}: {}", dir, e.message)
+            0L
+        }
+    }
 
-    /** Read `Data.{LevelName, Version.Name, LastPlayed}`, or null when `level.dat` is unreadable. */
+    /** The bits of a save's `level.dat` the Installed tab shows or sorts by. */
+    private data class LevelData(val name: String?, val info: WorldInfo)
+
+    /**
+     * Read the `Data` compound of a save's `level.dat`, or null when it is unreadable. 26.2 keeps
+     * difficulty in `difficulty_settings` (`difficulty`/`hardcore`/`locked`) rather than a plain byte.
+     */
     private fun readLevelData(dir: java.nio.file.Path): LevelData? = try {
         val data = NbtIo.readCompressed(dir.resolve("level.dat"), NbtAccounter.unlimitedHeap())
             .getCompoundOrEmpty("Data")
+        val difficulty = data.getCompoundOrEmpty("difficulty_settings")
+        val enabledPacks = data.getCompoundOrEmpty("DataPacks").getListOrEmpty("Enabled")
         LevelData(
             name = data.getString("LevelName").orElse(null)?.takeIf { it.isNotBlank() },
-            mcVersion = data.getCompoundOrEmpty("Version").getString("Name").orElse(null)
-                ?.takeIf { it.isNotBlank() },
-            lastPlayed = data.getLongOr("LastPlayed", 0L),
+            info = WorldInfo(
+                mcVersion = data.getCompoundOrEmpty("Version").getString("Name").orElse(null)
+                    ?.takeIf { it.isNotBlank() },
+                lastPlayed = data.getLongOr("LastPlayed", 0L),
+                playTicks = data.getLongOr("Time", 0L),
+                difficulty = difficulty.getString("difficulty").orElse(null),
+                hardcore = difficulty.getBooleanOr("hardcore", false),
+                allowCommands = data.getBooleanOr("allowCommands", false),
+                dataPacks = enabledPacks.indices
+                    .map { enabledPacks.getStringOr(it, "") }
+                    .filter { it.isNotBlank() && it != "vanilla" }
+                    .map { it.removePrefix("file/") },
+            ),
         )
     } catch (e: Exception) {
         Constants.LOG.warn("Unreadable level.dat in {}: {}", dir, e.message)

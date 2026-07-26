@@ -29,6 +29,8 @@ object Markdown {
     private val UNORDERED = Regex("""^\s*[-*+]\s+(.*)$""")
     private val ORDERED = Regex("""^\s*(\d+)\.\s+(.*)$""")
     private val RULE = Regex("""^\s*([-*_])\1{2,}\s*$""")
+    /** Markdown hard break: a line ending in two or more spaces (or a backslash). */
+    private val HARD_BREAK = Regex("""(  +|\\)$""")
 
     fun parse(markdown: String?): List<MdBlock> {
         if (markdown.isNullOrBlank()) return emptyList()
@@ -80,8 +82,11 @@ object Markdown {
                     blocks.add(MdBlock.ListItem("${m.groupValues[1]}.", inline(m.groupValues[2])))
                 }
                 else -> {
-                    if (paragraph.isNotEmpty()) paragraph.append(' ')
+                    // A hard break stays a real newline; the font splitter breaks the line there,
+                    // so the rows sit exactly one wrapped-line apart instead of a paragraph gap.
+                    if (paragraph.isNotEmpty() && paragraph.last() != '\n') paragraph.append(' ')
                     paragraph.append(line.trim())
+                    if (HARD_BREAK.containsMatchIn(line)) paragraph.append('\n')
                 }
             }
             i++
