@@ -225,10 +225,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private fun applyLayout() {
         leftLeft = 8
         val usable = width - 16 - GUTTER
-        val minSide = minOf(MIN_SIDE, usable / 2)
-        leftWidth = (usable * splitRatio).toInt().coerceIn(minSide, usable - minSide)
-        // Store the clamped value back so a drag past the limit can't keep pushing the ratio.
-        splitRatio = leftWidth.toFloat() / usable
+        leftWidth = clampLeftWidth(splitRatio, usable)
         listTop = TAB_BAR_H + 28
         listBottom = height - 32
         rightLeft = leftLeft + leftWidth + GUTTER
@@ -250,6 +247,11 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         // Vanilla only repositions list entries here (never per frame), so without this call every
         // MapRow keeps drawing at its old x/width.
         list.updateSizeAndPosition(leftWidth, listBottom - listTop, leftLeft, listTop)
+    }
+
+    private fun clampLeftWidth(ratio: Float, usable: Int): Int {
+        val minSide = minOf(MIN_SIDE, usable / 2)
+        return (usable * ratio).toInt().coerceIn(minSide, usable - minSide)
     }
 
     /** X of the split handle — the divider drawn in the middle of the gutter. */
@@ -895,7 +897,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         if (splitDragging) {
             val usable = width - 16 - GUTTER
             val newLeft = event.x() - splitGrabOffset - GUTTER / 2.0 - leftLeft
-            splitRatio = (newLeft / usable).toFloat()
+            // Clamping here to persist users choice when window big enough again
+            splitRatio = clampLeftWidth((newLeft / usable).toFloat(), usable).toFloat() / usable
             applyLayout()
             syncWidgets()
             return true
