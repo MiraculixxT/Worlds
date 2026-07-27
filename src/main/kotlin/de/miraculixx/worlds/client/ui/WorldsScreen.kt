@@ -1,6 +1,8 @@
 package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.worlds.Constants
+import de.miraculixx.worlds.client.FilterSettings
+import de.miraculixx.worlds.client.WorldsConfig
 import de.miraculixx.worlds.client.ui.markdown.Markdown
 import de.miraculixx.worlds.client.ui.markdown.MdBlock
 import de.miraculixx.worlds.data.InstallResult
@@ -81,19 +83,12 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private data class LinkRect(val x1: Int, val y1: Int, val x2: Int, val y2: Int, val url: String)
     private val linkRects = ArrayList<LinkRect>()
 
-    /** Filter + sort selection of one tab. Each tab keeps its own — they never sync. */
-    private class FilterState {
-        var category: String? = null
-        var version = VersionMode.ALL
-        var sort = SortMode.AZ
-        var reverse = false
-
-        val isActive: Boolean
-            get() = category != null || version != VersionMode.ALL || sort != SortMode.AZ || reverse
-    }
-
-    private val filterStates = Tab.entries.associateWith { FilterState() }
-    private val filters: FilterState get() = filterStates.getValue(tab)
+    /** Filter + sort selection per tab — they never sync, and both live in the config file. */
+    private val filterStates = mapOf(
+        Tab.INSTALLED to WorldsConfig.settings.installedFilter,
+        Tab.BROWSE to WorldsConfig.settings.browseFilter,
+    )
+    private val filters: FilterSettings get() = filterStates.getValue(tab)
 
     private lateinit var list: MapListWidget
     private lateinit var search: EditBox
@@ -396,6 +391,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         filters.sort = sort
         filters.reverse = reverse
         applyFilter()
+        WorldsConfig.save()
     }
 
     /** Whether [entry]'s supported game versions satisfy world version. */
@@ -859,6 +855,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 splitRatio = DEFAULT_SPLIT
                 applyLayout()
                 syncWidgets()
+                WorldsConfig.save()
             } else {
                 splitDragging = true
                 splitGrabOffset = (mx - handleX()).toInt()
@@ -913,7 +910,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     override fun mouseReleased(event: MouseButtonEvent): Boolean {
         if (event.button() == 0) {
             scrollbarDragging = false
-            splitDragging = false
+            if (splitDragging) {
+                splitDragging = false
+                WorldsConfig.save()
+            }
         }
         return super.mouseReleased(event)
     }
@@ -951,7 +951,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         const val HANDLE_GRAB = 7
         /** Description lines in the detail header, before it would reach the category pill. */
         const val DESC_LINES = 2
-        var splitRatio = DEFAULT_SPLIT
+        var splitRatio: Float
+            get() = WorldsConfig.settings.ratio
+            set(value) { WorldsConfig.settings.ratio = value }
         const val ICON_TRAILER = "📺"
         const val ICON_WEBSITE = "🌎"
         const val ICON_DELETE = "🗑"
