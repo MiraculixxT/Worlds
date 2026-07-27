@@ -2,21 +2,28 @@
 **#BringBackAdventureMaps**
 
 *Worlds* adds a world map browser to the SinglePlayer menu that allows browsing through all available Maps on Modrinth
-and outside*!<br>
+and outside*! 
+Also improves the normal world list by showing useful information and short-cut to actions.<br>
 This is an attempt to use Modrinth to bring back the good times of adventure/custom Maps!
 
-![Preview](https://cdn.modrinth.com/data/RTVJw4FT/images/40ebfbdac808465040ce583049ce2629ba01d171.png)
+---
+
+![Preview](https://i.postimg.cc/13FGcFDt/untitled.webp)
+
+---
 
 # 🌟 Features
-- World screen overhaul (inspired by [ModMenu](https://modrinth.com/mods/modmenu))
+- World screen overhaul (inspired by [ModMenu](https://modrinth.com/mod/modmenu))
 - Ingame one-click world install
   - Extracts worlds & resource-packs (multiple supported)
   - Scans for other dependencies like mods
   - Displays description, previews & trailer/source links
 - Loads all resourcepacks inside a worlds `resourcepacks` folder (vanilla: only `resources.zip`)
+  - Bind packs to worlds to auto load/unload them while playing
 - Displays useful information about installed worlds
   - Bundled resourcepacks, datapacks & required mods
   - Playtime, last played
+  - Total disk size
 
 I'm glad over any feedback how to improve the flow for adventure maps even more!<br>
 What do you miss?
