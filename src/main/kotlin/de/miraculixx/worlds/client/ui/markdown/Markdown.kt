@@ -116,16 +116,19 @@ object Markdown {
 
     private val INLINE = Regex("""(\*\*|__)(.+?)\1|([*_])(.+?)\3|`([^`]+?)`|\[(.+?)]\((\S+?)\)""")
 
-    /** Parse a single line of inline Markdown into a styled [Component]. */
-    fun inline(text: String): Component {
+    /**
+     * Parse a single line of inline Markdown into a styled [Component]. Emphasis recurses, so a
+     * `**[label](url)**` stays a clickable link
+     */
+    fun inline(text: String): MutableComponent {
         val root: MutableComponent = Component.empty()
         var last = 0
         for (match in INLINE.findAll(text)) {
             if (match.range.first > last) root.append(Component.literal(text.substring(last, match.range.first)))
             val g = match.groupValues
             when {
-                g[1].isNotEmpty() -> root.append(Component.literal(g[2]).withStyle { it.withBold(true) })
-                g[3].isNotEmpty() -> root.append(Component.literal(g[4]).withStyle { it.withItalic(true) })
+                g[1].isNotEmpty() -> root.append(inline(g[2]).withStyle { it.withBold(true) })
+                g[3].isNotEmpty() -> root.append(inline(g[4]).withStyle { it.withItalic(true) })
                 g[5].isNotEmpty() -> root.append(Component.literal(g[5]).withStyle { it.withColor(ChatFormatting.GRAY) })
                 g[6].isNotEmpty() -> root.append(linkComponent(g[6], g[7]))
             }

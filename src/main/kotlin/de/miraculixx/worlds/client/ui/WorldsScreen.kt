@@ -1,6 +1,8 @@
 package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.worlds.Constants
+import de.miraculixx.worlds.api.CurseForgeCategories
+import de.miraculixx.worlds.api.WorldsApi
 import de.miraculixx.worlds.client.FilterSettings
 import de.miraculixx.worlds.client.WorldsConfig
 import de.miraculixx.worlds.client.ui.markdown.Markdown
@@ -79,6 +81,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     // Browse paging state: the query the current result was fetched with, and whether the source
     // said another page exists. Only CurseForge ever pages.
     private var loadedQuery = ""
+    /** Server-side filter the current result was fetched with; a change forces a new first page. */
+    private var loadedFilter: MapRepository.BrowseFilter? = null
     private var browseHasMore = false
     private var loadingMore = false
     /** Deadline of the debounce that hands a typed query to the remote source; 0 = nothing pending. */
@@ -353,11 +357,12 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         val loadingTab = tab
         val source = browseSource
         val query = search.value.trim()
+        val filter = browseFilter()
         val gen = ++loadGen
         Constants.SCOPE.launch {
             var hasMore = false
             val entries = when (loadingTab) {
-                Tab.BROWSE -> MapRepository.loadBrowse(source, query, force)
+                Tab.BROWSE -> MapRepository.loadBrowse(source, query, force, filter)
                     .also { hasMore = it.hasMore }.entries
                 Tab.INSTALLED -> MapRepository.scanInstalled().map { installed ->
                     val meta = installed.meta
@@ -399,6 +404,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 if (gen != loadGen) return@execute
                 allEntries = entries
                 loadedQuery = query
+                loadedFilter = filter
                 browseHasMore = hasMore
                 status = if (entries.isEmpty()) {
                     if (loadingTab == Tab.INSTALLED) "No maps installed yet." else "No maps found."
@@ -417,9 +423,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         val gen = loadGen
         val source = browseSource
         val query = loadedQuery
+        val filter = loadedFilter ?: browseFilter()
         val index = allEntries.size
         Constants.SCOPE.launch {
-            val page = MapRepository.loadMore(source, query, index)
+            val page = MapRepository.loadMore(source, query, index, filter)
             Minecraft.getInstance().execute {
                 loadingMore = false
                 if (gen != loadGen) return@execute
@@ -520,8 +527,31 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         filters.version = version
         filters.sort = sort
         filters.reverse = reverse
-        applyFilter()
         WorldsConfig.save()
+        if (tab == Tab.BROWSE && browseSource == MapSource.CURSEFORGE && browseFilter() != loadedFilter) {
+            loadCurrentTab()
+        } else {
+            applyFilter()
+        }
+    }
+
+    /**
+     * The part of the active filter CurseForge answers server-side.
+     * Version filters are brittle (equal over higher must be client side)
+     */
+    private fun browseFilter(): MapRepository.BrowseFilter {
+        val state = filters
+        return MapRepository.BrowseFilter(
+            sort = when (state.sort) {
+                SortMode.AZ -> WorldsApi.Sort.RELEVANCY
+                SortMode.DOWNLOADS -> WorldsApi.Sort.DOWNLOADS
+                SortMode.DATE -> WorldsApi.Sort.DATE
+            },
+            categoryId = CurseForgeCategories.idOf(state.category),
+            versions = if (state.version == VersionMode.EQUAL) {
+                listOf(Minecraft.getInstance().launchedVersion)
+            } else emptyList(),
+        )
     }
 
     private fun onSelect(entry: MapEntry) {

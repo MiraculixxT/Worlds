@@ -1,9 +1,13 @@
 package de.miraculixx.worlds.data
 
 import de.miraculixx.worlds.Constants
-import de.miraculixx.worlds.api.ApiMapDetail
-import de.miraculixx.worlds.api.ApiMapEntry
+import de.miraculixx.worlds.api.CfDetailResponse
+import de.miraculixx.worlds.api.CfFile
+import de.miraculixx.worlds.api.CfMod
+import de.miraculixx.worlds.api.CurseForgeCategories
+import de.miraculixx.worlds.api.CurseForgeLinks
 import de.miraculixx.worlds.api.Http
+import de.miraculixx.worlds.client.ui.markdown.HtmlToMarkdown
 import de.miraculixx.worlds.api.ManualIndex
 import de.miraculixx.worlds.api.ManualMapEntry
 import de.miraculixx.worlds.api.ModrinthApi
@@ -31,10 +35,19 @@ object MapRepository {
     /** One page of browse results. [hasMore] is only ever true for the paged CurseForge source. */
     data class BrowsePage(val entries: List<MapEntry>, val hasMore: Boolean = false)
 
+    /**
+     * The part of the UI's filter state CurseForge can answer server-side (paging)
+     */
+    data class BrowseFilter(
+        val sort: WorldsApi.Sort = WorldsApi.Sort.RELEVANCY,
+        val categoryId: Int? = null,
+        val versions: List<String> = emptyList(),
+    )
+
     // Session caches of the two sources that fetch their whole list at once.
     @Volatile private var modrinthCache: List<MapEntry>? = null
     @Volatile private var manualCache: List<MapEntry>? = null
-    private val detailCache = ConcurrentHashMap<String, ApiMapDetail>()
+    private val detailCache = ConcurrentHashMap<String, CfDetailResponse>()
 
     data class Listing(val version: String?, val dateEpoch: Long)
 
@@ -43,16 +56,21 @@ object MapRepository {
      */
     private val seenListings = ConcurrentHashMap<String, Listing>()
 
-    fun loadBrowse(source: MapSource, query: String = "", force: Boolean = false): BrowsePage = when (source) {
+    fun loadBrowse(
+        source: MapSource,
+        query: String = "",
+        force: Boolean = false,
+        filter: BrowseFilter = BrowseFilter(),
+    ): BrowsePage = when (source) {
         MapSource.MANUAL -> BrowsePage(manualEntries(force))
         MapSource.MODRINTH -> BrowsePage(modrinthEntries(query, force))
-        MapSource.CURSEFORGE -> curseForgePage(query, 0)
+        MapSource.CURSEFORGE -> curseForgePage(query, 0, filter)
         else -> BrowsePage(emptyList())
     }
 
     /** Next CurseForge page, starting at [index]. Any other source has everything already. */
-    fun loadMore(source: MapSource, query: String, index: Int): BrowsePage =
-        if (source == MapSource.CURSEFORGE) curseForgePage(query, index) else BrowsePage(emptyList())
+    fun loadMore(source: MapSource, query: String, index: Int, filter: BrowseFilter = BrowseFilter()): BrowsePage =
+        if (source == MapSource.CURSEFORGE) curseForgePage(query, index, filter) else BrowsePage(emptyList())
 
     /** The bundled *Other* list. Free to build, so [force] only matters for consistency. */
     private fun manualEntries(force: Boolean): List<MapEntry> {
@@ -68,6 +86,7 @@ object MapRepository {
                 mcVersions = manual.mcVersions,
                 categories = manual.categories,
                 version = manual.version,
+                downloads = manual.downloads,
                 website = manual.website,
                 trailerUrl = manual.trailer,
             ).apply { downloadUrl = manual.download }
@@ -122,26 +141,49 @@ object MapRepository {
         website = modrinthUrl(projectType, slug ?: id),
     ).also(::remember)
 
-    private fun curseForgePage(query: String, index: Int): BrowsePage {
-        val page = WorldsApi.searchCurseForge(query, index) ?: return BrowsePage(emptyList())
-        val entries = page.hits.map { it.toEntry() }
-        return BrowsePage(entries, index + page.hits.size < page.total && page.hits.isNotEmpty())
+    private fun curseForgePage(query: String, index: Int, filter: BrowseFilter): BrowsePage {
+        val limit = (WorldsApi.MAX_INDEX - index).coerceAtMost(WorldsApi.PAGE_SIZE)
+        if (limit <= 0) return BrowsePage(emptyList())
+        val page = WorldsApi.searchCurseForge(query, index, limit, filter.sort, filter.categoryId, filter.versions)
+            ?: return BrowsePage(emptyList())
+        val entries = page.data.map { it.toEntry() }
+        val next = index + entries.size
+        return BrowsePage(entries, entries.isNotEmpty() && next < page.pagination.totalCount && next < WorldsApi.MAX_INDEX)
     }
 
-    private fun ApiMapEntry.toEntry() = MapEntry(
-        id = id,
+    /** CurseForge search hit → [MapEntry] */
+    private fun CfMod.toEntry() = MapEntry(
+        id = id.toString(),
         source = MapSource.CURSEFORGE,
-        title = title,
-        description = description,
-        iconUrl = icon,
-        mcVersions = mcVersions,
-        categories = categories,
-        version = version,
-        downloads = downloads,
-        dateEpoch = updated,
-        website = website,
-        trailerUrl = trailer,
+        title = name,
+        description = summary,
+        iconUrl = logo?.url ?: logo?.thumbnailUrl,
+        // gameVersions on a file mixes in loaders and Java versions; the indexes are MC only.
+        mcVersions = latestFilesIndexes.map { it.gameVersion }
+            .filter { it.firstOrNull()?.isDigit() == true }
+            .distinct(),
+        categories = categoryNames(),
+        version = pickFile()?.displayName?.ifBlank { null },
+        downloads = downloadCount.toLong(),
+        dateEpoch = parseEpoch(dateModified),
+        website = links?.websiteUrl,
     ).also(::remember)
+
+    /** CurseForge categories folded onto the pill taxonomy, primary first; unknown slugs kept raw. */
+    private fun CfMod.categoryNames(): List<String> {
+        val ordered = categories.sortedByDescending { it.id == primaryCategoryId }
+        val mapped = ordered.mapNotNull { CurseForgeCategories.taxonomy(it.slug) }
+        val raw = ordered.filter { CurseForgeCategories.taxonomy(it.slug) == null }
+            .mapNotNull { it.slug ?: it.name.ifBlank { null } }
+        return (mapped + raw).distinct()
+    }
+
+    private fun CfMod.pickFile(): CfFile? {
+        if (latestFiles.isEmpty()) return null
+        val mc = Minecraft.getInstance().launchedVersion
+        val sorted = latestFiles.sortedByDescending { it.fileDate ?: "" }
+        return sorted.firstOrNull { mc in it.gameVersions } ?: sorted.first()
+    }
 
     private fun remember(entry: MapEntry) {
         seenListings[key(entry.source, entry.id)] = Listing(entry.version, entry.dateEpoch)
@@ -184,19 +226,23 @@ object MapRepository {
         entry.requiredPacks = manual.requiredPacks.map { it.toRequirement(RequirementKind.RESOURCE_PACK) }
     }
 
-    /** Memoized per session; a failed fetch leaves the entry unloaded so re-selecting retries. */
+    /**
+     * Memoized per session.
+     * Convert HTML readmes into Markdown (at least tries)
+     */
     private fun loadCurseForgeDetail(entry: MapEntry): Boolean {
         val key = key(entry.source, entry.id)
         val detail = detailCache[key]
             ?: WorldsApi.curseForgeDetail(entry.id)?.also { detailCache[key] = it }
             ?: return false
-        entry.readmeMarkdown = detail.readme?.ifBlank { null } ?: entry.description
-        entry.downloadUrl = detail.download ?: entry.downloadUrl
-        entry.gallery = detail.gallery
-        entry.trailerUrl = detail.trailer ?: entry.trailerUrl ?: firstYoutubeLink(detail.readme)
-        detail.website?.let { entry.website = it }
-        entry.requiredMods = detail.requiredMods.map { it.toRequirement(RequirementKind.MOD) }
-        entry.requiredPacks = detail.requiredPacks.map { it.toRequirement(RequirementKind.RESOURCE_PACK) }
+        val mod = detail.data
+        val readme = HtmlToMarkdown.convert(detail.description, CurseForgeLinks::resolve)
+            .ifBlank { entry.description }
+        entry.readmeMarkdown = readme
+        entry.downloadUrl = mod?.pickFile()?.downloadUrl ?: entry.downloadUrl
+        entry.gallery = mod?.screenshots?.mapNotNull { it.url } ?: emptyList()
+        entry.trailerUrl = entry.trailerUrl ?: firstYoutubeLink(readme)
+        mod?.links?.websiteUrl?.let { entry.website = it }
         return true
     }
 
