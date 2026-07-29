@@ -19,6 +19,7 @@ import kotlinx.serialization.Serializable
  *     "icon": "https://example.com/icon.png",
  *     "download": "https://example.com/the-dropper-1.4.zip",
  *     "version": "1.4",
+ *     "downloads": 128400,
  *     "mc": ["26.2"],
  *     "categories": ["parkour"],
  *     "website": "https://example.com/dropper",
@@ -32,7 +33,8 @@ import kotlinx.serialization.Serializable
  * - [id] must stay stable
  * - [download] must be a **direct** link to the world (or world-gen datapack) zip
  * - [version] is compared by equality only and drives the update pill on installed worlds
- * - [mcVersions] feeds the version filter and the row's `Version:` label.
+ * - [mcVersions] feeds the version filter and the row's `Version:` label
+ * - [downloads] is the source platform's count
  */
 @Serializable
 data class ManualMapEntry(
@@ -43,6 +45,7 @@ data class ManualMapEntry(
     val icon: String? = null,
     val download: String? = null,
     val version: String? = null,
+    val downloads: Long = 0,
     @SerialName("mc") val mcVersions: List<String> = emptyList(),
     val categories: List<String> = emptyList(),
     val website: String? = null,
