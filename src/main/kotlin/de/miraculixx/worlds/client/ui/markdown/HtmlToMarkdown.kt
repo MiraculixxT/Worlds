@@ -13,6 +13,8 @@ object HtmlToMarkdown {
     private val ATTR_SRC = Regex("""\bsrc\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))""", RegexOption.IGNORE_CASE)
     private val ATTR_ALT = Regex("""\balt\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))""", RegexOption.IGNORE_CASE)
     private val WHITESPACE = Regex("""\s+""")
+    /** A link whose whole content is image(s) — Markdown has no linked-image block, so it is dropped. */
+    private val IMAGE_ONLY = Regex("""(!\[[^\]]*]\(\S+\)\s*)+""")
     private val BLANK_RUN = Regex("""\n{3,}""")
     private val NUMERIC_ENTITY = Regex("""&#(x?)([0-9a-fA-F]+);""")
 
@@ -24,7 +26,7 @@ object HtmlToMarkdown {
     )
 
     /** Tags whose content is markup, not prose. */
-    private val DROPPED = setOf("script", "style", "head", "noscript", "iframe")
+    private val DROPPED = setOf("script", "style", "head", "noscript")
 
     /**
      * [resolveLink] gets every `href`/`src` and may rewrite or reject it (null = drop the link but keep its text)
@@ -32,12 +34,14 @@ object HtmlToMarkdown {
      */
     fun convert(html: String?, resolveLink: (String) -> String? = { it }): String {
         if (html.isNullOrBlank()) return ""
+        if (!TAG.containsMatchIn(html)) return html.trim()
         val out = StringBuilder()
         var bold = 0
         var italic = 0
         var code = 0
         var drop = 0
-        val links = ArrayList<String?>()
+        // href + the index of the '[' it opened, so an image-only link can be unwrapped on close.
+        val links = ArrayList<Pair<String, Int>?>()
         val lists = ArrayList<Int?>()
         var last = 0
 
@@ -106,21 +110,34 @@ object HtmlToMarkdown {
                     out.append("![").append(attr(ATTR_ALT, attrs) ?: "").append("](").append(src).append(')')
                     out.blankLine()
                 }
+                "iframe" -> if (!closing) attr(ATTR_SRC, attrs)?.let(resolveLink)?.let { src ->
+                    out.blankLine()
+                    out.append('[').append(src).append("](").append(src).append(')')
+                    out.blankLine()
+                }
                 "a" -> if (closing) {
-                    val href = links.removeLastOrNull()
-                    if (href != null) {
-                        if (out.endsWith("[")) out.setLength(out.length - 1)
-                        else out.append("](").append(href).append(')')
+                    val link = links.removeLastOrNull()
+                    if (link != null) {
+                        val (href, mark) = link
+                        val content = out.substring(mark + 1)
+                        when {
+                            content.isBlank() -> out.setLength(mark)
+                            // Ignore links on images
+                            IMAGE_ONLY.matches(content.trim()) -> out.deleteCharAt(mark)
+                            else -> out.append("](").append(href).append(')')
+                        }
                     }
                 } else {
                     val href = attr(ATTR_HREF, attrs)?.let(resolveLink)
-                    links.add(href)
+                    links.add(href?.let { it to out.length })
                     if (href != null) out.append('[')
                 }
             }
         }
         if (drop == 0) out.text(html.substring(last))
-        return BLANK_RUN.replace(out.toString(), "\n\n").trim()
+        // A <br> next to a block leaves a line holding nothing but its hard-break spaces.
+        val text = out.lineSequence().joinToString("\n") { it.ifBlank { "" } }
+        return BLANK_RUN.replace(text, "\n\n").trim()
     }
 
     private fun attr(regex: Regex, attrs: String): String? {
