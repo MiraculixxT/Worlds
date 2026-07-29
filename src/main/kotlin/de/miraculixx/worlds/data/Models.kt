@@ -1,9 +1,40 @@
 package de.miraculixx.worlds.data
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
-enum class MapSource { MODRINTH, MANUAL }
+/**
+ * Where a listing came from
+ */
+@Serializable(with = MapSource.Serializer::class)
+enum class MapSource(val key: String, val label: String) {
+    /** Queried straight from the Modrinth v2 API by the client. */
+    MODRINTH("modrinth", "Modrinth"),
+    /** Proxied through the backend (API key force) */
+    CURSEFORGE("curseforge", "CurseForge"),
+    /** Curated list bundled with the mod, for maps hosted anywhere else (mainly minecraftmaps.com scrape) */
+    MANUAL("manual", "Other"),
+    /** A save this mod did not install (never browsable) */
+    LOCAL("local", "Local"),
+    UNKNOWN("unknown", "Unknown");
+
+    companion object {
+        fun of(key: String?): MapSource = entries.firstOrNull { it.key.equals(key, true) } ?: UNKNOWN
+
+        val BROWSABLE = listOf(MODRINTH, CURSEFORGE, MANUAL)
+    }
+
+    object Serializer : KSerializer<MapSource> {
+        override val descriptor = PrimitiveSerialDescriptor("MapSource", PrimitiveKind.STRING)
+        override fun serialize(encoder: Encoder, value: MapSource) = encoder.encodeString(value.key)
+        override fun deserialize(decoder: Decoder) = of(decoder.decodeString())
+    }
+}
 
 /** Compare dotted numeric versions ("26.2" vs "26.1"); non-numeric parts count as 0. */
 fun compareMcVersions(a: String, b: String): Int {
@@ -23,40 +54,35 @@ enum class RequirementKind { MOD, RESOURCE_PACK }
 data class MapRequirement(
     val name: String,
     val kind: RequirementKind,
+    /** Modrinth project id, so a pack's download can be resolved at install time. */
     @SerialName("project_id") val projectId: String? = null,
     /** Mod id (as declared in fabric.mod.json) used for the installed-mod check. */
     val modId: String? = null,
     val link: String? = null,
     val download: String? = null,
-    /**
-     * True when the resource pack ships *inside* the map download (Modrinth `embedded` dep or manual
-     * `included: true`). No separate download or pack-toggle is needed — the entry is kept only to
-     * mark that the map uses a resource pack.
-     */
+
     val included: Boolean = false,
 )
 
 /**
- * A browsable/installable map, merged from Modrinth search hits and the GitHub manual index.
- * Heavy fields ([readmeMarkdown], [downloadUrl], requirements, [gallery]) are filled lazily when
- * the entry is first opened in the detail panel
+ * A browsable/installable map from one of the three [MapSource]s.
+ * Heavy fields like readme are loaded lazy
  * @see MapRepository.loadDetail
  */
 class MapEntry(
     val id: String,
     val source: MapSource,
-    val slug: String?,
     val title: String,
     val description: String,
     val iconUrl: String?,
     val mcVersions: List<String>,
     val categories: List<String>,
-    /** Total downloads (Modrinth). Any other sources (manual, GH-external) have 0 */
+    var version: String? = null,
+    /** Total downloads on the source platform; 0 when it reports none (sorts last). */
     val downloads: Long = 0,
-    /** Last-updated/played epoch millis. Any other sources have 0 */
+    /** Last-updated epoch millis in Browse, last-played in Installed; 0 when unknown. */
     val dateEpoch: Long = 0,
     var website: String? = null,
-    var sourceUrl: String? = null,
     var trailerUrl: String? = null,
 ) {
     @Volatile var detailLoaded: Boolean = false
@@ -67,6 +93,12 @@ class MapEntry(
     @Volatile var requiredPacks: List<MapRequirement> = emptyList()
 
     @Volatile var installedFolder: String? = null
+
+    /** Installed entries only: a newer release than this save's marker is known. */
+    @Volatile var updateAvailable: Boolean = false
+
+    /** Newest published version when it is known */
+    @Volatile var latestVersion: String? = null
 
     /** `level.dat` facts of the matching save; only set for Installed entries. */
     @Volatile var worldInfo: WorldInfo? = null
@@ -87,12 +119,12 @@ data class InstalledMeta(
     val id: String,
     val source: MapSource,
     val title: String,
+    val version: String? = null,
+    val updated: Long = 0,
     val description: String? = null,
-    /** Listing readme at install time, shown under the world facts in the Installed detail panel. */
     val readme: String? = null,
     val icon: String? = null,
     val categories: List<String> = emptyList(),
-    /** Listing download count at install time */
     val downloads: Long = 0,
     val website: String? = null,
     val trailer: String? = null,
@@ -105,11 +137,10 @@ data class InstalledMeta(
     }
 }
 
-/** What a save's `level.dat` tells us about the world itself, for the Installed detail panel. */
+/** Data from `level.dat` */
 data class WorldInfo(
     val mcVersion: String? = null,
     val lastPlayed: Long = 0,
-    /** `Data.Time` — ticks the world has run, i.e. singleplayer playtime. */
     val playTicks: Long = 0,
     val difficulty: String? = null,
     val hardcore: Boolean = false,
@@ -118,14 +149,14 @@ data class WorldInfo(
     val dataPacks: List<String> = emptyList(),
 )
 
-/** A world discovered by scanning the saves directory.
+/**
+ * A world discovered by scanning the saves directory.
  * Manual created/added worlds get tagged as well with data from the level.dat
  */
 data class InstalledMap(
     val saveFolder: String,
     /**
-     * The `worlds.meta.json` marker, or `null` for a world this mod did not install (created
-     * in-game, or dropped into `saves/` by hand). Those are tagged [MANUAL_CATEGORY] instead.
+     * The `worlds.meta.json` marker, or `null` for a world this mod did not install
      */
     val meta: InstalledMeta?,
     /**
@@ -141,7 +172,6 @@ data class InstalledMap(
     val lastPlayed: Long get() = info?.lastPlayed ?: 0
 
     companion object {
-        /** Pseudo-category marking a world this mod does not manage (no `worlds.meta.json`). */
         const val MANUAL_CATEGORY = "manual"
     }
 }

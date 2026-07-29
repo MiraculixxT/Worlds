@@ -3,6 +3,7 @@ package de.miraculixx.worlds.client
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.client.ui.SortMode
 import de.miraculixx.worlds.client.ui.VersionMode
+import de.miraculixx.worlds.data.MapSource
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import net.fabricmc.loader.api.FabricLoader
@@ -26,6 +27,8 @@ class FilterSettings {
 data class WorldsSettings(
     /** Left pane share of the split view */
     var ratio: Float = 0.42f,
+    /** Browse source the switcher last stood on */
+    var browseSource: MapSource = MapSource.MODRINTH,
     val installedFilter: FilterSettings = FilterSettings(),
     val browseFilter: FilterSettings = FilterSettings(),
 )

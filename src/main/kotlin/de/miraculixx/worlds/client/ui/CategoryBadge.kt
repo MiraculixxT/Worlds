@@ -7,17 +7,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
 /** Renders a map's main category as a small colored pill (ModMenu-style tag next to the title). */
 object CategoryBadge {
 
-    /**
-     * The documented category taxonomy — kept in sync with the `categories` field described in
-     * README.md. These are the values a map may declare for itself.
-     */
-    val CATEGORIES: List<String> =
-        listOf("adventure", "parkour", "survival", "puzzle", "horror", "minigames", "build")
-
-    /**
-     * Values offered by the filter popup: the taxonomy plus [InstalledMap.MANUAL_CATEGORY], which no
-     * map declares but every unmanaged save is tagged with — so Installed can be narrowed to them.
-     */
+    val CATEGORIES: List<String> = listOf("adventure", "parkour", "survival", "puzzle", "horror", "minigames", "build")
     val FILTER_CATEGORIES: List<String> = CATEGORIES + InstalledMap.MANUAL_CATEGORY
 
     /** Distinct color per known theme; anything else falls back to a neutral gray. */
@@ -29,25 +19,34 @@ object CategoryBadge {
         "survival" to 0xFF00897B.toInt(),  // teal
         "minigames" to 0xFF2196F3.toInt(), // blue
         "build" to 0xFF795548.toInt(),     // brown
-        // Not a Modrinth category: marks a save this mod doesn't manage (no worlds.meta.json).
+
         "manual" to 0xFF455A64.toInt(),    // slate
     )
 
     private const val PAD_X = 4
+
+    /** Amber pill on an Installed row whose map has a newer version in the cached index. */
+    private const val UPDATE_LABEL = "Update"
+    private const val UPDATE_COLOR = 0xFFFFC107.toInt()
 
     fun color(category: String): Int = COLORS[category.lowercase()] ?: 0xFF5A5A5A.toInt()
 
     /** Pixel width a badge for [category] would occupy (so callers can reserve space / trim). */
     fun width(font: Font, category: String): Int = font.width(label(category)) + PAD_X * 2
 
+    fun updateWidth(font: Font): Int = font.width(UPDATE_LABEL) + PAD_X * 2
+
+    fun draw(graphics: GuiGraphicsExtractor, font: Font, category: String, x: Int, y: Int): Int =
+        pill(graphics, font, label(category), color(category), x, y)
+
+    fun drawUpdate(graphics: GuiGraphicsExtractor, font: Font, x: Int, y: Int): Int =
+        pill(graphics, font, UPDATE_LABEL, UPDATE_COLOR, x, y)
+
     /**
-     * Draw the pill at (x, y); returns the width consumed. A 1 px border in the category color with
-     * the four corner pixels left out (so it reads as rounded) around a darkened fill.
+     * Draw the pill
      */
-    fun draw(graphics: GuiGraphicsExtractor, font: Font, category: String, x: Int, y: Int): Int {
-        val text = label(category)
+    private fun pill(graphics: GuiGraphicsExtractor, font: Font, text: String, border: Int, x: Int, y: Int): Int {
         val w = font.width(text)
-        val border = color(category)
         val fill = darken(border, 0.35f)
         val left = x
         val right = x + w + PAD_X * 2

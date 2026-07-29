@@ -5,23 +5,35 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
 /**
- * Thin wrapper over the Modrinth v2 REST API. All methods are blocking and are expected to be
- * called from a background coroutine.
+ * Thin wrapper over the Modrinth v2 REST API (only async)
  */
 object ModrinthApi {
     private fun enc(s: String) = URLEncoder.encode(s, StandardCharsets.UTF_8)
 
     /**
-     * Reverse-dependency search: every published project (datapack/modpack/resourcepack/mod)
-     * that lists [worldsId] as a compatible dependency. Uses Modrinth's `new_filters` grammar.
+     * Reverse-dependency search: every published project (datapack/modpack/resourcepack)
+     * that lists [worldsId] as a compatible dependency
      */
     fun searchDependents(worldsId: String = Constants.WORLDS_MODRINTH_ID): List<MrSearchHit> {
-        val filter = """project_types IN ["datapack","modpack","resourcepack","mod"] """ +
-            """AND compatible_dependency_project_ids = "$worldsId""""
-        val url = "${Constants.MODRINTH_API}/search?new_filters=${enc(filter)}&limit=100&index=downloads"
+        val url = "${Constants.MODRINTH_API}/search?new_filters=${enc(dependentFilter(worldsId))}" +
+            "&limit=100&index=downloads"
         val res = Http.decode<MrSearchResponse>(Http.getString(url))
         return res?.hits ?: emptyList()
     }
+
+    /**
+     * Free-text search **inside** the reverse-dependency list, used when the search box is non-empty
+     */
+    fun search(query: String, limit: Int = 100, worldsId: String = Constants.WORLDS_MODRINTH_ID): List<MrSearchHit> {
+        if (query.isBlank()) return emptyList()
+        val url = "${Constants.MODRINTH_API}/search?query=${enc(query)}" +
+            "&new_filters=${enc(dependentFilter(worldsId))}&limit=$limit&index=relevance"
+        return Http.decode<MrSearchResponse>(Http.getString(url))?.hits ?: emptyList()
+    }
+
+    private fun dependentFilter(worldsId: String) =
+        """project_types IN ["datapack","modpack","resourcepack"] """ +
+            """AND compatible_dependency_project_ids = "$worldsId""""
 
     fun getProject(idOrSlug: String): MrProject? =
         Http.decode<MrProject>(Http.getString("${Constants.MODRINTH_API}/project/${enc(idOrSlug)}"))

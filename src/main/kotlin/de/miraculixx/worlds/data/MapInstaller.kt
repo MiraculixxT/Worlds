@@ -41,7 +41,7 @@ sealed interface InstallResult {
 
 /**
  * Downloads a map's world file and unpacks it into the `saves/` directory, then writes an
- * [InstalledMeta] marker so the map is recognised offline. Blocking — call from a coroutine.
+ * [InstalledMeta] marker so the map is recognised offline.
  */
 object MapInstaller {
 
@@ -197,12 +197,15 @@ object MapInstaller {
             id = entry.id,
             source = entry.source,
             title = entry.title,
+            // Both are the update check's comparison keys
+            version = entry.version,
+            updated = entry.dateEpoch,
             description = entry.description,
             readme = entry.readmeMarkdown,
             icon = entry.iconUrl,
             categories = entry.categories,
             downloads = entry.downloads,
-            website = entry.sourceUrl ?: entry.website,
+            website = entry.website,
             trailer = entry.trailerUrl,
             requiredMods = entry.requiredMods,
             requiredPacks = entry.requiredPacks,
@@ -211,16 +214,16 @@ object MapInstaller {
     }
 
     /**
-     * Download every *external* required resource pack (not `included` in the world zip) into the
-     * save's own `resourcepacks/` folder so [WorldResourcePacks] can enable them on join. Best-effort:
-     * a pack that can't be resolved or fetched is logged and skipped, never failing the install.
+     * Download every *external* required resource pack into the save's own `resourcepacks/` folder so [WorldResourcePacks]
+     * can enable them on join. Unresolvable packs are just skipped
      */
     private fun downloadExternalPacks(target: Path, entry: MapEntry) {
         val external = entry.requiredPacks.filter { !it.included }
         if (external.isEmpty()) return
         val packsDir = target.resolve("resourcepacks")
         for (pack in external) {
-            val url = pack.download ?: pack.projectId?.let { MapRepository.resolveModrinthDownload(it) }
+            val url = pack.download?.takeIf { it.isNotBlank() }
+                ?: pack.projectId?.let { MapRepository.resolveModrinthDownload(it) }
             if (url == null) {
                 Constants.LOG.warn("No download URL for required pack '{}'", pack.name)
                 continue

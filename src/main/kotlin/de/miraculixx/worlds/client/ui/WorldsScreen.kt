@@ -14,6 +14,8 @@ import de.miraculixx.worlds.data.MapRequirement
 import de.miraculixx.worlds.data.MapSource
 import de.miraculixx.worlds.data.compareMcVersions
 import de.miraculixx.worlds.data.WorldResourcePacks
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.client.Minecraft
@@ -49,13 +51,10 @@ import kotlin.math.abs
 /** The in-game map browser: Installed / Browse tabs, list on the left, detail panel on the right. */
 class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worlds")) {
 
-    /** Ordinal doubles as the index in the [MenuTabBar] — Installed left, Browse right. */
     private enum class Tab(val label: String) { INSTALLED("Installed"), BROWSE("Browse") }
 
     private var tab = Tab.INSTALLED
 
-    // Native tab header (same widget the world-creation screen uses). The tabs hold no widgets of
-    // their own — this screen owns the list/detail panel and only swaps its data source.
     private val tabPages = Tab.entries.map { GridLayoutTab(Component.literal(it.label)) }
     private val tabManager = TabManager(
         { addRenderableWidget(it) },
@@ -65,8 +64,25 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     )
     private lateinit var tabBar: MenuTabBar
     private var allEntries: List<MapEntry> = emptyList()
+    // Render-thread only: bumped per filter pass so a superseded result is discarded on arrival.
+    private var filterGen = 0
+    private var filterJob: Job? = null
+    // Same for loads: a tab switch, source switch or new query invalidates whatever is in flight.
+    private var loadGen = 0
     private var status: String? = null
     private var actionMessage: String? = null
+
+    private var browseSource: MapSource
+        get() = WorldsConfig.settings.browseSource
+        set(value) { WorldsConfig.settings.browseSource = value }
+
+    // Browse paging state: the query the current result was fetched with, and whether the source
+    // said another page exists. Only CurseForge ever pages.
+    private var loadedQuery = ""
+    private var browseHasMore = false
+    private var loadingMore = false
+    /** Deadline of the debounce that hands a typed query to the remote source; 0 = nothing pending. */
+    private var queryDueAt = 0L
 
     private var selected: MapEntry? = null
     // Ids of maps already present in saves/
@@ -79,11 +95,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private var scrollbarDragging = false
     private var dragGrabOffset = 0.0
 
-    // Clickable link hit-boxes in the readme, rebuilt every frame (26.2 has no style-at-width test).
+    // Clickable link hit-boxes in the readme, rebuilt every frame
     private data class LinkRect(val x1: Int, val y1: Int, val x2: Int, val y2: Int, val url: String)
     private val linkRects = ArrayList<LinkRect>()
 
-    /** Filter + sort selection per tab — they never sync, and both live in the config file. */
     private val filterStates = mapOf(
         Tab.INSTALLED to WorldsConfig.settings.installedFilter,
         Tab.BROWSE to WorldsConfig.settings.browseFilter,
@@ -94,8 +109,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private lateinit var search: EditBox
     private lateinit var refreshButton: Button
     private lateinit var filterButton: Button
+    private lateinit var sourceButton: Button
 
-    // Refresh cooldown so we don't hammer the APIs.
+    // Refresh cooldown so we don't hammer the APIs
     private var lastRefresh = 0L
     private lateinit var primaryButton: Button
     private lateinit var websiteButton: Button
@@ -133,9 +149,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 .bounds(rightRight - 70, searchY - 2, 70, 20).build()
         )
 
-        search = EditBox(font, leftLeft, searchY, leftWidth - 22, 16, Component.literal("Search"))
+        search = EditBox(font, leftLeft, searchY, searchWidth(), 16, Component.literal("Search"))
         search.setHint(Component.literal("Search maps…"))
-        search.setResponder { applyFilter() }
+        search.setResponder { onSearchChanged() }
         addRenderableWidget(search)
 
         // Icon-only filter toggle right of the search box; sprite swaps when a filter is active.
@@ -143,6 +159,12 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             Button.builder(Component.empty()) { openFilters() }
                 .bounds(leftLeft + leftWidth - 20, searchY - 2, 20, 20).build()
         )
+        // Browse only: cycles the exclusive map source left of the filter button.
+        sourceButton = addRenderableWidget(
+            Button.builder(Component.empty()) { cycleSource() }
+                .bounds(leftLeft + leftWidth - 42, searchY - 2, 20, 20).build()
+        )
+        updateSourceTooltip()
 
         list = MapListWidget(minecraft, leftWidth, listBottom - listTop, listTop, ::onSelect, ::onActivate)
         list.updateSizeAndPosition(leftWidth, listBottom - listTop, leftLeft, listTop)
@@ -213,10 +235,6 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         refreshInstalledIds()
     }
 
-    /**
-     * Pure layout math — safe before the widgets exist. Both sides keep [MIN_SIDE], except on a
-     * window too narrow to hold two of them, where they shrink evenly instead of one side clipping.
-     */
     private fun applyLayout() {
         leftLeft = 8
         val usable = width - 16 - GUTTER
@@ -229,42 +247,37 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         readmeTop = buttonsY + 26
     }
 
-    /**
-     * Push the current layout into the widgets that bake their geometry at build time. The detail
-     * buttons are laid out every frame and the Refresh/bottom rows are anchored to the screen edges,
-     * so neither needs updating here.
-     */
     private fun syncWidgets() {
-        search.setWidth(leftWidth - 22)
+        search.setWidth(searchWidth())
         // EditBox caches the scroll offset of its text; this is the public path that re-clamps it.
         search.setHighlightPos(search.cursorPosition)
         filterButton.x = leftLeft + leftWidth - 20
+        sourceButton.x = leftLeft + leftWidth - 42
         // Vanilla only repositions list entries here (never per frame), so without this call every
         // MapRow keeps drawing at its old x/width.
         list.updateSizeAndPosition(leftWidth, listBottom - listTop, leftLeft, listTop)
     }
+
+    /** Search box width. Browse carries the source switcher next to the filter button, so it loses 22px. */
+    private fun searchWidth(): Int = leftWidth - if (tab == Tab.BROWSE) 44 else 22
 
     private fun clampLeftWidth(ratio: Float, usable: Int): Int {
         val minSide = minOf(MIN_SIDE, usable / 2)
         return (usable * ratio).toInt().coerceIn(minSide, usable - minSide)
     }
 
-    /** X of the split handle — the divider drawn in the middle of the gutter. */
     private fun handleX(): Int = rightLeft - GUTTER / 2
 
     private fun overHandle(mx: Double, my: Double): Boolean =
         my >= listTop && my <= listBottom && abs(mx - handleX()) <= HANDLE_GRAB / 2.0
 
     /**
-     * A [TabManager] callback that tolerates a null page. `setCurrentTab` passes a null *previous*
-     * tab on the very first selection; the parameter is declared non-null, so a plain Kotlin SAM
-     * lambda would throw on its intrinsic null check and abort `init` before the first load runs.
+     * A [TabManager] callback that tolerates a null page
      */
     @Suppress("UNCHECKED_CAST")
     private fun tabConsumer(action: (GuiTab?) -> Unit): Consumer<GuiTab> =
         Consumer<GuiTab?> { action(it) } as Consumer<GuiTab>
 
-    /** [TabManager] callback — maps the selected page back onto [tab]. */
     private fun onTabSelected(page: GuiTab) {
         if (!::list.isInitialized) return
         switchTab(Tab.entries[tabPages.indexOf(page).coerceAtLeast(0)])
@@ -284,10 +297,43 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         selected = null
         readmeBlocks = emptyList()
         search.value = ""
+        syncWidgets()
         loadCurrentTab()
     }
 
-    /** Re-fetch the current tab, bypassing caches. No-op while the cooldown is active. */
+    /** Step to the next browse source. Each has its own catalogue, so the list restarts empty. */
+    private fun cycleSource() {
+        val sources = MapSource.BROWSABLE
+        browseSource = sources[(sources.indexOf(browseSource) + 1) % sources.size]
+        WorldsConfig.save()
+        updateSourceTooltip()
+        selected = null
+        readmeBlocks = emptyList()
+        loadCurrentTab()
+    }
+
+    private fun updateSourceTooltip() {
+        sourceButton.setTooltip(Tooltip.create(Component.literal("Source: ${browseSource.label}")))
+    }
+
+    /**
+     * The search box drives two things: the local filter, always, and a re-query, so maps outside the page already loaded are findable.
+     */
+    private fun onSearchChanged() {
+        applyFilter()
+        if (tab == Tab.BROWSE && browseSource != MapSource.MANUAL) {
+            queryDueAt = System.currentTimeMillis() + QUERY_DEBOUNCE_MS
+        }
+    }
+
+    override fun tick() {
+        super.tick()
+        if (queryDueAt == 0L || System.currentTimeMillis() < queryDueAt) return
+        queryDueAt = 0L
+        if (search.value.trim() != loadedQuery) loadCurrentTab()
+    }
+
+    /** Re-fetch the current tab from its source, bypassing caches. No-op while the cooldown is active. */
     private fun onRefresh() {
         if (System.currentTimeMillis() - lastRefresh < REFRESH_COOLDOWN_MS) return
         lastRefresh = System.currentTimeMillis()
@@ -301,28 +347,36 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         status = "Loading…"
         allEntries = emptyList()
         list.setEntries(emptyList())
+        queryDueAt = 0L
+        browseHasMore = false
+        loadingMore = false
         val loadingTab = tab
+        val source = browseSource
+        val query = search.value.trim()
+        val gen = ++loadGen
         Constants.SCOPE.launch {
+            var hasMore = false
             val entries = when (loadingTab) {
-                Tab.BROWSE -> MapRepository.loadBrowse(force)
+                Tab.BROWSE -> MapRepository.loadBrowse(source, query, force)
+                    .also { hasMore = it.hasMore }.entries
                 Tab.INSTALLED -> MapRepository.scanInstalled().map { installed ->
                     val meta = installed.meta
                     MapEntry(
                         id = meta?.id ?: "local:${installed.saveFolder}",
-                        source = meta?.source ?: MapSource.MANUAL,
-                        slug = null,
+                        source = meta?.source ?: MapSource.LOCAL,
                         title = installed.title,
                         description = meta?.description?.takeIf { it.isNotBlank() }
                             ?: if (meta != null) "Installed • ${installed.saveFolder}"
                             else "Local world • ${installed.saveFolder}",
                         iconUrl = installed.localIcon ?: meta?.icon,
-                        // From level.dat, so the version filter works for unmanaged saves too.
                         mcVersions = listOfNotNull(installed.mcVersion),
-                        // Worlds this mod didn't install carry no metadata — tag them as such.
+                        // Worlds this mod didn't install carry no metadata
                         categories = meta?.categories ?: listOf(InstalledMap.MANUAL_CATEGORY),
+                        // The map version that was installed, not the game version.
+                        version = meta?.version,
                         // Unmanaged worlds have no listing → 0 downloads, sorted last.
                         downloads = meta?.downloads ?: 0,
-                        // "Date" on Installed means last played — available for every save.
+                        // "Date" on Installed means last played
                         dateEpoch = installed.lastPlayed,
                         website = meta?.website,
                         trailerUrl = meta?.trailer,
@@ -333,45 +387,121 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                         it.requiredMods = meta?.requiredMods ?: emptyList()
                         it.requiredPacks = meta?.requiredPacks ?: emptyList()
                         it.detailLoaded = true
+                        // The bundled list is matched directly; a remote map only reports an update
+                        // once Browse has pulled its listing this session.
+                        val update = meta?.let { m -> MapRepository.findUpdate(m) }
+                        it.updateAvailable = update != null
+                        it.latestVersion = update?.version
                     }
                 }
             }
             Minecraft.getInstance().execute {
-                if (tab != loadingTab) return@execute
+                if (gen != loadGen) return@execute
                 allEntries = entries
+                loadedQuery = query
+                browseHasMore = hasMore
                 status = if (entries.isEmpty()) {
                     if (loadingTab == Tab.INSTALLED) "No maps installed yet." else "No maps found."
                 } else null
+                // Resolving pendingSelectId has to wait for the list, so applyFilter does it.
                 applyFilter()
-                pendingSelectId?.let { id ->
-                    if (list.selectEntry { it.id == id }) pendingSelectId = null
-                }
             }
         }
     }
 
+    /**
+     * Pull the next page of a paged source (CurseForge) and append it
+     */
+    private fun loadMore() {
+        loadingMore = true
+        val gen = loadGen
+        val source = browseSource
+        val query = loadedQuery
+        val index = allEntries.size
+        Constants.SCOPE.launch {
+            val page = MapRepository.loadMore(source, query, index)
+            Minecraft.getInstance().execute {
+                loadingMore = false
+                if (gen != loadGen) return@execute
+                browseHasMore = page.hasMore
+                if (page.entries.isEmpty()) return@execute
+                allEntries = allEntries + page.entries
+                applyFilter()
+            }
+        }
+    }
+
+    /**
+     * Run a filter+sort pass and hand the result to the list.
+     * If list bigger than [SYNC_FILTER_MAX] run it async.
+     */
     private fun applyFilter() {
-        val query = if (::search.isInitialized) search.value.trim().lowercase() else ""
-        var filtered = if (query.isEmpty()) allEntries else allEntries.filter {
-            it.title.lowercase().contains(query) ||
-                it.description.lowercase().contains(query) ||
-                it.categories.any { c -> c.lowercase().contains(query) }
+        val gen = ++filterGen
+        filterJob?.cancel()
+        val pass = FilterPass(
+            entries = allEntries,
+            query = if (::search.isInitialized) search.value.trim().lowercase() else "",
+            state = filters,
+            mcVersion = Minecraft.getInstance().launchedVersion,
+        )
+        if (pass.entries.size <= SYNC_FILTER_MAX) {
+            showFiltered(gen, tab, pass.run())
+            return
         }
-        val state = filters
-        state.category?.let { cat ->
-            filtered = filtered.filter { e -> e.categories.any { it.equals(cat, ignoreCase = true) } }
+        val passTab = tab
+        filterJob = Constants.SCOPE.launch(Dispatchers.Default) {
+            val filtered = pass.run()
+            Minecraft.getInstance().execute { showFiltered(gen, passTab, filtered) }
         }
-        if (state.version != VersionMode.ALL) {
-            filtered = filtered.filter { versionMatches(it) }
-        }
-        val byKey = when (state.sort) {
-            SortMode.AZ -> filtered.sortedBy { it.title.lowercase() }
-            SortMode.DOWNLOADS -> filtered.sortedByDescending { it.downloads }
-            SortMode.DATE -> filtered.sortedByDescending { it.dateEpoch }
-        }
-        filtered = if (state.reverse) byKey.reversed() else byKey
+    }
+
+    private fun showFiltered(gen: Int, passTab: Tab, filtered: List<MapEntry>) {
+        if (gen != filterGen || tab != passTab) return
         list.setEntries(filtered)
         if (selected != null && selected !in filtered) selected = null
+        pendingSelectId?.let { id -> if (list.selectEntry { it.id == id }) pendingSelectId = null }
+    }
+
+    /**
+     * One filter+sort pass, holding a snapshot of every input taken on the render thread
+     */
+    private class FilterPass(
+        val entries: List<MapEntry>,
+        val query: String,
+        state: FilterSettings,
+        val mcVersion: String,
+    ) {
+        private val category = state.category
+        private val version = state.version
+        private val sort = state.sort
+        private val reverse = state.reverse
+
+        fun run(): List<MapEntry> {
+            var filtered = if (query.isEmpty()) entries else entries.filter {
+                it.title.lowercase().contains(query) ||
+                    it.description.lowercase().contains(query) ||
+                    it.categories.any { c -> c.lowercase().contains(query) }
+            }
+            category?.let { cat ->
+                filtered = filtered.filter { e -> e.categories.any { it.equals(cat, ignoreCase = true) } }
+            }
+            if (version != VersionMode.ALL) {
+                filtered = filtered.filter { versionMatches(it) }
+            }
+            val byKey = when (sort) {
+                SortMode.AZ -> filtered.sortedBy { it.title.lowercase() }
+                SortMode.DOWNLOADS -> filtered.sortedByDescending { it.downloads }
+                SortMode.DATE -> filtered.sortedByDescending { it.dateEpoch }
+            }
+            return if (reverse) byKey.reversed() else byKey
+        }
+
+        /** Whether [entry]'s supported game versions satisfy the version filter. */
+        private fun versionMatches(entry: MapEntry): Boolean = when (version) {
+            VersionMode.ALL -> true
+            VersionMode.EQUAL -> entry.mcVersions.any { it == mcVersion }
+            VersionMode.EQUAL_HIGHER -> entry.mcVersions.any { compareMcVersions(it, mcVersion) >= 0 }
+        }
     }
 
     private fun openFilters() {
@@ -384,7 +514,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         )
     }
 
-    /** Called back by [FilterScreen] when the popup closes — writes back to the current tab only. */
+    /** Called back by [FilterScreen] when the popup closes */
     fun applyFilters(category: String?, version: VersionMode, sort: SortMode, reverse: Boolean) {
         filters.category = category
         filters.version = version
@@ -392,16 +522,6 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         filters.reverse = reverse
         applyFilter()
         WorldsConfig.save()
-    }
-
-    /** Whether [entry]'s supported game versions satisfy world version. */
-    private fun versionMatches(entry: MapEntry): Boolean {
-        val current = Minecraft.getInstance().launchedVersion
-        return when (filters.version) {
-            VersionMode.ALL -> true
-            VersionMode.EQUAL -> entry.mcVersions.any { it == current }
-            VersionMode.EQUAL_HIGHER -> entry.mcVersions.any { compareMcVersions(it, current) >= 0 }
-        }
     }
 
     private fun onSelect(entry: MapEntry) {
@@ -439,8 +559,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
     /**
      * Detail markdown. Browse shows the listing readme; an installed world leads with its own facts
-     * from `level.dat` plus its data/resource packs, and only then the readme (if the map shipped
-     * one). The description is never repeated — the header above already shows it.
+     * from `level.dat` plus its data/resource packs, and only then the readme (if the map shipped one)
      */
     private fun readmeFor(entry: MapEntry): String {
         val folder = entry.installedFolder ?: return entry.readmeMarkdown ?: entry.description
@@ -454,6 +573,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             .append("**Last Played:** ${lastPlayed(info?.lastPlayed ?: 0)}  \n")
             .append("**Total Playtime:** ${playtime(info?.playTicks ?: 0)}  \n")
             .append("**Version:** ${info?.mcVersion ?: "unknown"}  \n")
+            .append(mapVersionRow(entry))
             .append("**Difficulty:** ${difficultyName(info?.difficulty)} (${flags.joinToString(", ")})  \n")
             .append("**Size:** ${worldSize(entry)}\n\n")
             .append(packSection("Data Packs", info?.dataPacks?.filter { !it.contains("fabric-") } ?: emptyList()))
@@ -462,6 +582,17 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         val readme = entry.readmeMarkdown?.takeIf { it.isNotBlank() && it.trim() != entry.description.trim() }
         if (readme != null) md.append("\n---\n\n").append(readme)
         return md.toString()
+    }
+
+    private fun mapVersionRow(entry: MapEntry): String {
+        val installed = entry.version
+        val latest = entry.latestVersion
+        val value = when {
+            !entry.updateAvailable -> installed ?: return ""
+            installed != null && latest != null -> "$installed → **$latest available**"
+            else -> "**update available**"
+        }
+        return "**Map Version:** $value  \n"
     }
 
     private fun packSection(title: String, names: List<String>): String =
@@ -489,7 +620,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         )
     }
 
-    /** World age in ticks as a coarse duration — `Data.Time` only advances while the world runs. */
+    /** World age in ticks as a coarse duration */
     private fun playtime(ticks: Long): String {
         val minutes = ticks / (20 * 60)
         if (minutes <= 0) return "less than a minute"
@@ -546,8 +677,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             !FabricLoader.getInstance().isModLoaded(id)
         }
 
-    /** Preferred external link: the source page (Modrinth/GitHub) if set, else the website. */
-    private fun MapEntry.linkUrl(): String? = sourceUrl?.takeIf { it.isNotBlank() } ?: website
+    /** Preferred external link: the source page if set, else the website. */
+    private fun MapEntry.linkUrl(): String? = website?.takeIf { it.isNotBlank() }
 
     private fun openUrl(url: String?) {
         if (!url.isNullOrBlank()) Util.getPlatform().openUri(url)
@@ -566,6 +697,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
         val sprite = if (filters.isActive) FILTER_ACTIVE else FILTER_INACTIVE
         graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, filterButton.x + 2, filterButton.y + 2, 16, 16)
+        if (sourceButton.visible) {
+            val icon = SOURCE_SPRITES.getValue(browseSource)
+            graphics.blitSprite(RenderPipelines.GUI_TEXTURED, icon, sourceButton.x + 2, sourceButton.y + 2, 16, 16)
+        }
 
         if (separatorX >= 0) graphics.fill(separatorX, buttonsY + 2, separatorX + 1, buttonsY + 18, 0x60FFFFFF)
 
@@ -586,6 +721,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
     private fun updateWidgets() {
         val entry = selected
+        sourceButton.visible = tab == Tab.BROWSE
+        // Auto-paging: the list reaching its end is what asks the source for the next chunk.
+        if (tab == Tab.BROWSE && browseHasMore && !loadingMore && list.nearBottom()) loadMore()
         val remaining = REFRESH_COOLDOWN_MS - (System.currentTimeMillis() - lastRefresh)
         if (remaining > 0) {
             refreshButton.active = false
@@ -706,8 +844,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         clampLines(entry.description, rightRight - textX, DESC_LINES).forEachIndexed { i, line ->
             graphics.text(font, line, textX, listTop + 14 + i * font.lineHeight, 0xFFB0B0B0.toInt())
         }
-        // Only a real category earns a pill — the source (modrinth/manual) is an implementation
-        // detail and used to leak "manual" onto every curated map.
+        // Only a real category earns a pill
         entry.categories.firstOrNull()?.let { category ->
             CategoryBadge.draw(graphics, font, category, rightLeft, listTop + iconSize + 3)
         }
@@ -938,7 +1075,11 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private companion object {
         /** Height of [MenuTabBar] (its own private constant), needed to place the row below it. */
         const val TAB_BAR_H = 24
+        /** Up to this many entries, filtering runs inline */
+        const val SYNC_FILTER_MAX = 2_000
         const val REFRESH_COOLDOWN_MS = 10_000L
+        /** Idle time after the last keystroke before the query is handed to a remote source. */
+        const val QUERY_DEBOUNCE_MS = 400L
         const val SCROLLBAR_W = 4
         const val READ_PAD_X = 4
         const val ICON_BTN = 20
@@ -960,5 +1101,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         const val ICON_RECREATE = "♻"
         val FILTER_INACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/inactive")
         val FILTER_ACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/active")
+        val SOURCE_SPRITES: Map<MapSource, Identifier> = MapSource.BROWSABLE.associateWith {
+            Identifier.fromNamespaceAndPath("worlds", "source/${it.key}")
+        }
     }
 }

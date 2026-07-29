@@ -52,6 +52,19 @@ class MapListWidget(
 
     override fun scrollBarX(): Int = x + width - 8
 
+    /**
+     * Manually flat calc the height to avoid nextEntry rescanning each entry every time
+     */
+    override fun getNextY(): Int = y + 2 - scrollAmount().toInt() + children().size * ROW_HEIGHT
+
+    override fun contentHeight(): Int = children().size * ROW_HEIGHT + 4
+
+    /**
+     * Detects end of list and requests more entries (infinity scroll)
+     */
+    fun nearBottom(px: Int = ROW_HEIGHT * 3): Boolean =
+        maxScrollAmount() <= 0 || scrollAmount() >= maxScrollAmount() - px
+
     inner class MapRow(val entry: MapEntry) : Entry<MapRow>() {
         override fun getNarration(): Component = Component.literal(entry.title)
 
@@ -110,24 +123,24 @@ class MapListWidget(
 
             val font = minecraft.font
             val textX = x + iconSize + 6
-            // Main category as a colored pill right of the title (ModMenu-style tag).
+            // Main category as a colored pill right of the title (ModMenu-style tag)
             val category = entry.categories.firstOrNull()
-            val badgeW = if (category != null) CategoryBadge.width(font, category) + 4 else 0
-            val title = trim(entry.title, right - textX - badgeW, font)
+            val categoryW = if (category != null) CategoryBadge.width(font, category) + 4 else 0
+            val updateW = if (entry.updateAvailable) CategoryBadge.updateWidth(font) + 4 else 0
+            val title = trim(entry.title, right - textX - categoryW - updateW, font)
             graphics.text(font, title, textX, y + 1, -1)
-            if (category != null) {
-                val badgeX = textX + font.width(title) + 4
-                if (badgeX + badgeW - 4 <= right) CategoryBadge.draw(graphics, font, category, badgeX, y + 1)
+            var pillX = textX + font.width(title) + 4
+            if (category != null && pillX + categoryW - 4 <= right) {
+                pillX += CategoryBadge.draw(graphics, font, category, pillX, y + 1) + 4
+            }
+            if (entry.updateAvailable && pillX + updateW - 4 <= right) {
+                CategoryBadge.drawUpdate(graphics, font, pillX, y + 1)
             }
             // Same three-row rhythm as vanilla's world list: name, then two gray detail rows.
             graphics.text(font, trim(entry.description, right - textX, font), textX, y + 12, SUBTEXT_COLOR)
             graphics.text(font, trim(infoLine(), right - textX, font), textX, y + 21, SUBTEXT_COLOR)
         }
 
-        /**
-         * Second detail row: the supported/last-saved MC version, paired with the download count
-         * when browsing or the last-played date once the world is installed.
-         */
         private fun infoLine(): String {
             val version = entry.displayVersion ?: "?"
             val tail = if (canPlay()) "Last: ${lastPlayed(entry.dateEpoch)}"

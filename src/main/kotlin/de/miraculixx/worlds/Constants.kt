@@ -5,23 +5,23 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import org.slf4j.LoggerFactory
 
-/**
- * Central constants and shared infrastructure for the Worlds mod.
- *
- * TODO(config): [WORLDS_MODRINTH_ID] and [MAPS_JSON_URL] point at the live sources.
- *  Confirm the real Modrinth project id and the GitHub raw path once the repo/project exist.
- */
+
 object Constants {
     const val MOD_ID = "worlds"
 
     /** Modrinth project id/slug of this mod, used for the reverse-dependency search. */
     const val WORLDS_MODRINTH_ID = "world"
 
-    /** Raw GitHub URL of the curated manual map index. */
-    const val MAPS_JSON_URL =
-        "https://raw.githubusercontent.com/MiraculixxT/Worlds/refs/heads/main/maps.json"
-
     const val MODRINTH_API = "https://api.modrinth.com/v2"
+
+    /** Backend base URL see [de.miraculixx.worlds.api.WorldsApi]. */
+    const val API_BASE = "https://api.miraculixx.de/worlds"
+
+    /** Manual added maps list */
+    const val MANUAL_INDEX = "/assets/$MOD_ID/maps.json"
+
+    /** Manual added modrinth projects list */
+    const val MODRINTH_INDEX = "/assets/$MOD_ID/modrinth.json"
 
     val USER_AGENT = "miraculixx/Worlds (worlds mod client)"
 

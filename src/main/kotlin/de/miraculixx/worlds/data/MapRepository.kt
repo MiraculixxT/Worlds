@@ -1,106 +1,203 @@
 package de.miraculixx.worlds.data
 
 import de.miraculixx.worlds.Constants
-import de.miraculixx.worlds.api.*
+import de.miraculixx.worlds.api.ApiMapDetail
+import de.miraculixx.worlds.api.ApiMapEntry
+import de.miraculixx.worlds.api.Http
+import de.miraculixx.worlds.api.ManualIndex
+import de.miraculixx.worlds.api.ManualMapEntry
+import de.miraculixx.worlds.api.ModrinthApi
+import de.miraculixx.worlds.api.ModrinthIndex
+import de.miraculixx.worlds.api.MrProject
+import de.miraculixx.worlds.api.MrSearchHit
+import de.miraculixx.worlds.api.MrVersion
+import de.miraculixx.worlds.api.WorldsApi
 import net.minecraft.client.Minecraft
 import net.minecraft.nbt.NbtAccounter
 import net.minecraft.nbt.NbtIo
 import java.nio.file.Files
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Central store that merges the two discovery sources (Modrinth reverse-dependency search + the
- * curated GitHub index), caches the results, resolves per-map detail lazily, and scans the saves
- * directory for installed maps. All network methods block and must run on a background coroutine.
+ * Central store around the three browse sources (not persistent)
+ * - Modrinth (queried client-side)
+ * - CurseForge (through proxy - thanks shit API-key)
+ * - Manual embedded list
+ * - Saves directory
+ *
+ * All network methods block and must run on a background coroutine.
  */
 object MapRepository {
-    @Volatile private var browseCache: List<MapEntry>? = null
-    // Keeps the raw manual entries so their inline detail can be filled without a network call.
-    private val manualById = HashMap<String, GhMapEntry>()
+    /** One page of browse results. [hasMore] is only ever true for the paged CurseForge source. */
+    data class BrowsePage(val entries: List<MapEntry>, val hasMore: Boolean = false)
 
-    /** Merged Browse list. Cached after the first successful load; pass [force] to refresh. */
-    fun loadBrowse(force: Boolean = false): List<MapEntry> {
-        browseCache?.let { if (!force) return it }
+    // Session caches of the two sources that fetch their whole list at once.
+    @Volatile private var modrinthCache: List<MapEntry>? = null
+    @Volatile private var manualCache: List<MapEntry>? = null
+    private val detailCache = ConcurrentHashMap<String, ApiMapDetail>()
 
-        val github = GitHubIndex.fetch()
-        val manual = github.filter { it.source.equals("manual", true) }
-        val ghModrinthSlugs = github.filter { it.source.equals("modrinth", true) }
-            .mapNotNull { it.slug }
+    data class Listing(val version: String?, val dateEpoch: Long)
 
-        manualById.clear()
-        val manualEntries = manual.mapNotNull { gh ->
-            val id = gh.id ?: gh.name?.lowercase()?.replace(Regex("[^a-z0-9]+"), "-") ?: return@mapNotNull null
-            manualById[id] = gh
+    /**
+     * Newest listing seen for a `source:id` while browsing (only source of update check)
+     */
+    private val seenListings = ConcurrentHashMap<String, Listing>()
+
+    fun loadBrowse(source: MapSource, query: String = "", force: Boolean = false): BrowsePage = when (source) {
+        MapSource.MANUAL -> BrowsePage(manualEntries(force))
+        MapSource.MODRINTH -> BrowsePage(modrinthEntries(query, force))
+        MapSource.CURSEFORGE -> curseForgePage(query, 0)
+        else -> BrowsePage(emptyList())
+    }
+
+    /** Next CurseForge page, starting at [index]. Any other source has everything already. */
+    fun loadMore(source: MapSource, query: String, index: Int): BrowsePage =
+        if (source == MapSource.CURSEFORGE) curseForgePage(query, index) else BrowsePage(emptyList())
+
+    /** The bundled *Other* list. Free to build, so [force] only matters for consistency. */
+    private fun manualEntries(force: Boolean): List<MapEntry> {
+        manualCache?.let { if (!force) return it }
+        val entries = ManualIndex.entries.mapNotNull { manual ->
+            val id = manualId(manual) ?: return@mapNotNull null
             MapEntry(
                 id = id,
                 source = MapSource.MANUAL,
-                slug = null,
-                title = gh.name ?: id,
-                description = gh.description ?: "",
-                iconUrl = gh.icon,
-                mcVersions = gh.mcVersions,
-                categories = gh.categories,
-                website = gh.website,
-            )
-        }
-
-        val hits = ModrinthApi.searchDependents()
-        val hitIds = hits.map { it.projectId }.toSet()
-        // Curated modrinth pointers not already surfaced by the reverse-dependency search.
-        val extraProjects = ModrinthApi.getProjects(ghModrinthSlugs)
-            .filter { it.id !in hitIds }
-
-        val modrinthEntries = hits.map { hit ->
-            MapEntry(
-                id = hit.projectId,
-                source = MapSource.MODRINTH,
-                slug = hit.slug,
-                title = hit.title,
-                description = hit.description,
-                iconUrl = hit.iconUrl,
-                mcVersions = hit.gameVersions,
-                categories = hit.displayCategories.ifEmpty { hit.categories },
-                downloads = hit.downloads,
-                dateEpoch = parseEpoch(hit.dateModified),
-            ).also { it.sourceUrl = modrinthUrl(hit.projectType, hit.slug ?: hit.projectId) }
-        } + extraProjects.map { p ->
-            MapEntry(
-                id = p.id,
-                source = MapSource.MODRINTH,
-                slug = p.slug,
-                title = p.title,
-                description = p.description,
-                iconUrl = p.iconUrl,
-                mcVersions = p.gameVersions,
-                categories = p.categories,
-                downloads = p.downloads,
-                dateEpoch = parseEpoch(p.updated),
-            ).also { it.sourceUrl = modrinthUrl(p.projectType, p.slug ?: p.id) }
-        }
-
-        val merged = (manualEntries + modrinthEntries)
-            .distinctBy { "${it.source}:${it.id}" }
-            .sortedBy { it.title.lowercase() }
-        browseCache = merged
-        return merged
+                title = manual.name ?: id,
+                description = manual.description ?: "",
+                iconUrl = manual.icon,
+                mcVersions = manual.mcVersions,
+                categories = manual.categories,
+                version = manual.version,
+                website = manual.website,
+                trailerUrl = manual.trailer,
+            ).apply { downloadUrl = manual.download }
+        }.sortedBy { it.title.lowercase() }
+        manualCache = entries
+        return entries
     }
 
-    /** Fill [entry]'s heavy fields (readme, download url, requirements, gallery). Idempotent. */
+    /**
+     * Modrinth maps: manual project list + reverse search. A query never widens the set — it runs a
+     * second dependency-filtered search so dependents past the base call's 100-hit cap show up.
+     */
+    private fun modrinthEntries(query: String, force: Boolean): List<MapEntry> {
+        val base = modrinthCache?.takeIf { !force } ?: fetchModrinthBase().also { modrinthCache = it }
+        if (query.isBlank()) return base
+        val known = base.map { it.id }.toSet()
+        return base + ModrinthApi.search(query).filter { it.projectId !in known }.map { it.toEntry() }
+    }
+
+    private fun fetchModrinthBase(): List<MapEntry> {
+        val dependents = ModrinthApi.searchDependents().map { it.toEntry() }
+        val known = dependents.map { it.id }.toSet()
+        val curated = ModrinthApi.getProjects(ModrinthIndex.slugs)
+            .filter { it.id !in known }
+            .map { it.toEntry() }
+        return (dependents + curated).sortedBy { it.title.lowercase() }
+    }
+
+    private fun MrSearchHit.toEntry() = MapEntry(
+        id = projectId,
+        source = MapSource.MODRINTH,
+        title = title,
+        description = description,
+        iconUrl = iconUrl,
+        mcVersions = gameVersions,
+        categories = displayCategories.ifEmpty { categories },
+        downloads = downloads,
+        dateEpoch = parseEpoch(dateModified),
+        website = modrinthUrl(projectType, slug ?: projectId),
+    ).also(::remember)
+
+    private fun MrProject.toEntry() = MapEntry(
+        id = id,
+        source = MapSource.MODRINTH,
+        title = title,
+        description = description,
+        iconUrl = iconUrl,
+        mcVersions = gameVersions,
+        categories = categories,
+        downloads = downloads,
+        dateEpoch = parseEpoch(updated),
+        website = modrinthUrl(projectType, slug ?: id),
+    ).also(::remember)
+
+    private fun curseForgePage(query: String, index: Int): BrowsePage {
+        val page = WorldsApi.searchCurseForge(query, index) ?: return BrowsePage(emptyList())
+        val entries = page.hits.map { it.toEntry() }
+        return BrowsePage(entries, index + page.hits.size < page.total && page.hits.isNotEmpty())
+    }
+
+    private fun ApiMapEntry.toEntry() = MapEntry(
+        id = id,
+        source = MapSource.CURSEFORGE,
+        title = title,
+        description = description,
+        iconUrl = icon,
+        mcVersions = mcVersions,
+        categories = categories,
+        version = version,
+        downloads = downloads,
+        dateEpoch = updated,
+        website = website,
+        trailerUrl = trailer,
+    ).also(::remember)
+
+    private fun remember(entry: MapEntry) {
+        seenListings[key(entry.source, entry.id)] = Listing(entry.version, entry.dateEpoch)
+    }
+
+    /**
+     * Updates for local indexes directly checked, remote maps only when fetched in browse
+     */
+    fun findUpdate(meta: InstalledMeta): Listing? {
+        val latest = if (meta.source == MapSource.MANUAL) {
+            manualEntries(false).firstOrNull { it.id == meta.id }?.let { Listing(it.version, it.dateEpoch) }
+        } else {
+            seenListings[key(meta.source, meta.id)]
+        } ?: return null
+        return when {
+            meta.version != null && latest.version != null -> latest.takeIf { it.version != meta.version }
+            meta.updated > 0 && latest.dateEpoch > 0 -> latest.takeIf { it.dateEpoch > meta.updated }
+            else -> null
+        }
+    }
+
+    /** Fill [entry]'s heavy fields (readme, download url, requirements, gallery) */
     fun loadDetail(entry: MapEntry) {
         if (entry.detailLoaded) return
         when (entry.source) {
             MapSource.MANUAL -> loadManualDetail(entry)
             MapSource.MODRINTH -> loadModrinthDetail(entry)
+            MapSource.CURSEFORGE -> if (!loadCurseForgeDetail(entry)) return
+            else -> {}
         }
         entry.detailLoaded = true
     }
 
     private fun loadManualDetail(entry: MapEntry) {
-        val gh = manualById[entry.id] ?: return
-        entry.readmeMarkdown = gh.readme ?: gh.description
-        entry.downloadUrl = gh.download
-        entry.trailerUrl = gh.trailer
-        entry.requiredMods = gh.requiredMods.map { it.toRequirement(RequirementKind.MOD) }
-        entry.requiredPacks = gh.requiredPacks.map { it.toRequirement(RequirementKind.RESOURCE_PACK) }
+        val manual = ManualIndex.entries.firstOrNull { manualId(it) == entry.id } ?: return
+        entry.readmeMarkdown = manual.readme ?: manual.description
+        entry.downloadUrl = manual.download
+        entry.trailerUrl = manual.trailer ?: firstYoutubeLink(manual.readme)
+        entry.requiredMods = manual.requiredMods.map { it.toRequirement(RequirementKind.MOD) }
+        entry.requiredPacks = manual.requiredPacks.map { it.toRequirement(RequirementKind.RESOURCE_PACK) }
+    }
+
+    /** Memoized per session; a failed fetch leaves the entry unloaded so re-selecting retries. */
+    private fun loadCurseForgeDetail(entry: MapEntry): Boolean {
+        val key = key(entry.source, entry.id)
+        val detail = detailCache[key]
+            ?: WorldsApi.curseForgeDetail(entry.id)?.also { detailCache[key] = it }
+            ?: return false
+        entry.readmeMarkdown = detail.readme?.ifBlank { null } ?: entry.description
+        entry.downloadUrl = detail.download ?: entry.downloadUrl
+        entry.gallery = detail.gallery
+        entry.trailerUrl = detail.trailer ?: entry.trailerUrl ?: firstYoutubeLink(detail.readme)
+        detail.website?.let { entry.website = it }
+        entry.requiredMods = detail.requiredMods.map { it.toRequirement(RequirementKind.MOD) }
+        entry.requiredPacks = detail.requiredPacks.map { it.toRequirement(RequirementKind.RESOURCE_PACK) }
+        return true
     }
 
     private fun loadModrinthDetail(entry: MapEntry) {
@@ -112,10 +209,9 @@ object MapRepository {
         val versions = ModrinthApi.getVersions(entry.id)
         val version = pickVersion(versions)
         entry.downloadUrl = version?.primaryFile()?.url
+        // Only known once a concrete version was picked
+        entry.version = version?.versionNumber?.ifBlank { null }
 
-        // `required` deps must be present; `embedded` deps ship inside the map download. We keep
-        // embedded deps only for resource packs (mark them "included"); an embedded mod is bundled
-        // in the map itself, so it must not trigger the missing-mod check.
         val depTypeById = version?.dependencies
             ?.filter { it.projectId != null && (it.dependencyType == "required" || it.dependencyType == "embedded") }
             ?.associate { it.projectId!! to it.dependencyType }
@@ -193,8 +289,7 @@ object MapRepository {
     }
 
     /**
-     * Total bytes of a save folder. Walks every region/entity file, so it can take a moment on big
-     * worlds — call it off the render thread. Unreadable files are skipped, never fatal.
+     * Total bytes of a save folder. Bad files are skipped
      */
     fun worldSize(saveFolder: String): Long {
         val dir = Minecraft.getInstance().gameDirectory.toPath().resolve("saves").resolve(saveFolder)
@@ -211,7 +306,6 @@ object MapRepository {
         }
     }
 
-    /** The bits of a save's `level.dat` the Installed tab shows or sorts by. */
     private data class LevelData(val name: String?, val info: WorldInfo)
 
     /**
@@ -244,9 +338,16 @@ object MapRepository {
         null
     }
 
+    /** Drop the session caches so the next browse load queries the sources again. */
     fun invalidate() {
-        browseCache = null
+        modrinthCache = null
+        manualCache = null
     }
+
+    private fun key(source: MapSource, id: String) = "${source.key}:$id"
+
+    private fun manualId(manual: ManualMapEntry): String? =
+        manual.id ?: manual.name?.lowercase()?.replace(Regex("[^a-z0-9]+"), "-")
 
     private val YOUTUBE_REGEX = Regex(
         """(?:https?://)?(?:www\.|m\.)?(?:youtube\.com/(?:watch\?[\w=&-]*v=|embed/|shorts/)|youtu\.be/)([\w-]{11})""",
@@ -254,8 +355,9 @@ object MapRepository {
     )
 
     /**
-     * First YouTube URL found in a Modrinth readme body, normalized to a canonical watch link
+     * First YouTube URL found in a readme body, normalized to watch link
      * (embed/shorts/youtu.be all collapse to `https://www.youtube.com/watch?v=<id>`).
+     * Only used when the source didn't supply a trailer of its own.
      */
     private fun firstYoutubeLink(body: String?): String? {
         if (body.isNullOrBlank()) return null
@@ -270,14 +372,4 @@ object MapRepository {
     private fun parseEpoch(iso: String?): Long =
         if (iso.isNullOrBlank()) 0L
         else try { java.time.Instant.parse(iso).toEpochMilli() } catch (_: Exception) { 0L }
-
-    private fun GhRequirement.toRequirement(kind: RequirementKind) = MapRequirement(
-        name = name,
-        kind = kind,
-        projectId = null,
-        modId = id,
-        link = link,
-        download = download,
-        included = included && kind == RequirementKind.RESOURCE_PACK,
-    )
 }
