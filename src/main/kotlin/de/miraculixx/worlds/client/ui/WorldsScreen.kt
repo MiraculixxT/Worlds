@@ -516,7 +516,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         minecraft.gui.setScreen(
             FilterScreen(
                 this, CategoryBadge.FILTER_CATEGORIES, state.category ?: ALL_CATEGORIES,
-                state.version, state.sort, state.reverse,
+                state.version, state.sort, state.reverse, state.defaultSort,
             )
         )
     }

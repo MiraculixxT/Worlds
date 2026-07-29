@@ -29,6 +29,7 @@ class FilterScreen(
     private var version: VersionMode,
     private var sort: SortMode,
     private var reverse: Boolean,
+    private val defaultSort: SortMode,
 ) : Screen(Component.literal("Filters")) {
 
     private val panelW = 280
@@ -101,7 +102,7 @@ class FilterScreen(
     private fun resetAll() {
         category = ALL_CATEGORIES
         version = VersionMode.ALL
-        sort = SortMode.AZ
+        sort = defaultSort
         reverse = false
         rebuildWidgets()
     }

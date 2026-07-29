@@ -5,6 +5,7 @@ import de.miraculixx.worlds.client.ui.SortMode
 import de.miraculixx.worlds.client.ui.VersionMode
 import de.miraculixx.worlds.data.MapSource
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
 import net.fabricmc.loader.api.FabricLoader
 import kotlin.io.path.createParentDirectories
@@ -13,14 +14,14 @@ import kotlin.io.path.writeText
 
 /** Filter + sort selection of one tab, persisted per tab. */
 @Serializable
-class FilterSettings {
+class FilterSettings(@Transient var defaultSort: SortMode = SortMode.AZ) {
     var category: String? = null
     var version = VersionMode.ALL
-    var sort = SortMode.AZ
+    var sort = defaultSort
     var reverse = false
 
     val isActive: Boolean
-        get() = category != null || version != VersionMode.ALL || sort != SortMode.AZ || reverse
+        get() = category != null || version != VersionMode.ALL || sort != defaultSort || reverse
 }
 
 @Serializable
@@ -30,7 +31,7 @@ data class WorldsSettings(
     /** Browse source the switcher last stood on */
     var browseSource: MapSource = MapSource.MODRINTH,
     val installedFilter: FilterSettings = FilterSettings(),
-    val browseFilter: FilterSettings = FilterSettings(),
+    val browseFilter: FilterSettings = FilterSettings(SortMode.DOWNLOADS),
 )
 
 object WorldsConfig {
@@ -41,6 +42,7 @@ object WorldsConfig {
         runCatching { json.decodeFromString<WorldsSettings>(file.readText()) }
             .onFailure { if (it !is java.nio.file.NoSuchFileException) Constants.LOG.warn("Failed to read $file, using defaults", it) }
             .getOrDefault(WorldsSettings())
+            .also { it.browseFilter.defaultSort = SortMode.DOWNLOADS }
     }
 
     @Synchronized
