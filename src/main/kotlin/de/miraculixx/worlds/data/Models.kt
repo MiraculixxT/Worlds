@@ -7,6 +7,10 @@ import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import net.minecraft.SharedConstants
+
+
+val mcVersion: String get() = SharedConstants.getCurrentVersion().name()
 
 /**
  * Where a listing came from
@@ -36,16 +40,22 @@ enum class MapSource(val key: String, val label: String) {
     }
 }
 
-/** Compare dotted numeric versions ("26.2" vs "26.1"); non-numeric parts count as 0. */
+/**
+ * Compare dotted numeric versions ("26.2" vs "26.1"); a part's leading digits count, the rest is
+ * dropped ("26.2-rc1" == "26.2"), a part with no leading digit counts as 0.
+ */
 fun compareMcVersions(a: String, b: String): Int {
     val pa = a.split('.'); val pb = b.split('.')
     for (i in 0 until maxOf(pa.size, pb.size)) {
-        val na = pa.getOrNull(i)?.toIntOrNull() ?: 0
-        val nb = pb.getOrNull(i)?.toIntOrNull() ?: 0
+        val na = pa.getOrNull(i).versionPart()
+        val nb = pb.getOrNull(i).versionPart()
         if (na != nb) return na.compareTo(nb)
     }
     return 0
 }
+
+private fun String?.versionPart(): Int =
+    this?.takeWhile { it.isDigit() }?.toIntOrNull() ?: 0
 
 enum class RequirementKind { MOD, RESOURCE_PACK }
 

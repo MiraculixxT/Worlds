@@ -180,7 +180,7 @@ object MapRepository {
 
     private fun CfMod.pickFile(): CfFile? {
         if (latestFiles.isEmpty()) return null
-        val mc = Minecraft.getInstance().launchedVersion
+        val mc = mcVersion
         val sorted = latestFiles.sortedByDescending { it.fileDate ?: "" }
         return sorted.firstOrNull { mc in it.gameVersions } ?: sorted.first()
     }
@@ -289,7 +289,7 @@ object MapRepository {
     /** Prefer the newest version compatible with the running MC version, else the newest overall. */
     private fun pickVersion(versions: List<MrVersion>): MrVersion? {
         if (versions.isEmpty()) return null
-        val mc = Minecraft.getInstance().launchedVersion
+        val mc = mcVersion
         val sorted = versions.sortedByDescending { it.datePublished ?: "" }
         return sorted.firstOrNull { mc in it.gameVersions } ?: sorted.first()
     }

@@ -15,6 +15,7 @@ import de.miraculixx.worlds.data.MapRepository
 import de.miraculixx.worlds.data.MapRequirement
 import de.miraculixx.worlds.data.MapSource
 import de.miraculixx.worlds.data.compareMcVersions
+import de.miraculixx.worlds.data.mcVersion as currentMcVersion
 import de.miraculixx.worlds.data.WorldResourcePacks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -449,7 +450,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             entries = allEntries,
             query = if (::search.isInitialized) search.value.trim().lowercase() else "",
             state = filters,
-            mcVersion = Minecraft.getInstance().launchedVersion,
+            mcVersion = currentMcVersion,
         )
         if (pass.entries.size <= SYNC_FILTER_MAX) {
             showFiltered(gen, tab, pass.run())
@@ -549,7 +550,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             },
             categoryId = CurseForgeCategories.idOf(state.category),
             versions = if (state.version == VersionMode.EQUAL) {
-                listOf(Minecraft.getInstance().launchedVersion)
+                listOf(currentMcVersion)
             } else emptyList(),
         )
     }
