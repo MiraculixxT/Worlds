@@ -4,6 +4,7 @@ import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.CurseForgeCategories
 import de.miraculixx.worlds.api.WorldsApi
 import de.miraculixx.worlds.client.FilterSettings
+import de.miraculixx.worlds.client.ModUpdate
 import de.miraculixx.worlds.client.WorldsConfig
 import de.miraculixx.worlds.client.ui.markdown.Markdown
 import de.miraculixx.worlds.client.ui.markdown.MdBlock
@@ -42,6 +43,7 @@ import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.FormattedText
 import net.minecraft.network.chat.Style
+import net.minecraft.network.chat.TextColor
 import net.minecraft.resources.Identifier
 import net.minecraft.util.Util
 import java.time.Instant
@@ -115,6 +117,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private lateinit var refreshButton: Button
     private lateinit var filterButton: Button
     private lateinit var sourceButton: Button
+    private lateinit var updateButton: Button
+    private var updateShown = false
 
     // Refresh cooldown so we don't hammer the APIs
     private var lastRefresh = 0L
@@ -149,6 +153,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         tabBar.arrangeElements(width)
 
         val searchY = TAB_BAR_H + 6
+        // Decided before to know the row width
+        updateShown = ModUpdate.available
         refreshButton = addRenderableWidget(
             Button.builder(Component.literal("Refresh")) { onRefresh() }
                 .bounds(rightRight - 70, searchY - 2, 70, 20).build()
@@ -158,6 +164,13 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         search.setHint(Component.literal("Search maps…"))
         search.setResponder { onSearchChanged() }
         addRenderableWidget(search)
+
+        updateButton = addRenderableWidget(
+            Button.builder(Component.empty()) { openUrl(ModUpdate.url) }
+                .bounds(leftLeft + searchWidth() + 2, searchY - 2, updateButtonWidth, 20).build()
+        )
+        updateButton.visible = updateShown
+        syncUpdateTooltip()
 
         // Icon-only filter toggle right of the search box; sprite swaps when a filter is active.
         filterButton = addRenderableWidget(
@@ -258,13 +271,32 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         search.setHighlightPos(search.cursorPosition)
         filterButton.x = leftLeft + leftWidth - 20
         sourceButton.x = leftLeft + leftWidth - 42
+        updateButton.x = leftLeft + searchWidth() + 2
         // Vanilla only repositions list entries here (never per frame), so without this call every
         // MapRow keeps drawing at its old x/width.
         list.updateSizeAndPosition(leftWidth, listBottom - listTop, leftLeft, listTop)
     }
 
-    /** Search box width. Browse carries the source switcher next to the filter button, so it loses 22px. */
-    private fun searchWidth(): Int = leftWidth - if (tab == Tab.BROWSE) 44 else 22
+    /**
+     * Search box width. Browse carries the source switcher next to the filter button, so it loses
+     * 22px, and the Update button takes its own width off the top whenever it is shown.
+     */
+    private fun searchWidth(): Int =
+        leftWidth - (if (tab == Tab.BROWSE) 44 else 22) - if (updateShown) updateButtonWidth + 2 else 0
+
+    private val updateButtonWidth: Int get() = ORB_SIZE + 8 + font.width(UPDATE_LABEL) + 6
+
+    private fun syncUpdateTooltip() {
+        val latest = ModUpdate.latestVersion ?: return
+        updateButton.setTooltip(
+            Tooltip.create(Component.literal("Outdated: ")
+                .append(Component.literal(ModUpdate.installedVersion ?: "unknown").withColor(TextColor.RED))
+                .append(Component.literal(" → "))
+                .append(Component.literal(latest).withColor(TextColor.GREEN))
+                .append(Component.literal(" (update now)"))
+            )
+        )
+    }
 
     private fun clampLeftWidth(ratio: Float, usable: Int): Int {
         val minSide = minOf(MIN_SIDE, usable / 2)
@@ -732,6 +764,11 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             val icon = SOURCE_SPRITES.getValue(browseSource)
             graphics.blitSprite(RenderPipelines.GUI_TEXTURED, icon, sourceButton.x + 2, sourceButton.y + 2, 16, 16)
         }
+        if (updateButton.visible) {
+            val orbY = updateButton.y + (20 - ORB_SIZE) / 2
+            graphics.blitSprite(RenderPipelines.GUI_TEXTURED, UPDATE_ORB, updateButton.x + 5, orbY, ORB_SIZE, ORB_SIZE)
+            graphics.text(font, UPDATE_LABEL, updateButton.x + ORB_SIZE + 9, updateButton.y + 6, -1)
+        }
 
         if (separatorX >= 0) graphics.fill(separatorX, buttonsY + 2, separatorX + 1, buttonsY + 18, 0x60FFFFFF)
 
@@ -753,6 +790,14 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private fun updateWidgets() {
         val entry = selected
         sourceButton.visible = tab == Tab.BROWSE
+        // The startup check can land while the screen is open, so the row re-flows when it does.
+        if (ModUpdate.available != updateShown) {
+            updateShown = ModUpdate.available
+            updateButton.visible = updateShown
+            updateButton.width = updateButtonWidth
+            syncUpdateTooltip()
+            syncWidgets()
+        }
         // Auto-paging: the list reaching its end is what asks the source for the next chunk.
         if (tab == Tab.BROWSE && browseHasMore && !loadingMore && list.nearBottom()) loadMore()
         val remaining = REFRESH_COOLDOWN_MS - (System.currentTimeMillis() - lastRefresh)
@@ -1130,6 +1175,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         const val ICON_WEBSITE = "🌎"
         const val ICON_DELETE = "🗑"
         const val ICON_RECREATE = "♻"
+        const val UPDATE_LABEL = "Update"
+        const val ORB_SIZE = 8
+        val UPDATE_ORB: Identifier = Identifier.withDefaultNamespace("icon/trial_available")
         val FILTER_INACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/inactive")
         val FILTER_ACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/active")
         val SOURCE_SPRITES: Map<MapSource, Identifier> = MapSource.BROWSABLE.associateWith {

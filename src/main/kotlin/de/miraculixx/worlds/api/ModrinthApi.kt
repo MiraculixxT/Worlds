@@ -46,6 +46,13 @@ object ModrinthApi {
         return Http.decode<List<MrProject>>(Http.getString(url)) ?: emptyList()
     }
 
+    /** Newest release of a project for one loader + game version */
+    fun latestVersion(idOrSlug: String, loader: String, gameVersion: String): MrVersion? {
+        val url = "${Constants.MODRINTH_API}/project/${enc(idOrSlug)}/version" +
+            "?loaders=${enc("[\"$loader\"]")}&game_versions=${enc("[\"$gameVersion\"]")}"
+        return Http.decode<List<MrVersion>>(Http.getString(url))?.firstOrNull()
+    }
+
     fun getVersions(idOrSlug: String): List<MrVersion> =
         Http.decode<List<MrVersion>>(
             Http.getString("${Constants.MODRINTH_API}/project/${enc(idOrSlug)}/version")

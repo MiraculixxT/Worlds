@@ -12,6 +12,8 @@ import net.minecraft.network.chat.Component
 class WorldsClient : ClientModInitializer {
 
     override fun onInitializeClient() {
+        ModUpdate.check()
+
         ScreenEvents.AFTER_INIT.register { _, screen, scaledWidth, _ ->
             if (screen !is TitleScreen) return@register
             val widgets = Screens.getWidgets(screen)
