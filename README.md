@@ -19,7 +19,8 @@ This is an attempt to use Modrinth to bring back the good times of adventure/cus
   - Scans for other dependencies like mods
   - Displays description, previews & trailer/source links
 - Loads all resourcepacks inside a worlds `resourcepacks` folder (vanilla: only `resources.zip`)
-  - Bind packs to worlds to auto load/unload them while playing
+  - Bind packs to worlds to autoload/unload them while playing
+- Improve initial custom world gen loading (when installed via browser) 
 - Displays useful information about installed worlds
   - Bundled resourcepacks, datapacks & required mods
   - Playtime, last played
@@ -28,18 +29,21 @@ This is an attempt to use Modrinth to bring back the good times of adventure/cus
 I'm glad over any feedback how to improve the flow for adventure maps even more!<br>
 What do you miss?
 
+
 # Creator Notice
-To add your World to the browse menu, there are two options:
+To add your World to the browse menu, there are multiple options:
 ### Modrinth Dependency (recommended)
-Upload your map to Modrinth as `DataPack` or `ModPack` and add this mod as dependency (`Worlds`).
+Upload your map to Modrinth as `ModPack` and add this mod as dependency (`world`).
 The newest version with this dependency will automatically show up in the browser!
 All properties are auto-detected, adding a youtube trailer to your project readme also creates a Trailer button.
+<br>Users are prompted to open the modrinth page on install, so you still receive revenue!
 
-Users are prompted to open the modrinth page on install, so you still receive revenue!
+### Curseforge Map
+Upload your map to Curseforge as `World`. 
+The newest version will automatically show up in the browser, but some properties like dependencies are not detected.
 
 ### *Manual List
-If you really don't want to upload your World to Modrinth, 
-you can edit `maps.json` in this repo to include your mod.
+You can edit `./src/main/resources/assets/worlds/maps.json` in this repo to include your world.
 See below for a guide to all fields:
 
 <details><summary>Json field description</summary>
