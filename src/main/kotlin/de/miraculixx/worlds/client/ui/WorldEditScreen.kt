@@ -25,6 +25,8 @@ import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.client.gui.screens.worldselection.OptimizeWorldScreen
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
+import net.minecraft.client.resources.sounds.SimpleSoundInstance
+import net.minecraft.sounds.SoundEvents
 import net.minecraft.client.gui.components.tabs.Tab as GuiTab
 import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.network.chat.CommonComponents
@@ -741,6 +743,8 @@ class WorldEditScreen(
     // GUI inputs
     //
 
+    private fun clickSound() = minecraft.soundManager.play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0f))
+
     override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
         if ((tab == Tab.DATA_PACKS || tab == Tab.RESOURCE_PACKS) && event.button() == 0) {
             val index = packRowAt(event.x(), event.y())
@@ -748,10 +752,12 @@ class WorldEditScreen(
             if (row != null) {
                 val point = event.x() to event.y()
                 if (point in packToggleRect(index)) {
+                    clickSound()
                     togglePack(index)
                     return true
                 }
                 if (row.deletable && point in packDeleteRect(index)) {
+                    clickSound()
                     confirmDeletePack(row)
                     return true
                 }
@@ -761,6 +767,7 @@ class WorldEditScreen(
             val point = event.x() to event.y()
             if (overIcon(event.x(), event.y())) {
                 commitEdit()
+                clickSound()
                 if (overResetIcon(event.x(), event.y())) resetIcon() else pickIcon()
                 return true
             }
@@ -774,6 +781,7 @@ class WorldEditScreen(
             }
             if (point in pillRect()) {
                 commitEdit()
+                clickSound()
                 cycleCategory()
                 return true
             }
