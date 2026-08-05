@@ -4,7 +4,9 @@ import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
 import de.miraculixx.worlds.client.ui.MapTextures
 import net.minecraft.nbt.CompoundTag
+import net.minecraft.nbt.ListTag
 import net.minecraft.nbt.NbtOps
+import net.minecraft.nbt.StringTag
 import net.minecraft.world.Difficulty
 import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
@@ -49,6 +51,37 @@ object WorldEditor {
             Constants.LOG.error("Failed to rename world {}", access.levelId, e)
         }
     }
+
+    fun readEnabledPacks(access: LevelStorageSource.LevelStorageAccess) = readPackList(access, "Enabled")
+
+    fun readDisabledPacks(access: LevelStorageSource.LevelStorageAccess) = readPackList(access, "Disabled")
+
+    private fun readPackList(access: LevelStorageSource.LevelStorageAccess, key: String): List<String> = try {
+        val list = readData(access).getCompoundOrEmpty("DataPacks").getListOrEmpty(key)
+        list.indices.map { list.getStringOr(it, "") }.filter { it.isNotBlank() }
+    } catch (e: Exception) {
+        Constants.LOG.warn("Failed to read data packs of {}: {}", access.levelId, e.message)
+        emptyList()
+    }
+
+    fun setPackLists(
+        access: LevelStorageSource.LevelStorageAccess,
+        enabled: List<String>,
+        disabled: List<String>,
+    ) {
+        try {
+            val data = readData(access)
+            val packs = CompoundTag()
+            packs.put("Enabled", packList(enabled))
+            packs.put("Disabled", packList(disabled))
+            data.put("DataPacks", packs)
+            access.saveLevelData(Dynamic(NbtOps.INSTANCE, data))
+        } catch (e: Exception) {
+            Constants.LOG.error("Failed to write data packs of {}", access.levelId, e)
+        }
+    }
+
+    private fun packList(ids: List<String>) = ListTag().apply { ids.forEach { add(StringTag.valueOf(it)) } }
 
     private fun modifySettings(access: LevelStorageSource.LevelStorageAccess, updater: (CompoundTag) -> Unit) {
         try {

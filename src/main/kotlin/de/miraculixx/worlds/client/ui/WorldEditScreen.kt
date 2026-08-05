@@ -2,6 +2,7 @@ package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.data.InstalledMap
+import de.miraculixx.worlds.data.WorldDataPacks
 import de.miraculixx.worlds.data.WorldEditor
 import kotlinx.coroutines.launch
 import net.minecraft.client.Minecraft
@@ -17,6 +18,7 @@ import net.minecraft.client.gui.components.tabs.TabManager
 import net.minecraft.client.gui.screens.BackupConfirmScreen
 import net.minecraft.client.gui.screens.ConfirmScreen
 import net.minecraft.client.gui.screens.Screen
+import net.minecraft.client.gui.screens.packs.PackSelectionScreen
 import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.client.gui.screens.worldselection.OptimizeWorldScreen
 import net.minecraft.client.input.KeyEvent
@@ -75,6 +77,10 @@ class WorldEditScreen(
     private lateinit var descBox: EditBox
     private lateinit var hardcoreButton: Button
     private val generalWidgets = ArrayList<AbstractWidget>()
+    private val dataPackWidgets = ArrayList<AbstractWidget>()
+
+    /** The Data Packs tab's list, re-read whenever it or the picker writes `level.dat`. */
+    private var packRows = emptyList<WorldDataPacks.PackRow>()
 
     /** Which field the in-place editor is currently bound to, or null when nothing is being edited. */
     private var editing: Field? = null
@@ -101,12 +107,14 @@ class WorldEditScreen(
         val meta = WorldEditor.readMeta(saveDir)
         description = meta?.description.orEmpty()
         category = meta?.categories?.firstOrNull() ?: InstalledMap.MANUAL_CATEGORY
+        packRows = WorldDataPacks.listRows(access)
     }
 
     override fun init() {
         // A resize re-runs init
         commitEdit()
         generalWidgets.clear()
+        dataPackWidgets.clear()
 
         tabBar = addRenderableWidget(
             MenuTabBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
@@ -163,6 +171,13 @@ class WorldEditScreen(
         )
         syncHardcoreTooltip()
 
+        dataPackWidgets.add(
+            addRenderableWidget(
+                Button.builder(Component.literal("Select Data Packs…")) { openDataPackSelection() }
+                    .bounds(rowX, listBottom() + 10, rowW, 20).build()
+            )
+        )
+
         addRenderableWidget(
             Button.builder(CommonComponents.GUI_DONE) { onClose() }
                 .bounds(width / 2 - 100, height - 28, 200, 20).build()
@@ -193,6 +208,7 @@ class WorldEditScreen(
     private fun applyTabVisibility() {
         val general = tab == Tab.GENERAL
         generalWidgets.forEach { it.visible = general }
+        dataPackWidgets.forEach { it.visible = tab == Tab.DATA_PACKS }
         // The two in-place editors only exist while a field is being edited.
         titleBox.visible = general && editing == Field.TITLE
         descBox.visible = general && editing == Field.DESCRIPTION
@@ -201,6 +217,42 @@ class WorldEditScreen(
     //
     // Geometry
     //
+
+    /** Bottom of a listing box (data/resource packs) */
+    private fun listBottom() = height - 68
+
+    private fun packRowH() = font.lineHeight + 6
+    private fun packRowsTop() = cardY + CARD_PAD + font.lineHeight + 5
+
+    /**
+     * How many rows are drawn as rows. When they do not all fit, the last slot is spent on a
+     * non-interactive "…and N more" line instead of a row.
+     */
+    private fun shownPackRows(): Int {
+        val fits = ((listBottom() - CARD_PAD - packRowsTop()) / packRowH()).coerceAtLeast(0)
+        return if (packRows.size <= fits) packRows.size else (fits - 1).coerceAtLeast(0)
+    }
+
+    private fun packRowRect(index: Int): Rect {
+        val top = packRowsTop() + index * packRowH()
+        return Rect(cardX + CARD_PAD, top, cardX + cardW - CARD_PAD, top + packRowH())
+    }
+
+    private fun packToggleRect(index: Int): Rect {
+        val row = packRowRect(index)
+        val y = row.y1 + (packRowH() - PACK_BOX) / 2
+        return Rect(row.x1 + 2, y, row.x1 + 2 + PACK_BOX, y + PACK_BOX)
+    }
+
+    private fun packDeleteRect(index: Int): Rect {
+        val row = packRowRect(index)
+        val y = row.y1 + (packRowH() - PACK_BOX) / 2
+        return Rect(row.x2 - 2 - PACK_BOX, y, row.x2 - 2, y + PACK_BOX)
+    }
+
+    /** Index of the interactive row under the cursor, or -1. */
+    private fun packRowAt(mx: Double, my: Double): Int =
+        (0 until shownPackRows()).firstOrNull { (mx to my) in packRowRect(it) } ?: -1
 
     private fun textX() = cardX + CARD_PAD + iconSize + 10
     private fun textWidth() = cardX + cardW - CARD_PAD - textX()
@@ -366,6 +418,57 @@ class WorldEditScreen(
         )
     }
 
+    //
+    // Data packs
+    //
+
+    /**
+     * Vanilla's own picker over [WorldDataPacks.createRepository]
+     */
+    private fun openDataPackSelection() {
+        val repository = WorldDataPacks.createRepository(access)
+        repository.reload()
+        repository.setSelected(
+            WorldEditor.readEnabledPacks(access).ifEmpty { listOf(WorldDataPacks.VANILLA) }
+        )
+        minecraft.gui.setScreen(
+            PackSelectionScreen(
+                repository,
+                { applied ->
+                    WorldDataPacks.apply(access, applied)
+                    packRows = WorldDataPacks.listRows(access)
+                    minecraft.gui.setScreen(this)
+                },
+                WorldDataPacks.libraryDir(),
+                Component.translatable("dataPack.title"),
+            )
+        )
+    }
+
+    private fun togglePack(index: Int) {
+        val row = packRows[index]
+        packRows = packRows.toMutableList().apply { this[index] = row.copy(enabled = !row.enabled) }
+        WorldDataPacks.writeRows(access, packRows)
+    }
+
+    private fun confirmDeletePack(row: WorldDataPacks.PackRow) {
+        minecraft.gui.setScreen(
+            ConfirmScreen(
+                { confirmed ->
+                    if (confirmed && WorldDataPacks.deletePack(access, row)) {
+                        packRows = WorldDataPacks.listRows(access)
+                        WorldDataPacks.writeRows(access, packRows)
+                    }
+                    minecraft.gui.setScreen(this)
+                },
+                Component.literal("Delete data pack"),
+                Component.literal("Delete '${row.name}' from '$levelName'?"),
+                CommonComponents.GUI_PROCEED,
+                CommonComponents.GUI_CANCEL,
+            )
+        )
+    }
+
     private fun hardcoreLabel(): Component =
         Component.literal(ICON_HARDCORE).withColor(if (hardcore) 0xFF5555 else 0x808080)
 
@@ -410,22 +513,83 @@ class WorldEditScreen(
 
     override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick)
-        if (tab != Tab.GENERAL) {
-            graphics.centeredText(font, Component.literal("${tab.label} — coming soon"), width / 2, height / 2 - 10, 0xFFA0A0A0.toInt())
-            return
+        when (tab) {
+            Tab.GENERAL -> drawCard(graphics, mouseX, mouseY)
+            Tab.DATA_PACKS -> drawDataPacks(graphics, mouseX, mouseY)
+            else -> graphics.centeredText(
+                font, Component.literal("${tab.label} — coming soon"), width / 2, height / 2 - 10, 0xFFA0A0A0.toInt(),
+            )
         }
-        drawCard(graphics, mouseX, mouseY)
+    }
+
+    private fun drawBox(graphics: GuiGraphicsExtractor, left: Int, top: Int, right: Int, bottom: Int) {
+        graphics.fill(left, top, right, bottom, 0x8D000000.toInt())
+        val border = 0xFF505050.toInt()
+        graphics.fill(left, top, right, top + 1, border)
+        graphics.fill(left, bottom - 1, right, bottom, border)
+        graphics.fill(left, top, left + 1, bottom, border)
+        graphics.fill(right - 1, top, right, bottom, border)
+    }
+
+    /**
+     * The save's own packs (excluding internal packs like fabric)
+     */
+    private fun drawDataPacks(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+        drawBox(graphics, cardX, cardY, cardX + cardW, listBottom())
+        val header = if (packRows.size <= 1) "No data packs installed" else "Data packs (${packRows.size - 1})"
+        graphics.centeredText(font, Component.literal(header), width / 2, cardY + CARD_PAD, 0xFFFFFFFF.toInt())
+
+        val point = mouseX.toDouble() to mouseY.toDouble()
+        val shown = shownPackRows()
+        for (index in 0 until shown) {
+            val row = packRows[index]
+            val rect = packRowRect(index)
+            val toggle = packToggleRect(index)
+            val delete = packDeleteRect(index)
+            if (point in rect) graphics.fill(rect.x1, rect.y1, rect.x2, rect.y2, 0x30FFFFFF)
+
+            drawToggle(graphics, toggle, row.enabled, row.locked, !row.locked && point in toggle)
+            val textY = rect.y1 + (packRowH() - font.lineHeight) / 2
+            val nameX = toggle.x2 + 6
+            graphics.text(
+                font, trim(row.name, delete.x1 - 4 - nameX), nameX, textY,
+                if (row.enabled) 0xFFFFFFFF.toInt() else SUBTEXT_COLOR,
+            )
+            graphics.centeredText(
+                font, Component.literal(ICON_RESET), (delete.x1 + delete.x2) / 2, textY,
+                when {
+                    row.locked -> LOCKED_COLOR
+                    point in delete -> 0xFFFF6060.toInt()
+                    else -> SUBTEXT_COLOR
+                },
+            )
+        }
+        if (packRows.size > shown) {
+            val rect = packRowRect(shown)
+            graphics.text(
+                font, "…and ${packRows.size - shown} more", rect.x1 + 2,
+                rect.y1 + (packRowH() - font.lineHeight) / 2, SUBTEXT_COLOR,
+            )
+        }
+    }
+
+    private fun drawToggle(graphics: GuiGraphicsExtractor, rect: Rect, on: Boolean, locked: Boolean, hover: Boolean) {
+        graphics.fill(rect.x1, rect.y1, rect.x2, rect.y2, 0xFF1A1A1A.toInt())
+        val border = if (locked) LOCKED_COLOR else if (hover) -1 else 0xFF808080.toInt()
+        graphics.fill(rect.x1, rect.y1, rect.x2, rect.y1 + 1, border)
+        graphics.fill(rect.x1, rect.y2 - 1, rect.x2, rect.y2, border)
+        graphics.fill(rect.x1, rect.y1, rect.x1 + 1, rect.y2, border)
+        graphics.fill(rect.x2 - 1, rect.y1, rect.x2, rect.y2, border)
+        if (on) {
+            graphics.fill(
+                rect.x1 + 3, rect.y1 + 3, rect.x2 - 3, rect.y2 - 3,
+                if (locked) LOCKED_COLOR else 0xFF55DD55.toInt(),
+            )
+        }
     }
 
     private fun drawCard(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
-        val right = cardX + cardW
-        val bottom = cardY + cardH
-        graphics.fill(cardX, cardY, right, bottom, 0x8D000000.toInt())
-        val border = 0xFF505050.toInt()
-        graphics.fill(cardX, cardY, right, cardY + 1, border)
-        graphics.fill(cardX, bottom - 1, right, bottom, border)
-        graphics.fill(cardX, cardY, cardX + 1, bottom, border)
-        graphics.fill(right - 1, cardY, right, bottom, border)
+        drawBox(graphics, cardX, cardY, cardX + cardW, cardY + cardH)
 
         drawIcon(graphics, mouseX, mouseY)
 
@@ -511,6 +675,21 @@ class WorldEditScreen(
     //
 
     override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
+        if (tab == Tab.DATA_PACKS && event.button() == 0) {
+            val index = packRowAt(event.x(), event.y())
+            val row = packRows.getOrNull(index)
+            if (row != null && !row.locked) {
+                val point = event.x() to event.y()
+                if (point in packToggleRect(index)) {
+                    togglePack(index)
+                    return true
+                }
+                if (point in packDeleteRect(index)) {
+                    confirmDeletePack(row)
+                    return true
+                }
+            }
+        }
         if (tab == Tab.GENERAL && event.button() == 0) {
             val point = event.x() to event.y()
             if (overIcon(event.x(), event.y())) {
@@ -571,7 +750,9 @@ class WorldEditScreen(
         const val ICON_BTN = 20
         const val BTN_GAP = 4
         const val DESC_LINES = 2
+        const val PACK_BOX = 10
         const val SUBTEXT_COLOR = -8355712
+        const val LOCKED_COLOR = 0xFF4A4A4A.toInt()
         const val ICON_HOVER_OVERLAY = -1601138544
         const val EMPTY_DESCRIPTION = "Click to add a description…"
         const val ICON_FOLDER = "📂"
