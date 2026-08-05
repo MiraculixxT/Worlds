@@ -8,6 +8,9 @@ import net.minecraft.nbt.ListTag
 import net.minecraft.nbt.NbtOps
 import net.minecraft.nbt.StringTag
 import net.minecraft.world.Difficulty
+import net.minecraft.world.flag.FeatureFlagSet
+import net.minecraft.world.flag.FeatureFlags
+import net.minecraft.world.level.WorldDataConfiguration
 import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
 import com.mojang.serialization.Dynamic
@@ -68,6 +71,7 @@ object WorldEditor {
         access: LevelStorageSource.LevelStorageAccess,
         enabled: List<String>,
         disabled: List<String>,
+        requiredFeatures: FeatureFlagSet = FeatureFlagSet.of(),
     ) {
         try {
             val data = readData(access)
@@ -75,10 +79,27 @@ object WorldEditor {
             packs.put("Enabled", packList(enabled))
             packs.put("Disabled", packList(disabled))
             data.put("DataPacks", packs)
+            mergeFeatures(data, requiredFeatures)
             access.saveLevelData(Dynamic(NbtOps.INSTANCE, data))
         } catch (e: Exception) {
             Constants.LOG.error("Failed to write data packs of {}", access.levelId, e)
         }
+    }
+
+    /**
+     * `MinecraftServer.configurePackRepository` drops an enabled pack again when its features are not
+     * a subset of `enabled_features`, so a feature pack needs its flags allowed here or it silently
+     * turns itself off on the next load. The set only ever grows — a world may already hold content
+     * from a flag, so this screen never takes one away.
+     */
+    private fun mergeFeatures(data: CompoundTag, required: FeatureFlagSet) {
+        if (required.isEmpty()) return
+        val key = WorldDataConfiguration.ENABLED_FEATURES_ID
+        val current = data.get(key)?.let { FeatureFlags.CODEC.parse(NbtOps.INSTANCE, it).result().orElse(null) }
+            ?: FeatureFlags.DEFAULT_FLAGS
+        val merged = current.join(required)
+        if (merged == current) return
+        FeatureFlags.CODEC.encodeStart(NbtOps.INSTANCE, merged).result().ifPresent { data.put(key, it) }
     }
 
     private fun packList(ids: List<String>) = ListTag().apply { ids.forEach { add(StringTag.valueOf(it)) } }

@@ -7,6 +7,7 @@ import net.minecraft.server.packs.repository.FolderRepositorySource
 import net.minecraft.server.packs.repository.PackRepository
 import net.minecraft.server.packs.repository.PackSource
 import net.minecraft.server.packs.repository.ServerPacksSource
+import net.minecraft.world.flag.FeatureFlagSet
 import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
 import java.nio.file.Files
@@ -25,12 +26,37 @@ object WorldDataPacks {
     private const val FILE_PREFIX = "file/"
     const val VANILLA = "vanilla"
 
-    /** One line of the editor's data pack list. [VANILLA] is [locked] */
-    data class PackRow(val id: String, val name: String, val enabled: Boolean) {
-        val locked: Boolean get() = id == VANILLA
+    enum class PackKind { FEATURE, FILE }
+
+    /** One line of the editor's data pack list. [VANILLA] never gets one - it is always on. */
+    data class PackRow(val id: String, val name: String, val enabled: Boolean, val kind: PackKind) {
+        /** Only a pack that is a file in the save can be removed; a feature pack lives in the jar. */
+        val deletable: Boolean get() = kind == PackKind.FILE
     }
 
-    private fun isManaged(id: String) = id == VANILLA || id.startsWith(FILE_PREFIX)
+    private class FeaturePack(val id: String, val name: String, val features: FeatureFlagSet)
+
+    /**
+     * The experimental packs `ServerPacksSource` bundles (26.2: `minecart_improvements`,
+     * `redstone_experiments`, `trade_rebalance`). Fixed for the run and listing them scans the client
+     * jar, so it is built once. Their [FeaturePack.features] is what `enabled_features` has to allow.
+     */
+    private val featurePacks: List<FeaturePack> by lazy {
+        val repository = PackRepository(ServerPacksSource(Minecraft.getInstance().directoryValidator()))
+        repository.reload()
+        repository.availablePacks
+            .filter { it.packSource == PackSource.FEATURE }
+            .map { pack -> FeaturePack(pack.id, pack.title.string.ifBlank { pack.id }, pack.requestedFeatures) }
+            .sortedBy { it.name }
+    }
+
+    private fun isManaged(id: String) =
+        id == VANILLA || id.startsWith(FILE_PREFIX) || featurePacks.any { it.id == id }
+
+    /** The flags every enabled feature pack in [enabledIds] asks for. */
+    private fun requiredFeatures(enabledIds: List<String>): FeatureFlagSet = featurePacks
+        .filter { it.id in enabledIds }
+        .fold(FeatureFlagSet.of()) { acc, pack -> acc.join(pack.features) }
 
     fun libraryDir(): Path = Minecraft.getInstance().gameDirectory.toPath().resolve("datapacks")
 
@@ -52,32 +78,39 @@ object WorldDataPacks {
     }
 
     /**
-     * Ordered the way `level.dat` enables them (later = higher prio) with anything it does not name appended alphabetically.
+     * The feature packs first, then the save's own, ordered the way `level.dat` enables them
+     * (later = higher prio) with anything it does not name appended alphabetically.
+     *
+     * The two kinds default the opposite way, which is why each reads a different list: a folder pack
+     * is `PackSource.WORLD` and gets added automatically on load unless it is named as disabled, a
+     * feature pack is `PackSource.FEATURE` and is never added unless it is named as enabled.
      */
     fun listRows(access: LevelStorageSource.LevelStorageAccess): List<PackRow> {
-        val order = WorldEditor.readEnabledPacks(access)
+        val enabled = WorldEditor.readEnabledPacks(access)
         val disabled = WorldEditor.readDisabledPacks(access).toSet()
         val names = folderPacks(worldDir(access)).map { it.name }.sortedWith(
-            compareBy({ order.indexOf(FILE_PREFIX + it).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }, { it })
+            compareBy({ enabled.indexOf(FILE_PREFIX + it).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }, { it })
         )
-        return listOf(PackRow(VANILLA, VANILLA, true)) +
-            names.map { PackRow(FILE_PREFIX + it, it, FILE_PREFIX + it !in disabled) }
+        return featurePacks.map { PackRow(it.id, it.name, it.id in enabled, PackKind.FEATURE) } +
+            names.map { PackRow(FILE_PREFIX + it, it, FILE_PREFIX + it !in disabled, PackKind.FILE) }
     }
 
+    /** Rows are emitted after the feature packs, so a save's own pack overrides an experiment. */
     fun writeRows(access: LevelStorageSource.LevelStorageAccess, rows: List<PackRow>) {
         val foreign = WorldEditor.readEnabledPacks(access).filterNot(::isManaged)
-        val (base, rest) = rows.filter { it.enabled }.map { it.id }.partition { it == VANILLA }
+        val enabled = rows.filter { it.enabled }.map { it.id }
         WorldEditor.setPackLists(
             access,
-            base + foreign + rest,
+            listOf(VANILLA) + foreign + enabled,
             WorldEditor.readDisabledPacks(access).filterNot(::isManaged) +
                 rows.filterNot { it.enabled }.map { it.id },
+            requiredFeatures(enabled),
         )
     }
 
     /** Delete a pack from the save. */
     fun deletePack(access: LevelStorageSource.LevelStorageAccess, row: PackRow): Boolean {
-        if (row.locked) return false
+        if (!row.deletable) return false
         return try {
             deleteTree(worldDir(access).resolve(row.name))
             true
@@ -100,13 +133,14 @@ object WorldDataPacks {
         val present = folderPacks(dir).map { it.name }
         val known = repository.availableIds.toSet()
         val foreign = WorldEditor.readEnabledPacks(access).filterNot { isManaged(it) || it in known }
-        val (base, others) = selected.partition { it == VANILLA }
+        val others = selected.filterNot { it == VANILLA }
         val enabled = others.filter { !it.startsWith(FILE_PREFIX) || it.removePrefix(FILE_PREFIX) in present }
         WorldEditor.setPackLists(
             access,
-            base + foreign + enabled,
+            listOf(VANILLA) + foreign + enabled,
             WorldEditor.readDisabledPacks(access).filterNot(::isManaged) +
                 present.filterNot { it in selectedNames }.sorted().map { FILE_PREFIX + it },
+            requiredFeatures(enabled),
         )
     }
 

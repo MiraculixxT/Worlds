@@ -221,20 +221,27 @@ class WorldEditScreen(
     /** Bottom of a listing box (data/resource packs) */
     private fun listBottom() = height - 68
 
-    private fun packRowH() = font.lineHeight + 6
+    private fun packRowH() = font.lineHeight + 5
     private fun packRowsTop() = cardY + CARD_PAD + font.lineHeight + 5
+
+    private fun featureCount() = packRows.count { it.kind == WorldDataPacks.PackKind.FEATURE }
+
+    /** The rule between the feature packs and the save's own; only drawn when both groups exist. */
+    private fun separated() = featureCount() > 0 && featureCount() < packRows.size
 
     /**
      * How many rows are drawn as rows. When they do not all fit, the last slot is spent on a
      * non-interactive "…and N more" line instead of a row.
      */
     private fun shownPackRows(): Int {
-        val fits = ((listBottom() - CARD_PAD - packRowsTop()) / packRowH()).coerceAtLeast(0)
+        val space = listBottom() - CARD_PAD - packRowsTop() - if (separated()) SEPARATOR_H else 0
+        val fits = (space / packRowH()).coerceAtLeast(0)
         return if (packRows.size <= fits) packRows.size else (fits - 1).coerceAtLeast(0)
     }
 
     private fun packRowRect(index: Int): Rect {
-        val top = packRowsTop() + index * packRowH()
+        val gap = if (separated() && index >= featureCount()) SEPARATOR_H else 0
+        val top = packRowsTop() + index * packRowH() + gap
         return Rect(cardX + CARD_PAD, top, cardX + cardW - CARD_PAD, top + packRowH())
     }
 
@@ -532,15 +539,21 @@ class WorldEditScreen(
     }
 
     /**
-     * The save's own packs (excluding internal packs like fabric)
+     * The bundled feature packs, a rule, then the save's own packs (excluding internal ones like
+     * fabric's). `vanilla` gets no row — it is written as enabled unconditionally.
      */
     private fun drawDataPacks(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
         drawBox(graphics, cardX, cardY, cardX + cardW, listBottom())
-        val header = if (packRows.size <= 1) "No data packs installed" else "Data packs (${packRows.size - 1})"
+        val own = packRows.size - featureCount()
+        val header = if (own == 0) "No data packs installed" else "Data packs ($own)"
         graphics.centeredText(font, Component.literal(header), width / 2, cardY + CARD_PAD, 0xFFFFFFFF.toInt())
 
         val point = mouseX.toDouble() to mouseY.toDouble()
         val shown = shownPackRows()
+        if (separated() && shown > featureCount()) {
+            val y = packRowsTop() + featureCount() * packRowH() + SEPARATOR_H / 2
+            graphics.fill(cardX + CARD_PAD, y, cardX + cardW - CARD_PAD, y + 1, 0xFF505050.toInt())
+        }
         for (index in 0 until shown) {
             val row = packRows[index]
             val rect = packRowRect(index)
@@ -548,21 +561,21 @@ class WorldEditScreen(
             val delete = packDeleteRect(index)
             if (point in rect) graphics.fill(rect.x1, rect.y1, rect.x2, rect.y2, 0x30FFFFFF)
 
-            drawToggle(graphics, toggle, row.enabled, row.locked, !row.locked && point in toggle)
+            drawToggle(graphics, toggle, row.enabled, point in toggle)
             val textY = rect.y1 + (packRowH() - font.lineHeight) / 2
             val nameX = toggle.x2 + 6
+            val nameEnd = if (row.deletable) delete.x1 - 4 else rect.x2 - 2
             graphics.text(
-                font, trim(row.name, delete.x1 - 4 - nameX), nameX, textY,
+                font, trim(row.name, nameEnd - nameX), nameX, textY,
                 if (row.enabled) 0xFFFFFFFF.toInt() else SUBTEXT_COLOR,
             )
-            graphics.centeredText(
-                font, Component.literal(ICON_RESET), (delete.x1 + delete.x2) / 2, textY,
-                when {
-                    row.locked -> LOCKED_COLOR
-                    point in delete -> 0xFFFF6060.toInt()
-                    else -> SUBTEXT_COLOR
-                },
-            )
+            // A feature pack lives in the jar, so it gets no delete glyph at all rather than a dead one.
+            if (row.deletable) {
+                graphics.centeredText(
+                    font, Component.literal(ICON_RESET), (delete.x1 + delete.x2) / 2, textY,
+                    if (point in delete) 0xFFFF6060.toInt() else SUBTEXT_COLOR,
+                )
+            }
         }
         if (packRows.size > shown) {
             val rect = packRowRect(shown)
@@ -573,19 +586,14 @@ class WorldEditScreen(
         }
     }
 
-    private fun drawToggle(graphics: GuiGraphicsExtractor, rect: Rect, on: Boolean, locked: Boolean, hover: Boolean) {
+    private fun drawToggle(graphics: GuiGraphicsExtractor, rect: Rect, on: Boolean, hover: Boolean) {
         graphics.fill(rect.x1, rect.y1, rect.x2, rect.y2, 0xFF1A1A1A.toInt())
-        val border = if (locked) LOCKED_COLOR else if (hover) -1 else 0xFF808080.toInt()
+        val border = if (hover) -1 else 0xFF808080.toInt()
         graphics.fill(rect.x1, rect.y1, rect.x2, rect.y1 + 1, border)
         graphics.fill(rect.x1, rect.y2 - 1, rect.x2, rect.y2, border)
         graphics.fill(rect.x1, rect.y1, rect.x1 + 1, rect.y2, border)
         graphics.fill(rect.x2 - 1, rect.y1, rect.x2, rect.y2, border)
-        if (on) {
-            graphics.fill(
-                rect.x1 + 3, rect.y1 + 3, rect.x2 - 3, rect.y2 - 3,
-                if (locked) LOCKED_COLOR else 0xFF55DD55.toInt(),
-            )
-        }
+        if (on) graphics.fill(rect.x1 + 3, rect.y1 + 3, rect.x2 - 3, rect.y2 - 3, 0xFF55DD55.toInt())
     }
 
     private fun drawCard(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
@@ -678,13 +686,13 @@ class WorldEditScreen(
         if (tab == Tab.DATA_PACKS && event.button() == 0) {
             val index = packRowAt(event.x(), event.y())
             val row = packRows.getOrNull(index)
-            if (row != null && !row.locked) {
+            if (row != null) {
                 val point = event.x() to event.y()
                 if (point in packToggleRect(index)) {
                     togglePack(index)
                     return true
                 }
-                if (point in packDeleteRect(index)) {
+                if (row.deletable && point in packDeleteRect(index)) {
                     confirmDeletePack(row)
                     return true
                 }
@@ -751,8 +759,9 @@ class WorldEditScreen(
         const val BTN_GAP = 4
         const val DESC_LINES = 2
         const val PACK_BOX = 10
+        /** Vertical space the rule between the feature packs and the save's own occupies. */
+        const val SEPARATOR_H = 7
         const val SUBTEXT_COLOR = -8355712
-        const val LOCKED_COLOR = 0xFF4A4A4A.toInt()
         const val ICON_HOVER_OVERLAY = -1601138544
         const val EMPTY_DESCRIPTION = "Click to add a description…"
         const val ICON_FOLDER = "📂"
