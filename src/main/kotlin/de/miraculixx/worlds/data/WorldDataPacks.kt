@@ -12,7 +12,6 @@ import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import kotlin.io.path.name
 
 /**
@@ -26,20 +25,15 @@ object WorldDataPacks {
     private const val FILE_PREFIX = "file/"
     const val VANILLA = "vanilla"
 
-    enum class PackKind { FEATURE, FILE }
-
-    /** One line of the editor's data pack list. [VANILLA] never gets one - it is always on. */
-    data class PackRow(val id: String, val name: String, val enabled: Boolean, val kind: PackKind) {
-        /** Only a pack that is a file in the save can be removed; a feature pack lives in the jar. */
-        val deletable: Boolean get() = kind == PackKind.FILE
-    }
+    /** [PackRow.group] of the bundled experiments and of the save's own packs. */
+    const val GROUP_FEATURE = 0
+    const val GROUP_FILE = 1
 
     private class FeaturePack(val id: String, val name: String, val features: FeatureFlagSet)
 
     /**
-     * The experimental packs `ServerPacksSource` bundles (26.2: `minecart_improvements`,
-     * `redstone_experiments`, `trade_rebalance`). Fixed for the run and listing them scans the client
-     * jar, so it is built once. Their [FeaturePack.features] is what `enabled_features` has to allow.
+     * The experimental packs `ServerPacksSource` bundles. Fixed for the run and listing them scans the client
+     * jar, so it is built once.
      */
     private val featurePacks: List<FeaturePack> by lazy {
         val repository = PackRepository(ServerPacksSource(Minecraft.getInstance().directoryValidator()))
@@ -88,11 +82,12 @@ object WorldDataPacks {
     fun listRows(access: LevelStorageSource.LevelStorageAccess): List<PackRow> {
         val enabled = WorldEditor.readEnabledPacks(access)
         val disabled = WorldEditor.readDisabledPacks(access).toSet()
-        val names = folderPacks(worldDir(access)).map { it.name }.sortedWith(
+        val names = PackFiles.list(worldDir(access)).map { it.name }.sortedWith(
             compareBy({ enabled.indexOf(FILE_PREFIX + it).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }, { it })
         )
-        return featurePacks.map { PackRow(it.id, it.name, it.id in enabled, PackKind.FEATURE) } +
-            names.map { PackRow(FILE_PREFIX + it, it, FILE_PREFIX + it !in disabled, PackKind.FILE) }
+        // A feature pack lives in the jar, so it can never be deleted
+        return featurePacks.map { PackRow(it.id, it.name, it.id in enabled, false, GROUP_FEATURE) } +
+            names.map { PackRow(FILE_PREFIX + it, it, FILE_PREFIX + it !in disabled, true, GROUP_FILE) }
     }
 
     /** Rows are emitted after the feature packs, so a save's own pack overrides an experiment. */
@@ -112,7 +107,7 @@ object WorldDataPacks {
     fun deletePack(access: LevelStorageSource.LevelStorageAccess, row: PackRow): Boolean {
         if (!row.deletable) return false
         return try {
-            deleteTree(worldDir(access).resolve(row.name))
+            PackFiles.delete(worldDir(access).resolve(row.name))
             true
         } catch (e: Exception) {
             Constants.LOG.warn("Could not delete data pack {}: {}", row.name, e.message)
@@ -130,7 +125,7 @@ object WorldDataPacks {
         val selectedNames = selected.filter { it.startsWith(FILE_PREFIX) }.map { it.removePrefix(FILE_PREFIX) }
         importPacks(dir, selectedNames)
 
-        val present = folderPacks(dir).map { it.name }
+        val present = PackFiles.list(dir).map { it.name }
         val known = repository.availableIds.toSet()
         val foreign = WorldEditor.readEnabledPacks(access).filterNot { isManaged(it) || it in known }
         val others = selected.filterNot { it == VANILLA }
@@ -144,18 +139,6 @@ object WorldDataPacks {
         )
     }
 
-    private fun isPack(p: Path): Boolean =
-        (Files.isRegularFile(p) && p.name.endsWith(".zip", ignoreCase = true)) ||
-            (Files.isDirectory(p) && Files.isRegularFile(p.resolve("pack.mcmeta")))
-
-    private fun folderPacks(dir: Path): List<Path> = try {
-        if (!Files.isDirectory(dir)) emptyList()
-        else Files.newDirectoryStream(dir).use { it.filter(::isPack) }
-    } catch (e: Exception) {
-        Constants.LOG.warn("Could not list {}: {}", dir, e.message)
-        emptyList()
-    }
-
     private fun importPacks(worldDir: Path, wanted: List<String>) {
         val library = libraryDir()
         try {
@@ -166,7 +149,7 @@ object WorldDataPacks {
             return
         }
 
-        val present = folderPacks(worldDir).map { it.name }.toSet()
+        val present = PackFiles.list(worldDir).map { it.name }.toSet()
         for (name in wanted) {
             if (name in present) continue
             val source = library.resolve(name)
@@ -175,34 +158,10 @@ object WorldDataPacks {
                 continue
             }
             try {
-                copyTree(source, worldDir.resolve(name))
+                PackFiles.copy(source, worldDir.resolve(name))
             } catch (e: Exception) {
                 Constants.LOG.warn("Could not copy data pack {}: {}", name, e.message)
             }
-        }
-    }
-
-    private fun copyTree(source: Path, dest: Path) {
-        if (!Files.isDirectory(source)) {
-            Files.copy(source, dest, StandardCopyOption.REPLACE_EXISTING)
-            return
-        }
-        Files.walk(source).use { stream ->
-            stream.forEach { path ->
-                val target = dest.resolve(source.relativize(path).toString())
-                if (Files.isDirectory(path)) Files.createDirectories(target)
-                else Files.copy(path, target, StandardCopyOption.REPLACE_EXISTING)
-            }
-        }
-    }
-
-    private fun deleteTree(path: Path) {
-        if (!Files.isDirectory(path)) {
-            Files.deleteIfExists(path)
-            return
-        }
-        Files.walk(path).use { stream ->
-            stream.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }
         }
     }
 }

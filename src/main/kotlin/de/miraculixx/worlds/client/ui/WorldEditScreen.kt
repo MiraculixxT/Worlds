@@ -2,8 +2,10 @@ package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.data.InstalledMap
+import de.miraculixx.worlds.data.PackRow
 import de.miraculixx.worlds.data.WorldDataPacks
 import de.miraculixx.worlds.data.WorldEditor
+import de.miraculixx.worlds.data.WorldResourcePacks
 import kotlinx.coroutines.launch
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
@@ -78,9 +80,11 @@ class WorldEditScreen(
     private lateinit var hardcoreButton: Button
     private val generalWidgets = ArrayList<AbstractWidget>()
     private val dataPackWidgets = ArrayList<AbstractWidget>()
+    private val resourcePackWidgets = ArrayList<AbstractWidget>()
 
-    /** The Data Packs tab's list, re-read whenever it or the picker writes `level.dat`. */
-    private var packRows = emptyList<WorldDataPacks.PackRow>()
+    /** The two pack tabs' lists, re-read whenever they or a picker writes to the save. */
+    private var packRows = emptyList<PackRow>()
+    private var resourceRows = emptyList<PackRow>()
 
     /** Which field the in-place editor is currently bound to, or null when nothing is being edited. */
     private var editing: Field? = null
@@ -108,6 +112,7 @@ class WorldEditScreen(
         description = meta?.description.orEmpty()
         category = meta?.categories?.firstOrNull() ?: InstalledMap.MANUAL_CATEGORY
         packRows = WorldDataPacks.listRows(access)
+        resourceRows = WorldResourcePacks.listRows(access)
     }
 
     override fun init() {
@@ -115,6 +120,7 @@ class WorldEditScreen(
         commitEdit()
         generalWidgets.clear()
         dataPackWidgets.clear()
+        resourcePackWidgets.clear()
 
         tabBar = addRenderableWidget(
             MenuTabBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
@@ -156,7 +162,12 @@ class WorldEditScreen(
         y += 24
         general(
             Button.builder(Component.translatable("selectWorld.edit.optimize")) { optimize() }
-                .bounds(rowX, y, rowW, 20).build()
+                .bounds(rowX, y, wideW, 20).build()
+        )
+        general(
+            Button.builder(Component.literal(ICON_FOLDER)) { openWorldFolder() }
+                .tooltip(Tooltip.create(Component.literal("Open world folder")))
+                .bounds(rowX + rowW - ICON_BTN, y, ICON_BTN, 20).build()
         )
 
         y += 24
@@ -174,6 +185,12 @@ class WorldEditScreen(
         dataPackWidgets.add(
             addRenderableWidget(
                 Button.builder(Component.literal("Select Data Packs…")) { openDataPackSelection() }
+                    .bounds(rowX, listBottom() + 10, rowW, 20).build()
+            )
+        )
+        resourcePackWidgets.add(
+            addRenderableWidget(
+                Button.builder(Component.literal("Select Resource Packs…")) { openResourcePackSelection() }
                     .bounds(rowX, listBottom() + 10, rowW, 20).build()
             )
         )
@@ -209,6 +226,7 @@ class WorldEditScreen(
         val general = tab == Tab.GENERAL
         generalWidgets.forEach { it.visible = general }
         dataPackWidgets.forEach { it.visible = tab == Tab.DATA_PACKS }
+        resourcePackWidgets.forEach { it.visible = tab == Tab.RESOURCE_PACKS }
         // The two in-place editors only exist while a field is being edited.
         titleBox.visible = general && editing == Field.TITLE
         descBox.visible = general && editing == Field.DESCRIPTION
@@ -224,10 +242,11 @@ class WorldEditScreen(
     private fun packRowH() = font.lineHeight + 5
     private fun packRowsTop() = cardY + CARD_PAD + font.lineHeight + 5
 
-    private fun featureCount() = packRows.count { it.kind == WorldDataPacks.PackKind.FEATURE }
+    private fun rows() = if (tab == Tab.RESOURCE_PACKS) resourceRows else packRows
 
-    /** The rule between the feature packs and the save's own; only drawn when both groups exist. */
-    private fun separated() = featureCount() > 0 && featureCount() < packRows.size
+    /** Size of the first [PackRow.group] */
+    private fun firstGroup() = rows().count { it.group == 0 }
+    private fun separated() = firstGroup() > 0 && firstGroup() < rows().size
 
     /**
      * How many rows are drawn as rows. When they do not all fit, the last slot is spent on a
@@ -236,11 +255,11 @@ class WorldEditScreen(
     private fun shownPackRows(): Int {
         val space = listBottom() - CARD_PAD - packRowsTop() - if (separated()) SEPARATOR_H else 0
         val fits = (space / packRowH()).coerceAtLeast(0)
-        return if (packRows.size <= fits) packRows.size else (fits - 1).coerceAtLeast(0)
+        return if (rows().size <= fits) rows().size else (fits - 1).coerceAtLeast(0)
     }
 
     private fun packRowRect(index: Int): Rect {
-        val gap = if (separated() && index >= featureCount()) SEPARATOR_H else 0
+        val gap = if (separated() && index >= firstGroup()) SEPARATOR_H else 0
         val top = packRowsTop() + index * packRowH() + gap
         return Rect(cardX + CARD_PAD, top, cardX + cardW - CARD_PAD, top + packRowH())
     }
@@ -400,6 +419,8 @@ class WorldEditScreen(
         Util.getPlatform().openPath(path)
     }
 
+    private fun openWorldFolder() = Util.getPlatform().openPath(saveDir)
+
     /**
      * Vanilla's world "optimizing".
      * It does weird things, so we just exit the screen and force the user to reload
@@ -452,32 +473,67 @@ class WorldEditScreen(
         )
     }
 
+    /**
+     * The same picker over [WorldResourcePacks.createRepository].
+     * Due to missing vanilla, empty leaving requires esc.
+     */
+    private fun openResourcePackSelection() {
+        val repository = WorldResourcePacks.createRepository(access)
+        repository.reload()
+        repository.setSelected(WorldResourcePacks.selectedIds(access))
+        minecraft.gui.setScreen(
+            PackSelectionScreen(
+                repository,
+                { applied ->
+                    WorldResourcePacks.apply(access, applied)
+                    resourceRows = WorldResourcePacks.listRows(access)
+                    minecraft.gui.setScreen(this)
+                },
+                WorldResourcePacks.libraryDir(),
+                Component.translatable("resourcePack.title"),
+            )
+        )
+    }
+
     private fun togglePack(index: Int) {
-        val row = packRows[index]
+        val row = rows()[index]
+        if (tab == Tab.RESOURCE_PACKS) {
+            if (WorldResourcePacks.setEnabled(access, row, !row.enabled)) {
+                resourceRows = WorldResourcePacks.listRows(access)
+            }
+            return
+        }
         packRows = packRows.toMutableList().apply { this[index] = row.copy(enabled = !row.enabled) }
         WorldDataPacks.writeRows(access, packRows)
     }
 
-    private fun confirmDeletePack(row: WorldDataPacks.PackRow) {
+    private fun confirmDeletePack(row: PackRow) {
+        val resource = tab == Tab.RESOURCE_PACKS
         minecraft.gui.setScreen(
             ConfirmScreen(
                 { confirmed ->
-                    if (confirmed && WorldDataPacks.deletePack(access, row)) {
-                        packRows = WorldDataPacks.listRows(access)
-                        WorldDataPacks.writeRows(access, packRows)
-                    }
+                    if (confirmed) deletePack(resource, row)
                     minecraft.gui.setScreen(this)
                 },
-                Component.literal("Delete data pack"),
-                Component.literal("Delete '${row.name}' from '$levelName'?"),
+                Component.literal(if (resource) "Delete resource pack" else "Delete data pack"),
+                Component.literal("Delete '${row.name}§r' from '$levelName§r'?"),
                 CommonComponents.GUI_PROCEED,
                 CommonComponents.GUI_CANCEL,
             )
         )
     }
 
+    private fun deletePack(resource: Boolean, row: PackRow) {
+        if (resource) {
+            if (WorldResourcePacks.deletePack(access, row)) resourceRows = WorldResourcePacks.listRows(access)
+        } else if (WorldDataPacks.deletePack(access, row)) {
+            packRows = WorldDataPacks.listRows(access)
+            WorldDataPacks.writeRows(access, packRows)
+        }
+    }
+
     private fun hardcoreLabel(): Component =
-        Component.literal(ICON_HARDCORE).withColor(if (hardcore) 0xFF5555 else 0x808080)
+        Component.literal(ICON_HARDCORE).withColor(if (hardcore) 0xFF5555 else 0x9BD698)
 
     private fun syncHardcoreTooltip() {
         hardcoreButton.setTooltip(
@@ -522,7 +578,11 @@ class WorldEditScreen(
         super.extractRenderState(graphics, mouseX, mouseY, partialTick)
         when (tab) {
             Tab.GENERAL -> drawCard(graphics, mouseX, mouseY)
-            Tab.DATA_PACKS -> drawDataPacks(graphics, mouseX, mouseY)
+            // The feature packs ship with the game, so the header only counts the save's own.
+            Tab.DATA_PACKS -> drawPackList(
+                graphics, mouseX, mouseY, "Data packs", packRows.count { it.group == WorldDataPacks.GROUP_FILE },
+            )
+            Tab.RESOURCE_PACKS -> drawPackList(graphics, mouseX, mouseY, "Resource packs", resourceRows.size)
             else -> graphics.centeredText(
                 font, Component.literal("${tab.label} — coming soon"), width / 2, height / 2 - 10, 0xFFA0A0A0.toInt(),
             )
@@ -539,23 +599,22 @@ class WorldEditScreen(
     }
 
     /**
-     * The bundled feature packs, a rule, then the save's own packs (excluding internal ones like
-     * fabric's). `vanilla` gets no row — it is written as enabled unconditionally.
+     * A list of all available packs. RPs are a simple folder walk, DPs also contain featured packs
      */
-    private fun drawDataPacks(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+    private fun drawPackList(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, what: String, own: Int) {
         drawBox(graphics, cardX, cardY, cardX + cardW, listBottom())
-        val own = packRows.size - featureCount()
-        val header = if (own == 0) "No data packs installed" else "Data packs ($own)"
+        val rows = rows()
+        val header = if (own == 0) "No ${what.lowercase()} installed" else "$what ($own)"
         graphics.centeredText(font, Component.literal(header), width / 2, cardY + CARD_PAD, 0xFFFFFFFF.toInt())
 
         val point = mouseX.toDouble() to mouseY.toDouble()
         val shown = shownPackRows()
-        if (separated() && shown > featureCount()) {
-            val y = packRowsTop() + featureCount() * packRowH() + SEPARATOR_H / 2
+        if (separated() && shown > firstGroup()) {
+            val y = packRowsTop() + firstGroup() * packRowH() + SEPARATOR_H / 2
             graphics.fill(cardX + CARD_PAD, y, cardX + cardW - CARD_PAD, y + 1, 0xFF505050.toInt())
         }
         for (index in 0 until shown) {
-            val row = packRows[index]
+            val row = rows[index]
             val rect = packRowRect(index)
             val toggle = packToggleRect(index)
             val delete = packDeleteRect(index)
@@ -577,10 +636,10 @@ class WorldEditScreen(
                 )
             }
         }
-        if (packRows.size > shown) {
+        if (rows.size > shown) {
             val rect = packRowRect(shown)
             graphics.text(
-                font, "…and ${packRows.size - shown} more", rect.x1 + 2,
+                font, "…and ${rows.size - shown} more", rect.x1 + 2,
                 rect.y1 + (packRowH() - font.lineHeight) / 2, SUBTEXT_COLOR,
             )
         }
@@ -683,9 +742,9 @@ class WorldEditScreen(
     //
 
     override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
-        if (tab == Tab.DATA_PACKS && event.button() == 0) {
+        if ((tab == Tab.DATA_PACKS || tab == Tab.RESOURCE_PACKS) && event.button() == 0) {
             val index = packRowAt(event.x(), event.y())
-            val row = packRows.getOrNull(index)
+            val row = rows().getOrNull(index)
             if (row != null) {
                 val point = event.x() to event.y()
                 if (point in packToggleRect(index)) {
