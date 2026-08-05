@@ -10,7 +10,6 @@ import net.minecraft.client.gui.screens.NoticeWithLinkScreen
 import net.minecraft.client.gui.screens.ProgressScreen
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen
-import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 import net.minecraft.world.level.storage.LevelResource
@@ -67,7 +66,9 @@ object WorldActions {
             return
         }
         val screen = try {
-            EditWorldScreen.create(mc, access) {
+            // Lock world & open our custom edit screen
+            access.fixAndGetSummary()
+            WorldEditScreen(access) {
                 access.safeClose()
                 onDone()
             }

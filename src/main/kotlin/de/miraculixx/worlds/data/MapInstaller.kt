@@ -3,7 +3,6 @@ package de.miraculixx.worlds.data
 import com.mojang.serialization.Lifecycle
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
-import de.miraculixx.worlds.client.ui.MapTextures
 import net.minecraft.client.Minecraft
 import net.minecraft.commands.Commands
 import net.minecraft.nbt.CompoundTag
@@ -25,13 +24,10 @@ import net.minecraft.world.level.levelgen.WorldOptions
 import net.minecraft.world.level.levelgen.presets.WorldPresets
 import net.minecraft.world.level.storage.LevelStorageSource
 import net.minecraft.world.level.storage.PrimaryLevelData
-import java.awt.RenderingHints
-import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.ZipInputStream
-import javax.imageio.ImageIO
 
 /** Result of an install attempt. */
 sealed interface InstallResult {
@@ -178,18 +174,7 @@ object MapInstaller {
      */
     private fun downloadIcon(target: Path, entry: MapEntry) {
         val bytes = entry.iconUrl?.let { Http.getBytes(it) } ?: return
-        try {
-            val source = MapTextures.readBuffered(bytes) ?: return
-            val icon = BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB)
-            icon.createGraphics().apply {
-                setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-                drawImage(source, 0, 0, 64, 64, null)
-                dispose()
-            }
-            ImageIO.write(icon, "png", target.resolve("icon.png").toFile())
-        } catch (e: Exception) {
-            Constants.LOG.warn("Failed to write world icon for '{}': {}", entry.title, e.message)
-        }
+        WorldEditor.writeIcon(target.resolve("icon.png"), bytes)
     }
 
     private fun writeMarker(target: Path, entry: MapEntry) {

@@ -63,6 +63,10 @@ object MapTextures {
         return null
     }
 
+    fun invalidate(url: String?) {
+        if (url != null) cache.remove(url)
+    }
+
     /**
      * Fetch image bytes for [url]: HTTP(S) URLs go through [Http], anything else is treated as a
      * local filesystem path (an installed save's own `icon.png`).
@@ -91,7 +95,7 @@ object MapTextures {
         return try {
             NativeImage.read(bytes)
         } catch (e: Exception) {
-            Constants.LOG.warn("STB decode failed ({}); retrying via ImageIO", e.message)
+            //Constants.LOG.warn("STB decode failed ({}); retrying via ImageIO", e.message)
             readViaImageIO(bytes)
         }
     }

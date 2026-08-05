@@ -320,10 +320,14 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         switchTab(Tab.entries[tabPages.indexOf(page).coerceAtLeast(0)])
     }
 
-    /** Refresh the set of installed map ids (async) so Browse can disable already-installed maps. */
+    /**
+     * Refresh the set of installed map ids (async) so Browse can disable already-installed maps.
+     * A "local" map was created/installed manually.
+     */
     private fun refreshInstalledIds() {
         Constants.SCOPE.launch {
-            val ids = MapRepository.scanInstalled().mapNotNull { it.meta?.id }.toSet()
+            val ids = MapRepository.scanInstalled()
+                .mapNotNull { it.meta?.takeIf { m -> m.source != MapSource.LOCAL }?.id }.toSet()
             Minecraft.getInstance().execute { installedIds = ids }
         }
     }
@@ -404,7 +408,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                         source = meta?.source ?: MapSource.LOCAL,
                         title = installed.title,
                         description = meta?.description?.takeIf { it.isNotBlank() }
-                            ?: if (meta != null) "Installed • ${installed.saveFolder}"
+                            ?: if (meta != null && meta.source != MapSource.LOCAL) "Installed • ${installed.saveFolder}"
                             else "Local world • ${installed.saveFolder}",
                         iconUrl = installed.localIcon ?: meta?.icon,
                         mcVersions = listOfNotNull(installed.mcVersion),
