@@ -176,7 +176,7 @@ class WorldEditScreen(
                 .bounds(rowX, y, wideW, 20).build()
         )
         general(
-            Button.builder(Component.literal(ICON_FOLDER)) { openBackupFolder() }
+            Button.builder(Component.literal(ICON_BACKUP)) { openBackupFolder() }
                 .tooltip(Tooltip.create(Component.translatable("selectWorld.edit.backupFolder")))
                 .bounds(rowX + rowW - ICON_BTN, y, ICON_BTN, 20).build()
         )
@@ -824,6 +824,7 @@ class WorldEditScreen(
         const val ICON_HOVER_OVERLAY = -1601138544
         const val EMPTY_DESCRIPTION = "Click to add a description…"
         const val ICON_FOLDER = "📂"
+        const val ICON_BACKUP = "\uD83D\uDDD0"
         const val ICON_RESET = "🗑"
         const val ICON_CHANGE = "✎"
         const val ICON_HARDCORE = "❤"
