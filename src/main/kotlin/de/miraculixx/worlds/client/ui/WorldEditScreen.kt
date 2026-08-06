@@ -2,12 +2,16 @@ package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.data.InstalledMap
+import de.miraculixx.worlds.data.ItemComponents
 import de.miraculixx.worlds.data.PackRow
 import de.miraculixx.worlds.data.WorldDataPacks
 import de.miraculixx.worlds.data.WorldEditor
+import de.miraculixx.worlds.data.WorldPlayers
 import de.miraculixx.worlds.data.WorldResourcePacks
+import de.miraculixx.worlds.data.WorldRules
 import kotlinx.coroutines.launch
 import net.minecraft.client.Minecraft
+import net.minecraft.core.BlockPos
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.AbstractWidget
 import net.minecraft.client.gui.components.Button
@@ -19,10 +23,13 @@ import net.minecraft.client.gui.components.tabs.MenuTabBar
 import net.minecraft.client.gui.components.tabs.TabManager
 import net.minecraft.client.gui.screens.BackupConfirmScreen
 import net.minecraft.client.gui.screens.ConfirmScreen
+import net.minecraft.client.gui.screens.GenericMessageScreen
 import net.minecraft.client.gui.screens.Screen
+import net.minecraft.client.gui.screens.achievement.StatsScreen
 import net.minecraft.client.gui.screens.packs.PackSelectionScreen
 import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.client.gui.screens.worldselection.OptimizeWorldScreen
+import net.minecraft.client.gui.screens.worldselection.WorldCreationGameRulesScreen
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.resources.sounds.SimpleSoundInstance
@@ -34,6 +41,7 @@ import net.minecraft.network.chat.Component
 import net.minecraft.util.FileUtil
 import net.minecraft.util.Util
 import net.minecraft.world.Difficulty
+import net.minecraft.world.level.GameType
 import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
 import org.lwjgl.system.MemoryStack
@@ -41,6 +49,16 @@ import org.lwjgl.util.tinyfd.TinyFileDialogs
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.function.Consumer
+
+/** The panel frame both pack tabs and the Extra tab's settings list draw. */
+internal fun drawBox(graphics: GuiGraphicsExtractor, left: Int, top: Int, right: Int, bottom: Int) {
+    graphics.fill(left, top, right, bottom, 0x8D000000.toInt())
+    val border = 0xFF505050.toInt()
+    graphics.fill(left, top, right, top + 1, border)
+    graphics.fill(left, bottom - 1, right, bottom, border)
+    graphics.fill(left, top, left + 1, bottom, border)
+    graphics.fill(right - 1, top, right, bottom, border)
+}
 
 /**
  * Replacement for vanilla's [EditWorldScreen].
@@ -76,6 +94,13 @@ class WorldEditScreen(
     private var category = InstalledMap.MANUAL_CATEGORY
     private var difficulty = Difficulty.NORMAL
     private var hardcore = false
+    private var allowCommands = false
+    private var gameType = GameType.SURVIVAL
+    private var spawn = BlockPos.ZERO
+    private var gameTime = 0L
+    private var seed: Long? = null
+    private var players = emptyList<WorldPlayers.PlayerData>()
+    private var extraLoaded = false
 
     private lateinit var titleBox: EditBox
     private lateinit var descBox: EditBox
@@ -83,6 +108,15 @@ class WorldEditScreen(
     private val generalWidgets = ArrayList<AbstractWidget>()
     private val dataPackWidgets = ArrayList<AbstractWidget>()
     private val resourcePackWidgets = ArrayList<AbstractWidget>()
+    private val extraWidgets = ArrayList<AbstractWidget>()
+    private lateinit var extraList: ExtraSettingsList
+
+    /** Not rebuilt in [init] to avoid auto-collapse */
+    private val categories = listOf(
+        ExtraCategory("World Settings"),
+        ExtraCategory("Players"),
+        ExtraCategory("Game Rules") { openGameRules() },
+    )
 
     /** The two pack tabs' lists, re-read whenever they or a picker writes to the save. */
     private var packRows = emptyList<PackRow>()
@@ -110,6 +144,10 @@ class WorldEditScreen(
         levelName = facts.name
         difficulty = facts.difficulty
         hardcore = facts.hardcore
+        allowCommands = facts.allowCommands
+        gameType = facts.gameType
+        spawn = facts.spawn.pos()
+        gameTime = facts.gameTime
         val meta = WorldEditor.readMeta(saveDir)
         description = meta?.description.orEmpty()
         category = meta?.categories?.firstOrNull() ?: InstalledMap.MANUAL_CATEGORY
@@ -120,9 +158,11 @@ class WorldEditScreen(
     override fun init() {
         // A resize re-runs init
         commitEdit()
+        if (::extraList.isInitialized) extraList.commitEdits()
         generalWidgets.clear()
         dataPackWidgets.clear()
         resourcePackWidgets.clear()
+        extraWidgets.clear()
 
         tabBar = addRenderableWidget(
             MenuTabBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
@@ -197,6 +237,11 @@ class WorldEditScreen(
             )
         )
 
+        extraList = ExtraSettingsList(minecraft, categories, ::extraRowsFor)
+        extraList.updateSizeAndPosition(cardW, listBottom() - cardY, cardX, cardY)
+        extraList.rebuild()
+        extraWidgets.add(addRenderableWidget(extraList))
+
         addRenderableWidget(
             Button.builder(CommonComponents.GUI_DONE) { onClose() }
                 .bounds(width / 2 - 100, height - 28, 200, 20).build()
@@ -220,7 +265,15 @@ class WorldEditScreen(
         val newTab = Tab.entries[tabPages.indexOf(page).coerceAtLeast(0)]
         if (newTab == tab) return
         commitEdit()
+        extraList.commitEdits()
         tab = newTab
+        if (tab == Tab.EXTRA && !extraLoaded) {
+            extraLoaded = true
+            seed = WorldRules.readSeed(access)
+            players = WorldPlayers.list(access)
+            WorldPlayers.resolveNames(players.map { it.id }) { extraList.requestRebuild() }
+            extraList.requestRebuild()
+        }
         applyTabVisibility()
     }
 
@@ -229,6 +282,8 @@ class WorldEditScreen(
         generalWidgets.forEach { it.visible = general }
         dataPackWidgets.forEach { it.visible = tab == Tab.DATA_PACKS }
         resourcePackWidgets.forEach { it.visible = tab == Tab.RESOURCE_PACKS }
+        extraWidgets.forEach { it.visible = tab == Tab.EXTRA }
+        if (tab != Tab.EXTRA && focused === extraList) focused = null
         // The two in-place editors only exist while a field is being edited.
         titleBox.visible = general && editing == Field.TITLE
         descBox.visible = general && editing == Field.DESCRIPTION
@@ -465,6 +520,99 @@ class WorldEditScreen(
     }
 
     //
+    // Extra
+    //
+
+    private fun extraRowsFor(category: ExtraCategory): List<ExtraSettingsList.Row> =
+        when (categories.indexOf(category)) {
+            0 -> worldSettingRows()
+            1 -> playerRows()
+            else -> emptyList()
+        }
+
+    private fun worldSettingRows(): List<ExtraSettingsList.Row> {
+        val seedValue = seed
+        return listOf(
+            extraList.TextRow("Seed", seedValue?.toString() ?: "unknown", onPress = seedValue?.let {
+                { minecraft.keyboardHandler.setClipboard(it.toString()) }
+            }),
+            extraList.ToggleRow("Cheats", allowCommands) {
+                allowCommands = it
+                WorldEditor.setAllowCommands(access, it)
+            },
+            extraList.CycleRow("Default Game Mode", GameType.entries, gameType, GameType::getShortDisplayName) {
+                gameType = it
+                WorldEditor.setGameType(access, it)
+            },
+            extraList.NumberRow(
+                "World Spawn",
+                listOf(
+                    numberField(spawn.x.toLong(), HORIZONTAL_RANGE) { moveSpawn(x = it.toInt()) },
+                    numberField(spawn.y.toLong(), VERTICAL_RANGE) { moveSpawn(y = it.toInt()) },
+                    numberField(spawn.z.toLong(), HORIZONTAL_RANGE) { moveSpawn(z = it.toInt()) },
+                ),
+            ),
+            extraList.NumberRow(
+                "World Ticks",
+                listOf(numberField(gameTime, 0..Long.MAX_VALUE, WIDGET_W) {
+                    gameTime = it
+                    WorldEditor.setGameTime(access, it)
+                }),
+            ),
+        )
+    }
+
+    private fun numberField(value: Long, range: LongRange, width: Int = FIELD_W, apply: (Long) -> Unit) =
+        NumberField(font, width, value, range, apply)
+
+    private fun moveSpawn(x: Int = spawn.x, y: Int = spawn.y, z: Int = spawn.z) {
+        spawn = BlockPos(x, y, z)
+        WorldEditor.setSpawn(access, spawn)
+    }
+
+    /** Every `playerdata/<uuid>.dat` the save holds */
+    private fun playerRows(): List<ExtraSettingsList.Row> {
+        if (players.isEmpty()) return listOf(extraList.TextRow("No player data", "", onPress = null))
+        return players.map { player ->
+            val onStats: (() -> Unit)? = if (player.hasStats) ({ openPlayerStats(player) }) else null
+            extraList.TextRow(WorldPlayers.displayName(player.id), player.summary(), "Stats", onStats)
+        }
+    }
+
+    /**
+     * Vanilla's stats screen, rebuild to support server-less. Item-Cmps have to be bound for this
+     */
+    private fun openPlayerStats(player: WorldPlayers.PlayerData) {
+        val stats = WorldPlayers.readStats(access, player.id)
+        if (!ItemComponents.bound()) {
+            minecraft.gui.setScreen(GenericMessageScreen(Component.literal("Reading statistics…")))
+        }
+        ItemComponents.prepare { ok ->
+            if (!ok) {
+                minecraft.gui.setScreen(this)
+                return@prepare
+            }
+            val screen = StatsScreen(this, stats)
+            (screen as OfflineStatsScreen).worlds_useLocalStats()
+            minecraft.gui.setScreen(screen)
+        }
+    }
+
+    /**
+     * Vanilla's world creation rules screen over the save's own `game_rules.dat`.
+     */
+    private fun openGameRules() {
+        val features = WorldEditor.readFeatures(access)
+        val rules = WorldRules.readGameRules(access, features)
+        minecraft.gui.setScreen(
+            WorldCreationGameRulesScreen(rules) { result ->
+                result.ifPresent { WorldRules.writeGameRules(access, features, it) }
+                minecraft.gui.setScreen(this)
+            }
+        )
+    }
+
+    //
     // Data packs
     //
 
@@ -597,19 +745,8 @@ class WorldEditScreen(
         when (tab) {
             Tab.GENERAL -> drawCard(graphics, mouseX, mouseY)
             Tab.DATA_PACKS, Tab.RESOURCE_PACKS -> drawPackList(graphics, mouseX, mouseY)
-            else -> graphics.centeredText(
-                font, Component.literal("${tab.label} - coming soon"), width / 2, height / 2 - 10, 0xFFA0A0A0.toInt(),
-            )
+            Tab.EXTRA -> Unit
         }
-    }
-
-    private fun drawBox(graphics: GuiGraphicsExtractor, left: Int, top: Int, right: Int, bottom: Int) {
-        graphics.fill(left, top, right, bottom, 0x8D000000.toInt())
-        val border = 0xFF505050.toInt()
-        graphics.fill(left, top, right, top + 1, border)
-        graphics.fill(left, bottom - 1, right, bottom, border)
-        graphics.fill(left, top, left + 1, bottom, border)
-        graphics.fill(right - 1, top, right, bottom, border)
     }
 
     /**
@@ -833,10 +970,14 @@ class WorldEditScreen(
 
     override fun onClose() {
         commitEdit()
+        extraList.commitEdits()
         onDone()
     }
 
     private companion object {
+        val HORIZONTAL_RANGE = -30_000_000L..30_000_000L
+        val VERTICAL_RANGE = -2048L..2047L
+
         /** Height of [MenuTabBar] (its own private constant). */
         const val TAB_BAR_H = 24
         const val CARD_MAX_W = 360

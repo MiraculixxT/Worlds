@@ -6,6 +6,7 @@
   "mixins": [
   ],
   "client": [
+    "StatsScreenMixin",
     "WorldOpenFlowsMixin"
   ],
   "injectors": {

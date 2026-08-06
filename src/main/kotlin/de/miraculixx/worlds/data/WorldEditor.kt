@@ -7,10 +7,13 @@ import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.ListTag
 import net.minecraft.nbt.NbtOps
 import net.minecraft.nbt.StringTag
+import net.minecraft.core.BlockPos
 import net.minecraft.world.Difficulty
 import net.minecraft.world.flag.FeatureFlagSet
 import net.minecraft.world.flag.FeatureFlags
+import net.minecraft.world.level.GameType
 import net.minecraft.world.level.WorldDataConfiguration
+import net.minecraft.world.level.storage.LevelData
 import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
 import com.mojang.serialization.Dynamic
@@ -27,7 +30,15 @@ import javax.imageio.ImageIO
 object WorldEditor {
 
     /** The subset of `level.dat` this screen edits. */
-    data class LevelFacts(val name: String, val difficulty: Difficulty, val hardcore: Boolean)
+    data class LevelFacts(
+        val name: String,
+        val difficulty: Difficulty,
+        val hardcore: Boolean,
+        val allowCommands: Boolean,
+        val gameType: GameType,
+        val spawn: LevelData.RespawnData,
+        val gameTime: Long,
+    )
 
     fun readFacts(access: LevelStorageSource.LevelStorageAccess): LevelFacts {
         val data = readData(access)
@@ -37,6 +48,10 @@ object WorldEditor {
             difficulty = settings.getString("difficulty").orElse(null)
                 ?.let { Difficulty.byName(it) } ?: Difficulty.NORMAL,
             hardcore = settings.getBooleanOr("hardcore", false),
+            allowCommands = data.getBooleanOr("allowCommands", false),
+            gameType = GameType.byId(data.getIntOr("GameType", 0)),
+            spawn = data.read("spawn", LevelData.RespawnData.CODEC).orElse(LevelData.RespawnData.DEFAULT),
+            gameTime = data.getLongOr("Time", 0L),
         )
     }
 
@@ -45,6 +60,30 @@ object WorldEditor {
 
     fun setHardcore(access: LevelStorageSource.LevelStorageAccess, hardcore: Boolean) =
         modifySettings(access) { it.putBoolean("hardcore", hardcore) }
+
+    fun setAllowCommands(access: LevelStorageSource.LevelStorageAccess, value: Boolean) =
+        modifyData(access) { it.putBoolean("allowCommands", value) }
+
+    fun setGameType(access: LevelStorageSource.LevelStorageAccess, type: GameType) =
+        modifyData(access) { it.putInt("GameType", type.id) }
+
+    fun setGameTime(access: LevelStorageSource.LevelStorageAccess, ticks: Long) =
+        modifyData(access) { it.putLong("Time", ticks) }
+
+    /** Moves the spawn point, keeping the dimension and the spawn angle it already had. */
+    fun setSpawn(access: LevelStorageSource.LevelStorageAccess, pos: BlockPos) = modifyData(access) { data ->
+        val current = data.read("spawn", LevelData.RespawnData.CODEC).orElse(LevelData.RespawnData.DEFAULT)
+        val spawn = LevelData.RespawnData.of(current.dimension(), pos, current.yaw(), current.pitch())
+        data.store("spawn", LevelData.RespawnData.CODEC, spawn)
+    }
+
+    /** The save's own `enabled_features`, for anything that has to agree with them. */
+    fun readFeatures(access: LevelStorageSource.LevelStorageAccess): FeatureFlagSet = try {
+        readFeatures(readData(access))
+    } catch (e: Exception) {
+        Constants.LOG.warn("Failed to read features of {}: {}", access.levelId, e.message)
+        FeatureFlags.DEFAULT_FLAGS
+    }
 
     /** Rename the world itself. The save folder is left alone, as in vanilla. */
     fun rename(access: LevelStorageSource.LevelStorageAccess, name: String) {
@@ -88,29 +127,36 @@ object WorldEditor {
 
     /**
      * `MinecraftServer.configurePackRepository` drops an enabled pack again when its features are not
-     * a subset of `enabled_features`, so a feature pack needs its flags allowed here or it silently
-     * turns itself off on the next load. The set only ever grows — a world may already hold content
-     * from a flag, so this screen never takes one away.
+     * a subset of `enabled_features`. Can not be removed later without world break.
      */
     private fun mergeFeatures(data: CompoundTag, required: FeatureFlagSet) {
         if (required.isEmpty()) return
-        val key = WorldDataConfiguration.ENABLED_FEATURES_ID
-        val current = data.get(key)?.let { FeatureFlags.CODEC.parse(NbtOps.INSTANCE, it).result().orElse(null) }
-            ?: FeatureFlags.DEFAULT_FLAGS
+        val current = readFeatures(data)
         val merged = current.join(required)
         if (merged == current) return
-        FeatureFlags.CODEC.encodeStart(NbtOps.INSTANCE, merged).result().ifPresent { data.put(key, it) }
+        FeatureFlags.CODEC.encodeStart(NbtOps.INSTANCE, merged).result()
+            .ifPresent { data.put(WorldDataConfiguration.ENABLED_FEATURES_ID, it) }
     }
+
+    private fun readFeatures(data: CompoundTag): FeatureFlagSet =
+        data.get(WorldDataConfiguration.ENABLED_FEATURES_ID)
+            ?.let { FeatureFlags.CODEC.parse(NbtOps.INSTANCE, it).result().orElse(null) }
+            ?: FeatureFlags.DEFAULT_FLAGS
 
     private fun packList(ids: List<String>) = ListTag().apply { ids.forEach { add(StringTag.valueOf(it)) } }
 
-    private fun modifySettings(access: LevelStorageSource.LevelStorageAccess, updater: (CompoundTag) -> Unit) {
-        try {
-            val data = readData(access)
+    private fun modifySettings(access: LevelStorageSource.LevelStorageAccess, updater: (CompoundTag) -> Unit) =
+        modifyData(access) { data ->
             // getCompoundOrEmpty hands back a detached tag when the key is missing, so re-put it.
             val settings = data.getCompound("difficulty_settings").orElseGet { CompoundTag() }
             updater(settings)
             data.put("difficulty_settings", settings)
+        }
+
+    private fun modifyData(access: LevelStorageSource.LevelStorageAccess, updater: (CompoundTag) -> Unit) {
+        try {
+            val data = readData(access)
+            updater(data)
             access.saveLevelData(Dynamic(NbtOps.INSTANCE, data))
         } catch (e: Exception) {
             Constants.LOG.error("Failed to write level.dat of {}", access.levelId, e)
