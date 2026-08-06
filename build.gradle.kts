@@ -88,7 +88,7 @@ modrinth {
     outlet.mcVersionRange = properties["fabricSupportedVersions"] as String
     versionNumber.set(version as String)
     changelog.set(properties["changelog"] as String)
-    versionType.set("beta")
+    versionType.set("alpha")
 
 
     // Project sync
