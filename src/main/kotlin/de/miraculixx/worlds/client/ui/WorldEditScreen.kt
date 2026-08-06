@@ -282,6 +282,20 @@ class WorldEditScreen(
     private fun packRowAt(mx: Double, my: Double): Int =
         (0 until shownPackRows()).firstOrNull { (mx to my) in packRowRect(it) } ?: -1
 
+    private fun packHeader(): String = when (tab) {
+        // Count ignores bundled/feature packs
+        Tab.DATA_PACKS -> headerText("Data packs", packRows.count { it.group == WorldDataPacks.GROUP_FILE })
+        else -> headerText("Resource packs", resourceRows.size)
+    }
+
+    private fun headerText(what: String, own: Int) =
+        if (own == 0) "No ${what.lowercase()} installed" else "$what ($own)"
+
+    private fun packHeaderRect(): Rect {
+        val half = font.width(packHeader()) / 2
+        return Rect(width / 2 - half, cardY + CARD_PAD, width / 2 + half, cardY + CARD_PAD + font.lineHeight)
+    }
+
     private fun textX() = cardX + CARD_PAD + iconSize + 10
     private fun textWidth() = cardX + cardW - CARD_PAD - textX()
     private fun iconX() = cardX + CARD_PAD
@@ -410,16 +424,18 @@ class WorldEditScreen(
             .thenAcceptAsync({ minecraft.gui.setScreen(this) }, minecraft)
     }
 
-    private fun openBackupFolder() {
-        val path = minecraft.levelSource.backupPath
+    /** World pack folders are generated if not yet present (vanilla omits them sometimes?) */
+    private fun openFolder(path: Path) {
         try {
             FileUtil.createDirectoriesSafe(path)
         } catch (e: Exception) {
-            Constants.LOG.error("Could not create backup folder {}", path, e)
+            Constants.LOG.error("Could not create folder {}", path, e)
             return
         }
         Util.getPlatform().openPath(path)
     }
+
+    private fun openBackupFolder() = openFolder(minecraft.levelSource.backupPath)
 
     private fun openWorldFolder() = Util.getPlatform().openPath(saveDir)
 
@@ -580,13 +596,9 @@ class WorldEditScreen(
         super.extractRenderState(graphics, mouseX, mouseY, partialTick)
         when (tab) {
             Tab.GENERAL -> drawCard(graphics, mouseX, mouseY)
-            // The feature packs ship with the game, so the header only counts the save's own.
-            Tab.DATA_PACKS -> drawPackList(
-                graphics, mouseX, mouseY, "Data packs", packRows.count { it.group == WorldDataPacks.GROUP_FILE },
-            )
-            Tab.RESOURCE_PACKS -> drawPackList(graphics, mouseX, mouseY, "Resource packs", resourceRows.size)
+            Tab.DATA_PACKS, Tab.RESOURCE_PACKS -> drawPackList(graphics, mouseX, mouseY)
             else -> graphics.centeredText(
-                font, Component.literal("${tab.label} — coming soon"), width / 2, height / 2 - 10, 0xFFA0A0A0.toInt(),
+                font, Component.literal("${tab.label} - coming soon"), width / 2, height / 2 - 10, 0xFFA0A0A0.toInt(),
             )
         }
     }
@@ -603,13 +615,16 @@ class WorldEditScreen(
     /**
      * A list of all available packs. RPs are a simple folder walk, DPs also contain featured packs
      */
-    private fun drawPackList(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, what: String, own: Int) {
+    private fun drawPackList(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
         drawBox(graphics, cardX, cardY, cardX + cardW, listBottom())
         val rows = rows()
-        val header = if (own == 0) "No ${what.lowercase()} installed" else "$what ($own)"
-        graphics.centeredText(font, Component.literal(header), width / 2, cardY + CARD_PAD, 0xFFFFFFFF.toInt())
-
         val point = mouseX.toDouble() to mouseY.toDouble()
+        // Header links to folder (underline on hover)
+        val hoverHeader = point in packHeaderRect()
+        val header = Component.literal(packHeader())
+            .withStyle { if (hoverHeader) it.withUnderlined(true) else it }
+        graphics.centeredText(font, header, width / 2, cardY + CARD_PAD, 0xFFFFFFFF.toInt())
+
         val shown = shownPackRows()
         if (separated() && shown > firstGroup()) {
             val y = packRowsTop() + firstGroup() * packRowH() + SEPARATOR_H / 2
@@ -623,7 +638,7 @@ class WorldEditScreen(
             if (point in rect) graphics.fill(rect.x1, rect.y1, rect.x2, rect.y2, 0x30FFFFFF)
 
             drawToggle(graphics, toggle, row.enabled, point in toggle)
-            val textY = rect.y1 + (packRowH() - font.lineHeight) / 2
+            val textY = rect.y1 + (packRowH() - font.lineHeight) / 2 + 1
             val nameX = toggle.x2 + 6
             val nameEnd = if (row.deletable) delete.x1 - 4 else rect.x2 - 2
             graphics.text(
@@ -747,6 +762,14 @@ class WorldEditScreen(
 
     override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
         if ((tab == Tab.DATA_PACKS || tab == Tab.RESOURCE_PACKS) && event.button() == 0) {
+            if ((event.x() to event.y()) in packHeaderRect()) {
+                clickSound()
+                openFolder(
+                    if (tab == Tab.DATA_PACKS) WorldDataPacks.worldDir(access)
+                    else WorldResourcePacks.worldDir(access),
+                )
+                return true
+            }
             val index = packRowAt(event.x(), event.y())
             val row = rows().getOrNull(index)
             if (row != null) {
