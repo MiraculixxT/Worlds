@@ -4,19 +4,42 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.CycleButton
 import net.minecraft.client.gui.screens.Screen
+import net.minecraft.client.resources.language.I18n
+import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 
 /** How a map's supported versions are matched against the running MC version. */
-enum class VersionMode(val label: String) { EQUAL("Equal"), EQUAL_HIGHER("Equal & higher"), ALL("All") }
+enum class VersionMode {
+    EQUAL, EQUAL_HIGHER, ALL;
+
+    val label: String get() = I18n.get(
+        when (this) {
+            EQUAL -> "worlds.version_mode.equal"
+            EQUAL_HIGHER -> "worlds.version_mode.equal_higher"
+            ALL -> "gui.all"
+        }
+    )
+}
 
 /**
  * Sort key. Downloads/Date are descending by nature; [SortMode] pairs with a reverse toggle.
  * On the Installed tab, Date means *last played* and unmanaged worlds count as 0 downloads.
  */
-enum class SortMode(val label: String) { AZ("A → Z"), DOWNLOADS("Downloads"), DATE("Date") }
+enum class SortMode {
+    AZ, DOWNLOADS, DATE;
 
-/** Sentinel category meaning "no category filter". */
+    val label: String get() = when (this) {
+        AZ -> "A → Z"
+        DOWNLOADS -> I18n.get("worlds.downloads")
+        DATE -> I18n.get("worlds.date")
+    }
+}
+
+/** Sentinel category meaning "no category filter". Never shown; [categoryLabel] translates it. */
 const val ALL_CATEGORIES = "All"
+
+private fun categoryLabel(category: String): String =
+    if (category == ALL_CATEGORIES) I18n.get("gui.all") else CategoryBadge.label(category)
 
 /**
  * Filter popup: category (cycle), version match (cycle), sort key (cycle) and a reverse toggle.
@@ -30,11 +53,11 @@ class FilterScreen(
     private var sort: SortMode,
     private var reverse: Boolean,
     private val defaultSort: SortMode,
-) : Screen(Component.literal("Filters")) {
+) : Screen(Component.translatable("worlds.filter.title")) {
 
     private val panelW = 280
     private val ctrlW = 150
-    private val labels = ArrayList<Pair<String, Int>>()
+    private val labels = ArrayList<Pair<Component, Int>>()
     private var panelTop = 0
     private var panelBottom = 0
     private var dividerY = 0
@@ -46,19 +69,25 @@ class FilterScreen(
         var y = height / 2 - 66
         panelTop = y - 30
 
-        fun row(label: String) = (y).also { labels.add(label to it); y += 24 }
+        fun row(key: String) = (y).also { labels.add(Component.translatable(key) to it); y += 24 }
 
         val catValues = listOf(ALL_CATEGORIES) + categories
         if (category !in catValues) category = ALL_CATEGORIES
         addRenderableWidget(
-            CycleButton.builder({ Component.literal(it) }, category)
+            CycleButton.builder({ Component.literal(categoryLabel(it)) }, category)
                 .withValues(catValues)
-                .create(ctrlX, row("Category"), ctrlW, 20, Component.literal("Category")) { _, v -> category = v }
+                .create(
+                    ctrlX, row("worlds.filter.category"), ctrlW, 20,
+                    Component.translatable("worlds.filter.category"),
+                ) { _, v -> category = v }
         )
         addRenderableWidget(
             CycleButton.builder({ Component.literal(it.label) }, version)
                 .withValues(VersionMode.entries)
-                .create(ctrlX, row("MC version"), ctrlW, 20, Component.literal("Version")) { _, v -> version = v }
+                .create(
+                    ctrlX, row("worlds.filter.mc_version"), ctrlW, 20,
+                    Component.translatable("worlds.filter.mc_version"),
+                ) { _, v -> version = v }
         )
 
         // Divider between the filters (above) and the ordering controls (below).
@@ -67,11 +96,11 @@ class FilterScreen(
 
         // Sort key + a small square reverse toggle (↑ ascending / ↓ descending) to its right.
         val sortW = ctrlW - 24
-        val sortY = row("Sort by")
+        val sortY = row("worlds.filter.sort_by")
         addRenderableWidget(
             CycleButton.builder({ Component.literal(it.label) }, sort)
                 .withValues(SortMode.entries)
-                .create(ctrlX, sortY, sortW, 20, Component.literal("Sort")) { _, v -> sort = v }
+                .create(ctrlX, sortY, sortW, 20, Component.translatable("worlds.filter.sort_by")) { _, v -> sort = v }
         )
         reverseButton = addRenderableWidget(
             Button.builder(reverseArrow()) { toggleReverse() }
@@ -82,11 +111,11 @@ class FilterScreen(
         panelBottom = by + 28
         val px = width / 2 - panelW / 2
         addRenderableWidget(
-            Button.builder(Component.literal("Reset")) { resetAll() }
+            Button.builder(Component.translatable("controls.reset")) { resetAll() }
                 .bounds(px + 8, by, 80, 20).build()
         )
         addRenderableWidget(
-            Button.builder(Component.literal("Done")) { onClose() }
+            Button.builder(CommonComponents.GUI_DONE) { onClose() }
                 .bounds(px + panelW - 108, by, 100, 20).build()
         )
     }
@@ -125,7 +154,10 @@ class FilterScreen(
         graphics.fill(px, panelTop, px + 1, panelBottom, border)
         graphics.fill(pr - 1, panelTop, pr, panelBottom, border)
 
-        graphics.text(font, Component.literal("Filters").withStyle { it.withBold(true) }, px + 8, panelTop + 10, -1)
+        graphics.text(
+            font, Component.translatable("worlds.filter.title").withStyle { it.withBold(true) },
+            px + 8, panelTop + 10, -1,
+        )
         for ((label, y) in labels) {
             graphics.text(font, label, px + 8, y + 6, 0xFFC0C0C0.toInt())
         }

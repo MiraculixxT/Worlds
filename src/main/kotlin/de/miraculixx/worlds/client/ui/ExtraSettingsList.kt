@@ -132,11 +132,11 @@ class ExtraSettingsList(
     inner class TextRow(
         label: String,
         private val value: String,
-        buttonLabel: String = "Copy",
+        buttonKey: String = "worlds.copy",
         onPress: (() -> Unit)?,
     ) : Row(label, INDENT) {
         private val button = onPress?.let {
-            Button.builder(Component.literal(buttonLabel)) { _ -> it() }.bounds(0, 0, WIDGET_W, WIDGET_H).build()
+            Button.builder(Component.translatable(buttonKey)) { _ -> it() }.bounds(0, 0, WIDGET_W, WIDGET_H).build()
         }
 
         override fun widgets(): List<AbstractWidget> = listOfNotNull(button)

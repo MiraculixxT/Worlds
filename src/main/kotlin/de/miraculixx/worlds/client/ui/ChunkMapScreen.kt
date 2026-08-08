@@ -21,8 +21,10 @@ import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.renderer.RenderPipelines
+import net.minecraft.client.resources.language.I18n
 import net.minecraft.client.renderer.texture.DynamicTexture
 import net.minecraft.core.BlockPos
+import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
 import net.minecraft.world.level.ChunkPos
@@ -84,7 +86,7 @@ class ChunkMapScreen(
     private val access: LevelStorageSource.LevelStorageAccess,
     private val worldTime: Long,
     private val spawn: BlockPos,
-) : Screen(Component.literal("Chunk Map")) {
+) : Screen(Component.translatable("worlds.chunkmap.title")) {
 
     private val dimensions = ChunkRegions.dimensions(access)
     private var dimension = dimensions.firstOrNull()
@@ -136,30 +138,35 @@ class ChunkMapScreen(
         dimensionPicker = Dropdown(MARGIN, 6, DROPDOWN_W, dimensions, dim, { it.label }, ::switchDimension)
         addRenderableWidget(dimensionPicker.button)
         addRenderableWidget(
-            Button.builder(Component.literal("Reset View")) { resetView() }
+            Button.builder(Component.translatable("worlds.chunkmap.reset_view")) { resetView() }
                 .bounds(MARGIN + 146, 6, 84, 20).build()
         )
         addRenderableWidget(
-            Button.builder(Component.literal("Refresh")) { dimension?.let { loadDimension(it) } }
+            Button.builder(Component.translatable("selectServer.refresh")) { dimension?.let { loadDimension(it) } }
                 .bounds(MARGIN + 236, 6, 70, 20).build()
         )
 
-        val labels = listOf("Select All", "Invert", "Clear", "Trim…")
+        val bulk = listOf<Pair<String, () -> Unit>>(
+            "worlds.chunkmap.select_all" to ::selectAll,
+            "worlds.chunkmap.invert" to ::invertSelection,
+            "worlds.chunkmap.clear" to ::clearSelection,
+            "worlds.chunkmap.trim" to ::openTrim,
+        )
         val buttonW = 78
         var x = MARGIN
         val y = height - FOOTER_H + 6
-        labels.forEach { label ->
+        bulk.forEach { (key, action) ->
             addRenderableWidget(
-                Button.builder(Component.literal(label)) { onBulk(label) }.bounds(x, y, buttonW, 20).build()
+                Button.builder(Component.translatable(key)) { action() }.bounds(x, y, buttonW, 20).build()
             )
             x += buttonW + 4
         }
         deleteButton = addRenderableWidget(
-            Button.builder(Component.literal("Delete Selected")) { confirmDelete() }
+            Button.builder(Component.translatable("worlds.chunkmap.delete_selected")) { confirmDelete() }
                 .bounds(width - MARGIN - 190, y, 110, 20).build()
         )
         addRenderableWidget(
-            Button.builder(Component.literal("Done")) { onClose() }
+            Button.builder(CommonComponents.GUI_DONE) { onClose() }
                 .bounds(width - MARGIN - 76, y, 76, 20).build()
         )
         syncDeleteButton()
@@ -199,30 +206,26 @@ class ChunkMapScreen(
         }
     }
 
-    private fun onBulk(label: String) = when (label) {
-        "Select All" -> {
-            indices.values.forEach { ChunkRegions.forEachChunk(it) { pos -> selected.add(pos.pack()) } }
-            onSelectionChanged()
-        }
+    private fun selectAll() {
+        indices.values.forEach { ChunkRegions.forEachChunk(it) { pos -> selected.add(pos.pack()) } }
+        onSelectionChanged()
+    }
 
-        "Invert" -> {
-            val inverted = LongOpenHashSet()
-            indices.values.forEach {
-                ChunkRegions.forEachChunk(it) { pos ->
-                    if (!selected.contains(pos.pack())) inverted.add(pos.pack())
-                }
+    private fun invertSelection() {
+        val inverted = LongOpenHashSet()
+        indices.values.forEach {
+            ChunkRegions.forEachChunk(it) { pos ->
+                if (!selected.contains(pos.pack())) inverted.add(pos.pack())
             }
-            selected.clear()
-            selected.addAll(inverted)
-            onSelectionChanged()
         }
+        selected.clear()
+        selected.addAll(inverted)
+        onSelectionChanged()
+    }
 
-        "Clear" -> {
-            selected.clear()
-            onSelectionChanged()
-        }
-
-        else -> openTrim()
+    private fun clearSelection() {
+        selected.clear()
+        onSelectionChanged()
     }
 
     private fun openTrim() {
@@ -280,9 +283,9 @@ class ChunkMapScreen(
 
     private fun syncDeleteButton() {
         deleteButton.active = selected.isNotEmpty()
-        deleteButton.message = Component.literal(
-            if (selected.isEmpty()) "Delete Selected" else "Delete ${selected.size}"
-        )
+        deleteButton.message =
+            if (selected.isEmpty()) Component.translatable("worlds.chunkmap.delete_selected")
+            else Component.literal("${I18n.get("selectWorld.delete")} ${selected.size}")
     }
 
     /**
@@ -299,11 +302,9 @@ class ChunkMapScreen(
                     EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access)
                         .thenAcceptAsync({ runDelete(dim) }, minecraft)
                 },
-                Component.literal("Delete $count chunks"),
-                Component.literal(
-                    "'${dim.label}' regenerates these chunks on the next visit. Anything built is gone, and features on chunk boarders stay"
-                ),
-                Component.literal("Delete"),
+                Component.translatable("worlds.chunkmap.delete_title", count),
+                Component.translatable("worlds.chunkmap.delete_warning", dim.label),
+                Component.translatable("selectWorld.delete"),
                 false,
             )
         )
@@ -511,9 +512,9 @@ class ChunkMapScreen(
     private fun drawInfo(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
         val infoX = MARGIN + 312
         val summary = when {
-            dimension == null -> "No region files - old world format?"
-            loading -> "Reading regions…"
-            else -> "${indices.size} regions · $totalChunks chunks · ${bytes(totalBytes)}"
+            dimension == null -> I18n.get("worlds.chunkmap.no_regions")
+            loading -> I18n.get("worlds.chunkmap.reading")
+            else -> I18n.get("worlds.chunkmap.summary", indices.size, totalChunks, bytes(totalBytes))
         }
         graphics.text(font, summary, infoX, 12, -1)
 
@@ -529,13 +530,13 @@ class ChunkMapScreen(
         val blockPosZ = if (hovering) floor(blockZ(mouseY.toDouble())).toInt() else null
         var x = MARGIN + 6
         // Chunk and region are the block coords shifted, so they hide with it rather than freezing.
-        x = coordGroup(graphics, "Region", blockPosX?.shr(9), blockPosZ?.shr(9), REGION_EXTREME, x, textY)
-        x = coordGroup(graphics, "Chunk", blockPosX?.shr(4), blockPosZ?.shr(4), CHUNK_EXTREME, x, textY)
-        x = coordGroup(graphics, "Block", blockPosX, blockPosZ, BLOCK_EXTREME, x, textY)
+        x = coordGroup(graphics, "worlds.chunkmap.region", blockPosX?.shr(9), blockPosZ?.shr(9), REGION_EXTREME, x, textY)
+        x = coordGroup(graphics, "worlds.chunkmap.chunk", blockPosX?.shr(4), blockPosZ?.shr(4), CHUNK_EXTREME, x, textY)
+        x = coordGroup(graphics, "worlds.chunkmap.block", blockPosX, blockPosZ, BLOCK_EXTREME, x, textY)
 
         val progress = scanProgress
-        val hint = if (progress != null) "Scanning ${progress.first}/${progress.second} regions…"
-        else "Drag to pan · right-drag to select (shift removes) · scroll to zoom"
+        val hint = if (progress != null) I18n.get("worlds.chunkmap.scanning", progress.first, progress.second)
+        else I18n.get("worlds.chunkmap.hint")
         val hintX = width - MARGIN - 6 - font.width(hint)
         if (hintX > x) graphics.text(font, hint, hintX, textY, SUBTEXT_COLOR)
     }
@@ -544,10 +545,11 @@ class ChunkMapScreen(
      * One `<label>: <x>,<z>` group
      */
     private fun coordGroup(
-        graphics: GuiGraphicsExtractor, label: String, vx: Int?, vz: Int?, extreme: String, x: Int, y: Int,
+        graphics: GuiGraphicsExtractor, labelKey: String, vx: Int?, vz: Int?, extreme: String, x: Int, y: Int,
     ): Int {
-        graphics.text(font, "$label:", x, y, SUBTEXT_COLOR)
-        val valueX = x + font.width("$label:") + 4
+        val label = "${I18n.get(labelKey)}:"
+        graphics.text(font, label, x, y, SUBTEXT_COLOR)
+        val valueX = x + font.width(label) + 4
         graphics.text(font, "${vx ?: "–"},${vz ?: "–"}", valueX, y, -1)
         return valueX + font.width("$extreme,$extreme") + 14
     }
@@ -822,7 +824,7 @@ data class TrimCriteria(
 class ChunkTrimScreen(
     private val parent: ChunkMapScreen,
     private val onApply: (TrimCriteria) -> Unit,
-) : Screen(Component.literal("Select chunks")) {
+) : Screen(Component.translatable("worlds.trim.title")) {
 
     private val panelW = 300
     private var panelTop = 0
@@ -841,33 +843,34 @@ class ChunkTrimScreen(
         var y = height / 2 - 60
         panelTop = y - 26
 
-        fun row(label: String, value: String, onCheck: (Boolean) -> Unit): Pair<Checkbox, EditBox> {
+        fun row(key: String, value: String, onCheck: (Boolean) -> Unit): Pair<Checkbox, EditBox> {
+            val label = Component.translatable(key)
             val check = addRenderableWidget(
-                Checkbox.builder(Component.literal(label), font).pos(left, y).onValueChange { _, v -> onCheck(v) }.build()
+                Checkbox.builder(label, font).pos(left, y).onValueChange { _, v -> onCheck(v) }.build()
             )
-            val field = addRenderableWidget(EditBox(font, fieldX, y, 60, 20, Component.literal(label)))
+            val field = addRenderableWidget(EditBox(font, fieldX, y, 60, 20, label))
             field.value = value
             y += 26
             return check to field
         }
 
-        val inhabited = row("Played less than (minutes)", "5") {}
+        val inhabited = row("worlds.trim.inhabited", "5") {}
         inhabitedBox = inhabited.first
         inhabitedValue = inhabited.second
-        val stale = row("Not saved for (minutes)", "60") {}
+        val stale = row("worlds.trim.stale", "60") {}
         staleBox = stale.first
         staleValue = stale.second
-        val distance = row("Farther from spawn than (chunks)", "32") {}
+        val distance = row("worlds.trim.distance", "32") {}
         distanceBox = distance.first
         distanceValue = distance.second
 
         panelBottom = y + 40
         addRenderableWidget(
-            Button.builder(Component.literal("Select")) { apply() }
+            Button.builder(Component.translatable("mco.template.button.select")) { apply() }
                 .bounds(width / 2 - panelW / 2 + 10, y + 6, 130, 20).build()
         )
         addRenderableWidget(
-            Button.builder(Component.literal("Cancel")) { onClose() }
+            Button.builder(CommonComponents.GUI_CANCEL) { onClose() }
                 .bounds(width / 2 + panelW / 2 - 140, y + 6, 130, 20).build()
         )
     }
@@ -892,7 +895,7 @@ class ChunkTrimScreen(
     override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick)
         graphics.text(
-            font, Component.literal("Select chunks").withStyle { it.withBold(true) },
+            font, Component.translatable("worlds.trim.title").withStyle { it.withBold(true) },
             width / 2 - panelW / 2 + 10, panelTop + 9, -1,
         )
     }

@@ -25,7 +25,7 @@ class WorldsClient : ClientModInitializer {
             val by = slot?.y ?: 96
             val bw = slot?.width ?: 200
 
-            val button = Button.builder(Component.literal("Worlds")) {
+            val button = Button.builder(Component.translatable("worlds.menu.worlds")) {
                 Minecraft.getInstance().gui.setScreen(WorldsScreen(screen))
             }.bounds(bx, by, bw, 20).build()
 

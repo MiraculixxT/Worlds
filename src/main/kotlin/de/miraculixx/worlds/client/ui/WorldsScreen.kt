@@ -36,10 +36,12 @@ import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen
 import net.minecraft.client.gui.screens.worldselection.WorldSelectionList
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
+import net.minecraft.client.resources.language.I18n
 import net.minecraft.client.gui.components.tabs.Tab as GuiTab
 import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.locale.Language
 import net.minecraft.network.chat.ClickEvent
+import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.FormattedText
 import net.minecraft.network.chat.Style
@@ -54,13 +56,13 @@ import java.util.function.Consumer
 import kotlin.math.abs
 
 /** The in-game map browser: Installed / Browse tabs, list on the left, detail panel on the right. */
-class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worlds")) {
+class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable("worlds.menu.worlds")) {
 
-    private enum class Tab(val label: String) { INSTALLED("Installed"), BROWSE("Browse") }
+    private enum class Tab(val key: String) { INSTALLED("worlds.installed"), BROWSE("worlds.tab.browse") }
 
     private var tab = Tab.INSTALLED
 
-    private val tabPages = Tab.entries.map { GridLayoutTab(Component.literal(it.label)) }
+    private val tabPages = Tab.entries.map { GridLayoutTab(Component.translatable(it.key)) }
     private val tabManager = TabManager(
         { addRenderableWidget(it) },
         { removeWidget(it) },
@@ -156,12 +158,12 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         // Decided before to know the row width
         updateShown = ModUpdate.available
         refreshButton = addRenderableWidget(
-            Button.builder(Component.literal("Refresh")) { onRefresh() }
+            Button.builder(Component.translatable("selectServer.refresh")) { onRefresh() }
                 .bounds(rightRight - 70, searchY - 2, 70, 20).build()
         )
 
-        search = EditBox(font, leftLeft, searchY, searchWidth(), 16, Component.literal("Search"))
-        search.setHint(Component.literal("Search maps…"))
+        search = EditBox(font, leftLeft, searchY, searchWidth(), 16, Component.translatable("worlds.search"))
+        search.setHint(Component.translatable("worlds.search"))
         search.setResponder { onSearchChanged() }
         addRenderableWidget(search)
 
@@ -190,11 +192,11 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
         // The detail row is laid out every frame by layoutButtons
         primaryButton = addRenderableWidget(
-            Button.builder(Component.literal("Install")) { onPrimary() }
+            Button.builder(Component.translatable("worlds.install")) { onPrimary() }
                 .bounds(rightLeft, buttonsY, 60, 20).build()
         )
         editButton = addRenderableWidget(
-            Button.builder(Component.literal("Edit")) { withSelectedWorld(WorldActions::edit) }
+            Button.builder(Component.translatable("selectWorld.edit")) { withSelectedWorld(WorldActions::edit) }
                 .bounds(rightLeft, buttonsY, 60, 20).build()
         )
         deleteButton = addRenderableWidget(
@@ -202,23 +204,23 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 val entry = selected ?: return@builder
                 val folder = entry.installedFolder ?: return@builder
                 WorldActions.delete(folder, entry.title) { returnAndReload() }
-            }.tooltip(Tooltip.create(Component.literal("Delete world")))
+            }.tooltip(Tooltip.create(Component.translatable("worlds.tooltip.delete_world")))
                 .bounds(rightLeft, buttonsY, ICON_BTN, 20).build()
         )
         recreateButton = addRenderableWidget(
             Button.builder(Component.literal(ICON_RECREATE)) { withSelectedWorld(WorldActions::recreate) }
-                .tooltip(Tooltip.create(Component.literal("Re-create world")))
+                .tooltip(Tooltip.create(Component.translatable("worlds.tooltip.recreate_world")))
                 .bounds(rightLeft, buttonsY, ICON_BTN, 20).build()
         )
         // One link button: the source page (Modrinth/GitHub) is the website when present.
         websiteButton = addRenderableWidget(
-            Button.builder(Component.literal("Website")) { openUrl(selected?.linkUrl()) }
-                .tooltip(Tooltip.create(Component.literal("Website")))
+            Button.builder(Component.translatable(WEBSITE_KEY)) { openUrl(selected?.linkUrl()) }
+                .tooltip(Tooltip.create(Component.translatable(WEBSITE_KEY)))
                 .bounds(rightLeft, buttonsY, 60, 20).build()
         )
         trailerButton = addRenderableWidget(
-            Button.builder(Component.literal("Trailer")) { openUrl(selected?.trailerUrl) }
-                .tooltip(Tooltip.create(Component.literal("Trailer")))
+            Button.builder(Component.translatable(TRAILER_KEY)) { openUrl(selected?.trailerUrl) }
+                .tooltip(Tooltip.create(Component.translatable(TRAILER_KEY)))
                 .bounds(rightLeft, buttonsY, 60, 20).build()
         )
 
@@ -226,23 +228,23 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         addRenderableWidget(
             Button.builder(Component.literal("⏪")) {
                 minecraft.gui.setScreen(SelectWorldScreen(this))
-            }.tooltip(Tooltip.create(Component.literal("Back to vanilla menu")))
+            }.tooltip(Tooltip.create(Component.translatable("worlds.tooltip.back_to_vanilla")))
                 .bounds(leftLeft, height - 26, 20, 20).build()
         )
         addRenderableWidget(
             Button.builder(Component.literal("\uD83D\uDCC2")) {
                 Util.getPlatform().openPath(minecraft.gameDirectory.toPath().resolve("saves"))
-            }.tooltip(Tooltip.create(Component.literal("Open worlds folder")))
+            }.tooltip(Tooltip.create(Component.translatable("worlds.tooltip.open_saves_folder")))
                 .bounds(leftLeft + 22, height - 26, 20, 20).build()
         )
         addRenderableWidget(
             Button.builder(Component.literal("+")) {
                 CreateWorldScreen.openFresh(minecraft) { minecraft.gui.setScreen(this) }
-            }.tooltip(Tooltip.create(Component.literal("Create new world")))
+            }.tooltip(Tooltip.create(Component.translatable("worlds.tooltip.create_world")))
                 .bounds(leftLeft + 44, height - 26, 20, 20).build()
         )
         addRenderableWidget(
-            Button.builder(Component.literal("Done")) { onClose() }
+            Button.builder(CommonComponents.GUI_DONE) { onClose() }
                 .bounds(width - 108, height - 26, 100, 20).build()
         )
 
@@ -289,11 +291,13 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     private fun syncUpdateTooltip() {
         val latest = ModUpdate.latestVersion ?: return
         updateButton.setTooltip(
-            Tooltip.create(Component.literal("Outdated: ")
-                .append(Component.literal(ModUpdate.installedVersion ?: "unknown").withColor(TextColor.RED))
-                .append(Component.literal(" → "))
-                .append(Component.literal(latest).withColor(TextColor.GREEN))
-                .append(Component.literal(" (update now)"))
+            Tooltip.create(
+                Component.translatable(
+                    "worlds.update.tooltip",
+                    Component.literal(ModUpdate.installedVersion ?: I18n.get("selectWorld.versionUnknown"))
+                        .withColor(TextColor.RED),
+                    Component.literal(latest).withColor(TextColor.GREEN),
+                )
             )
         )
     }
@@ -354,7 +358,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     }
 
     private fun updateSourceTooltip() {
-        sourceButton.setTooltip(Tooltip.create(Component.literal("Source: ${browseSource.label}")))
+        sourceButton.setTooltip(Tooltip.create(Component.translatable("worlds.tooltip.source", browseSource.label)))
     }
 
     /**
@@ -385,7 +389,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     }
 
     private fun loadCurrentTab(force: Boolean = false) {
-        status = "Loading…"
+        status = I18n.get("worlds.status.loading")
         allEntries = emptyList()
         list.setEntries(emptyList())
         queryDueAt = 0L
@@ -408,8 +412,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                         source = meta?.source ?: MapSource.LOCAL,
                         title = installed.title,
                         description = meta?.description?.takeIf { it.isNotBlank() }
-                            ?: if (meta != null && meta.source != MapSource.LOCAL) "Installed • ${installed.saveFolder}"
-                            else "Local world • ${installed.saveFolder}",
+                            ?: "${I18n.get(if (meta != null && meta.source != MapSource.LOCAL) "worlds.installed" else "worlds.local_world")} • ${installed.saveFolder}",
                         iconUrl = installed.localIcon ?: meta?.icon,
                         mcVersions = listOfNotNull(installed.mcVersion),
                         // Worlds this mod didn't install carry no metadata
@@ -444,7 +447,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 loadedFilter = filter
                 browseHasMore = hasMore
                 status = if (entries.isEmpty()) {
-                    if (loadingTab == Tab.INSTALLED) "No maps installed yet." else "No maps found."
+                    if (loadingTab == Tab.INSTALLED) I18n.get("worlds.status.none_installed")
+                    else I18n.get("worlds.status.none_found")
                 } else null
                 // Resolving pendingSelectId has to wait for the list, so applyFilter does it.
                 applyFilter()
@@ -632,47 +636,60 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         val folder = entry.installedFolder ?: return entry.readmeMarkdown ?: entry.description
         val info = entry.worldInfo
         val flags = listOfNotNull(
-            "hardcore".takeIf { info?.hardcore == true },
-            "commands " + if (info?.allowCommands == true) "on" else "off",
+            I18n.get("worlds.fact.hardcore").takeIf { info?.hardcore == true },
+            I18n.get(if (info?.allowCommands == true) "worlds.fact.commands_on" else "worlds.fact.commands_off"),
         )
         // Two trailing spaces = Markdown hard break: one wrapped line apart, no paragraph gap.
         val md = StringBuilder()
-            .append("**Last Played:** ${lastPlayed(info?.lastPlayed ?: 0)}  \n")
-            .append("**Total Playtime:** ${playtime(info?.playTicks ?: 0)}  \n")
-            .append("**Version:** ${info?.mcVersion ?: "unknown"}  \n")
+            .append(fact("worlds.last_played", lastPlayed(info?.lastPlayed ?: 0)))
+            .append(fact("worlds.fact.total_playtime", playtime(info?.playTicks ?: 0)))
+            .append(fact("worlds.version", info?.mcVersion ?: I18n.get("selectWorld.versionUnknown")))
             .append(mapVersionRow(entry))
-            .append("**Difficulty:** ${difficultyName(info?.difficulty)} (${flags.joinToString(", ")})  \n")
-            .append("**Size:** ${worldSize(entry)}\n\n")
-            .append(packSection("Data Packs", info?.dataPacks?.filter { !it.contains("fabric-") } ?: emptyList()))
-            .append(packSection("Resource Packs", WorldResourcePacks.listPackNames(folder)))
+            .append(fact("options.difficulty", "${difficultyName(info?.difficulty)} (${flags.joinToString(", ")})"))
+            .append("**${I18n.get("worlds.fact.size")}:** ${worldSize(entry)}\n\n")
+            .append(
+                packSection(
+                    I18n.get("selectWorld.dataPacks"),
+                    info?.dataPacks?.filter { !it.contains("fabric-") } ?: emptyList(),
+                )
+            )
+            .append(packSection(I18n.get("worlds.resource_packs"), WorldResourcePacks.listPackNames(folder)))
 
         val readme = entry.readmeMarkdown?.takeIf { it.isNotBlank() && it.trim() != entry.description.trim() }
         if (readme != null) md.append("\n---\n\n").append(readme)
         return md.toString()
     }
 
+    /** One `**Label:** value` row, ending in a Markdown hard break. */
+    private fun fact(key: String, value: String): String = "**${I18n.get(key)}:** $value  \n"
+
     private fun mapVersionRow(entry: MapEntry): String {
         val installed = entry.version
         val latest = entry.latestVersion
         val value = when {
             !entry.updateAvailable -> installed ?: return ""
-            installed != null && latest != null -> "$installed → **$latest available**"
-            else -> "**update available**"
+            installed != null && latest != null -> "$installed → **$latest**"
+            else -> "**${I18n.get("worlds.update.available")}**"
         }
-        return "**Map Version:** $value  \n"
+        return fact("worlds.fact.map_version", value)
     }
 
     private fun packSection(title: String, names: List<String>): String =
-        "### **$title** (${names.size})\n" + (if (names.isEmpty()) "- *none*" else names.joinToString("\n") { "- $it" }) + "\n\n"
+        "### **$title** (${names.size})\n" +
+            (if (names.isEmpty()) "- *${I18n.get("gui.none")}*" else names.joinToString("\n") { "- $it" }) +
+            "\n\n"
 
-    private fun difficultyName(id: String?): String =
-        id?.replaceFirstChar { it.uppercase() } ?: "unknown"
+    /** Vanilla already ships a name per difficulty; an unknown id keeps its raw, capitalized form. */
+    private fun difficultyName(id: String?): String {
+        if (id == null) return I18n.get("selectWorld.versionUnknown")
+        return Language.getInstance().getOrDefault("options.difficulty.$id", id.replaceFirstChar { it.uppercase() })
+    }
 
     /** Save size, or a placeholder while the background walk in [onSelect] is still running. */
     private fun worldSize(entry: MapEntry): String {
         val bytes = entry.worldSizeBytes
         return when {
-            bytes < 0 -> "calculating…"
+            bytes < 0 -> I18n.get("worlds.calculating")
             bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1L shl 30).toDouble())
             bytes >= 1L shl 20 -> "%.1f MB".format(bytes / (1L shl 20).toDouble())
             else -> "%.0f KB".format(bytes / 1024.0)
@@ -681,7 +698,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
     /** Localized short date, matching the vanilla world list. 0 means the world was never opened. */
     private fun lastPlayed(epochMillis: Long): String {
-        if (epochMillis <= 0L) return "never"
+        if (epochMillis <= 0L) return I18n.get("worlds.never")
         return WorldSelectionList.DATE_FORMAT.format(
             ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault())
         )
@@ -690,7 +707,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
     /** World age in ticks as a coarse duration */
     private fun playtime(ticks: Long): String {
         val minutes = ticks / (20 * 60)
-        if (minutes <= 0) return "less than a minute"
+        if (minutes <= 0) return I18n.get("worlds.less_than_minute")
         val hours = minutes / 60
         val days = hours / 24
         return when {
@@ -712,13 +729,13 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             }
             return
         }
-        actionMessage = "Installing…"
+        actionMessage = I18n.get("worlds.status.installing")
         Constants.SCOPE.launch {
             val result = MapInstaller.install(entry)
             Minecraft.getInstance().execute {
                 when (result) {
                     is InstallResult.Success -> {
-                        actionMessage = "Installed to saves/${result.saveFolder}"
+                        actionMessage = "${I18n.get("worlds.installed")}: saves/${result.saveFolder}"
                         refreshInstalledIds()
                         // Jump to the Installed tab and select the freshly-installed map.
                         pendingSelectId = entry.id
@@ -781,7 +798,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
 
         val entry = selected
         if (entry == null) {
-            graphics.text(font, "Select a map to see details.", rightLeft, listTop + 4, 0xFFA0A0A0.toInt())
+            graphics.text(
+                font, Component.translatable("worlds.detail.hint"), rightLeft, listTop + 4, 0xFFA0A0A0.toInt(),
+            )
         } else {
             drawDetailHeader(graphics, entry)
             drawReadme(graphics, mouseX, mouseY)
@@ -810,7 +829,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
             refreshButton.message = Component.literal("${remaining / 1000 + 1}s")
         } else {
             refreshButton.active = true
-            refreshButton.message = Component.literal("Refresh")
+            refreshButton.message = Component.translatable("selectServer.refresh")
         }
         val isInstalledEntry = entry?.installedFolder != null
         primaryButton.visible = entry != null
@@ -822,11 +841,11 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         layoutButtons(isInstalledEntry)
         if (entry != null) {
             val alreadyInstalled = isInstalledEntry || entry.id in installedIds
-            primaryButton.message = Component.literal(
+            primaryButton.message = Component.translatable(
                 when {
-                    isInstalledEntry -> "Play"
-                    alreadyInstalled -> "Installed"
-                    else -> "Install"
+                    isInstalledEntry -> "mco.selectServer.play"
+                    alreadyInstalled -> "worlds.installed"
+                    else -> "worlds.install"
                 }
             )
             // Play stays clickable; a Browse map already in saves/ is disabled.
@@ -853,8 +872,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
                 // The last one absorbs the integer-division remainder so the row ends flush right.
                 place(button, x, if (i == visible.lastIndex) rightRight - x else each)
             }
-            websiteButton.message = Component.literal("Website")
-            trailerButton.message = Component.literal("Trailer")
+            websiteButton.message = Component.translatable(WEBSITE_KEY)
+            trailerButton.message = Component.translatable(TRAILER_KEY)
             return
         }
 
@@ -1175,11 +1194,14 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.literal("Worl
         var splitRatio: Float
             get() = WorldsConfig.settings.ratio
             set(value) { WorldsConfig.settings.ratio = value }
+        /** Vanilla ships both of these words; no need for our own key. */
+        const val WEBSITE_KEY = "known_server_link.website"
+        const val TRAILER_KEY = "mco.template.button.trailer"
         const val ICON_TRAILER = "📺"
         const val ICON_WEBSITE = "🌎"
         const val ICON_DELETE = "🗑"
         const val ICON_RECREATE = "♻"
-        const val UPDATE_LABEL = "Update"
+        val UPDATE_LABEL: String get() = I18n.get("worlds.update.label")
         const val ORB_SIZE = 8
         val UPDATE_ORB: Identifier = Identifier.withDefaultNamespace("icon/trial_available")
         val FILTER_INACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/inactive")

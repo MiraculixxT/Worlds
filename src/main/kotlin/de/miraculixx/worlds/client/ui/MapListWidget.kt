@@ -7,6 +7,7 @@ import net.minecraft.client.gui.components.ObjectSelectionList
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.client.gui.screens.worldselection.WorldSelectionList
+import net.minecraft.client.resources.language.I18n
 import net.minecraft.client.resources.sounds.SimpleSoundInstance
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
@@ -143,14 +144,14 @@ class MapListWidget(
 
         private fun infoLine(): String {
             val version = entry.displayVersion ?: "?"
-            val tail = if (canPlay()) "Last: ${lastPlayed(entry.dateEpoch)}"
-            else "Downloads: ${downloads(entry.downloads)}"
-            return "Version: $version | $tail"
+            val tail = if (canPlay()) "${I18n.get("worlds.last_played")}: ${lastPlayed(entry.dateEpoch)}"
+            else "${I18n.get("worlds.downloads")}: ${downloads(entry.downloads)}"
+            return "${I18n.get("worlds.version")}: $version | $tail"
         }
 
         /** Localized short date, matching the vanilla world list. 0 means the world was never opened. */
         private fun lastPlayed(epochMillis: Long): String {
-            if (epochMillis <= 0L) return "never"
+            if (epochMillis <= 0L) return I18n.get("worlds.never")
             return WorldSelectionList.DATE_FORMAT.format(
                 ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault())
             )

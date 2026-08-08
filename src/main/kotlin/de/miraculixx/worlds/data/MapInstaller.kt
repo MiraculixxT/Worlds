@@ -4,6 +4,7 @@ import com.mojang.serialization.Lifecycle
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
 import net.minecraft.client.Minecraft
+import net.minecraft.client.resources.language.I18n
 import net.minecraft.commands.Commands
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.NbtIo
@@ -44,15 +45,15 @@ object MapInstaller {
     fun install(entry: MapEntry): InstallResult {
         MapRepository.loadDetail(entry)
         val url = entry.downloadUrl
-            ?: return InstallResult.Failure("No downloadable world file found for '${entry.title}'.")
+            ?: return InstallResult.Failure(I18n.get("worlds.install.no_file", entry.title))
 
         val bytes = Http.getBytes(url)
-            ?: return InstallResult.Failure("Download failed for '${entry.title}'.")
+            ?: return InstallResult.Failure(I18n.get("worlds.install.download_failed", entry.title))
 
         val files = try {
             readZip(bytes)
         } catch (e: Exception) {
-            return InstallResult.Failure("Not a valid archive: ${e.message}")
+            return InstallResult.Failure(I18n.get("worlds.install.invalid_archive", e.message.orEmpty()))
         }
 
         val savesDir = Minecraft.getInstance().gameDirectory.toPath().resolve("saves")
@@ -63,7 +64,7 @@ object MapInstaller {
             .filter { it == "level.dat" || it.endsWith("/level.dat") }
             .minByOrNull { it.count { c -> c == '/' } }
             ?: return if (isDatapack(files)) installDatapack(entry, bytes, savesDir)
-            else InstallResult.Failure("'${entry.title}' is neither a world nor a datapack.")
+            else InstallResult.Failure(I18n.get("worlds.install.not_a_world", entry.title))
         val prefix = levelEntry.removeSuffix("level.dat") // "" or "world/" or "overrides/saves/world/"
 
         val target = uniqueFolder(savesDir, entry.title)
@@ -82,7 +83,7 @@ object MapInstaller {
             downloadExternalPacks(target, entry)
         } catch (e: Exception) {
             Constants.LOG.error("Install failed for {}", entry.title, e)
-            return InstallResult.Failure("Failed to write world: ${e.message}")
+            return InstallResult.Failure(I18n.get("worlds.install.write_failed", e.message.orEmpty()))
         }
 
         return InstallResult.Success(target.fileName.toString())
@@ -134,7 +135,7 @@ object MapInstaller {
             downloadExternalPacks(target, entry)
         } catch (e: Exception) {
             Constants.LOG.error("Datapack world creation failed for {}", entry.title, e)
-            return InstallResult.Failure("Failed to create world: ${e.message}")
+            return InstallResult.Failure(I18n.get("worlds.install.create_failed", e.message.orEmpty()))
         }
         return InstallResult.Success(target.fileName.toString())
     }

@@ -4,6 +4,7 @@ import de.miraculixx.worlds.data.MapRequirement
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
+import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 import net.minecraft.util.Util
 
@@ -17,7 +18,7 @@ class MissingModsScreen(
     private val mapTitle: String,
     private val missing: List<MapRequirement>,
     private val onJoin: () -> Unit,
-) : Screen(Component.literal("Missing mods")) {
+) : Screen(Component.translatable("worlds.missing_mods.title")) {
 
     override fun init() {
         val rowW = 300
@@ -28,7 +29,7 @@ class MissingModsScreen(
         for (req in missing) {
             val requirement = req
             addRenderableWidget(
-                Button.builder(Component.literal("Download")) { openUrl(downloadUrl(requirement)) }
+                Button.builder(Component.translatable("mco.brokenworld.download")) { openUrl(downloadUrl(requirement)) }
                     .bounds(rowX + rowW - dlW, y, dlW, 20).build()
             )
             y += 24
@@ -40,11 +41,11 @@ class MissingModsScreen(
         val bx = width / 2 - totalW / 2
         val by = height - 32
         addRenderableWidget(
-            Button.builder(Component.literal("Back")) { onClose() }
+            Button.builder(CommonComponents.GUI_BACK) { onClose() }
                 .bounds(bx, by, btnW, 20).build()
         )
         addRenderableWidget(
-            Button.builder(Component.literal("Ignore & Join")) {
+            Button.builder(Component.translatable("worlds.missing_mods.ignore")) {
                 onJoin()
             }.bounds(bx + btnW + gap, by, btnW, 20).build()
         )
@@ -55,14 +56,20 @@ class MissingModsScreen(
 
     override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick)
-        graphics.centeredText(font, Component.literal("Missing required mods").withStyle { it.withBold(true) }, width / 2, 18, 0xFFFF6B6B.toInt())
-        graphics.centeredText(font, "\"$mapTitle\" needs these mods, which are not installed:", width / 2, 34, 0xFFB0B0B0.toInt())
+        graphics.centeredText(
+            font, Component.translatable("worlds.missing_mods.title").withStyle { it.withBold(true) },
+            width / 2, 18, 0xFFFF6B6B.toInt(),
+        )
+        graphics.centeredText(
+            font, Component.translatable("worlds.missing_mods.subtitle", mapTitle),
+            width / 2, 34, 0xFFB0B0B0.toInt(),
+        )
 
         val rowW = 300
         val rowX = width / 2 - rowW / 2
         var y = listTop()
         for (req in missing) {
-            graphics.text(font, Component.literal("• ${req.name}"), rowX, y + 6, -1)
+            graphics.text(font, "• ${req.name}", rowX, y + 6, -1)
             req.modId?.let { graphics.text(font, it, rowX + 12, y + 6 + font.lineHeight + 1, 0xFF808080.toInt()) }
             y += 24
         }

@@ -8,6 +8,7 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import net.minecraft.SharedConstants
+import net.minecraft.client.resources.language.I18n
 
 
 val mcVersion: String get() = SharedConstants.getCurrentVersion().name()
@@ -16,16 +17,19 @@ val mcVersion: String get() = SharedConstants.getCurrentVersion().name()
  * Where a listing came from
  */
 @Serializable(with = MapSource.Serializer::class)
-enum class MapSource(val key: String, val label: String) {
+enum class MapSource(val key: String, private val brand: String? = null) {
     /** Queried straight from the Modrinth v2 API by the client. */
     MODRINTH("modrinth", "Modrinth"),
     /** Proxied through the backend (API key force) */
     CURSEFORGE("curseforge", "CurseForge"),
     /** Curated list bundled with the mod, for maps hosted anywhere else (mainly minecraftmaps.com scrape) */
-    MANUAL("manual", "Other"),
+    MANUAL("manual"),
     /** A save this mod did not install (never browsable) */
-    LOCAL("local", "Local"),
-    UNKNOWN("unknown", "Unknown");
+    LOCAL("local"),
+    UNKNOWN("unknown");
+
+    /** Platform names are proper nouns and stay as they are; the rest are translated. */
+    val label: String get() = brand ?: I18n.get("worlds.source.$key")
 
     companion object {
         fun of(key: String?): MapSource = entries.firstOrNull { it.key.equals(key, true) } ?: UNKNOWN

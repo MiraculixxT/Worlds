@@ -3,6 +3,8 @@ package de.miraculixx.worlds.client.ui
 import de.miraculixx.worlds.data.InstalledMap
 import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.resources.language.I18n
+import net.minecraft.locale.Language
 
 /** Renders a map's main category as a small colored pill (ModMenu-style tag next to the title). */
 object CategoryBadge {
@@ -26,7 +28,7 @@ object CategoryBadge {
     private const val PAD_X = 4
 
     /** Amber pill on an Installed row whose map has a newer version in the cached index. */
-    private const val UPDATE_LABEL = "Update"
+    private val updateLabel: String get() = I18n.get("worlds.update.label")
     private const val UPDATE_COLOR = 0xFFFFC107.toInt()
 
     fun color(category: String): Int = COLORS[category.lowercase()] ?: 0xFF5A5A5A.toInt()
@@ -34,13 +36,13 @@ object CategoryBadge {
     /** Pixel width a badge for [category] would occupy (so callers can reserve space / trim). */
     fun width(font: Font, category: String): Int = font.width(label(category)) + PAD_X * 2
 
-    fun updateWidth(font: Font): Int = font.width(UPDATE_LABEL) + PAD_X * 2
+    fun updateWidth(font: Font): Int = font.width(updateLabel) + PAD_X * 2
 
     fun draw(graphics: GuiGraphicsExtractor, font: Font, category: String, x: Int, y: Int): Int =
         pill(graphics, font, label(category), color(category), x, y)
 
     fun drawUpdate(graphics: GuiGraphicsExtractor, font: Font, x: Int, y: Int): Int =
-        pill(graphics, font, UPDATE_LABEL, UPDATE_COLOR, x, y)
+        pill(graphics, font, updateLabel, UPDATE_COLOR, x, y)
 
     /**
      * Draw the pill
@@ -70,5 +72,7 @@ object CategoryBadge {
         return (argb and 0xFF000000.toInt()) or (r shl 16) or (g shl 8) or b
     }
 
-    private fun label(category: String): String = category.replaceFirstChar { it.uppercase() }
+    /** Translated name, falling back to the raw slug for a category we do not ship a key for. */
+    fun label(category: String): String = Language.getInstance()
+        .getOrDefault("worlds.category.${category.lowercase()}", category.replaceFirstChar { it.uppercase() })
 }

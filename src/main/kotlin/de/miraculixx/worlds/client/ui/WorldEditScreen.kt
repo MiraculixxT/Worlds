@@ -32,6 +32,7 @@ import net.minecraft.client.gui.screens.worldselection.OptimizeWorldScreen
 import net.minecraft.client.gui.screens.worldselection.WorldCreationGameRulesScreen
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
+import net.minecraft.client.resources.language.I18n
 import net.minecraft.client.resources.sounds.SimpleSoundInstance
 import net.minecraft.sounds.SoundEvents
 import net.minecraft.client.gui.components.tabs.Tab as GuiTab
@@ -69,15 +70,18 @@ internal fun drawBox(graphics: GuiGraphicsExtractor, left: Int, top: Int, right:
 class WorldEditScreen(
     private val access: LevelStorageSource.LevelStorageAccess,
     private val onDone: () -> Unit,
-) : Screen(Component.literal("Edit World")) {
+) : Screen(Component.translatable("worlds.edit.title")) {
 
-    private enum class Tab(val label: String) {
-        GENERAL("General"), RESOURCE_PACKS("Resource Packs"), DATA_PACKS("Data Packs"), EXTRA("Extra")
+    private enum class Tab(val key: String) {
+        GENERAL("stat.generalButton"),
+        RESOURCE_PACKS("worlds.resource_packs"),
+        DATA_PACKS("selectWorld.dataPacks"),
+        EXTRA("worlds.edit.tab.extra"),
     }
 
     private var tab = Tab.GENERAL
 
-    private val tabPages = Tab.entries.map { GridLayoutTab(Component.literal(it.label)) }
+    private val tabPages = Tab.entries.map { GridLayoutTab(Component.translatable(it.key)) }
     private val tabManager = TabManager(
         { addRenderableWidget(it) },
         { removeWidget(it) },
@@ -113,10 +117,10 @@ class WorldEditScreen(
 
     /** Not rebuilt in [init] to avoid auto-collapse */
     private val categories = listOf(
-        ExtraCategory("World Settings"),
-        ExtraCategory("Players"),
-        ExtraCategory("Game Rules") { openGameRules() },
-        ExtraCategory("Chunk Map") { openChunkMap() },
+        ExtraCategory(I18n.get("worlds.extra.world_settings")),
+        ExtraCategory(I18n.get("mco.configure.world.buttons.players")),
+        ExtraCategory(I18n.get("selectWorld.gameRules")) { openGameRules() },
+        ExtraCategory(I18n.get("worlds.chunkmap.title")) { openChunkMap() },
     )
 
     /** The two pack tabs' lists, re-read whenever they or a picker writes to the save. */
@@ -180,8 +184,18 @@ class WorldEditScreen(
         rowW = cardW * 3 / 4
         rowX = (width - rowW) / 2
 
-        titleBox = general(EditBox(font, textX(), cardY + CARD_PAD, textWidth(), TITLE_H, Component.literal("Name")))
-        descBox = general(EditBox(font, textX(), cardY + descTop, textWidth(), TITLE_H, Component.literal("Description")))
+        titleBox = general(
+            EditBox(
+                font, textX(), cardY + CARD_PAD, textWidth(), TITLE_H,
+                Component.translatable("selectWorld.enterName"),
+            )
+        )
+        descBox = general(
+            EditBox(
+                font, textX(), cardY + descTop, textWidth(), TITLE_H,
+                Component.translatable("mco.backup.entry.description"),
+            )
+        )
         titleBox.setMaxLength(64)
         descBox.setMaxLength(160)
         titleBox.visible = false
@@ -192,7 +206,7 @@ class WorldEditScreen(
         general(
             CycleButton.builder({ d: Difficulty -> d.displayName }, difficulty)
                 .withValues(Difficulty.entries)
-                .create(rowX, y, wideW, 20, Component.literal("Difficulty")) { _, v ->
+                .create(rowX, y, wideW, 20, Component.translatable("options.difficulty")) { _, v ->
                     difficulty = v
                     WorldEditor.setDifficulty(access, v)
                 }
@@ -209,7 +223,7 @@ class WorldEditScreen(
         )
         general(
             Button.builder(Component.literal(ICON_FOLDER)) { openWorldFolder() }
-                .tooltip(Tooltip.create(Component.literal("Open world folder")))
+                .tooltip(Tooltip.create(Component.translatable("worlds.tooltip.open_world_folder")))
                 .bounds(rowX + rowW - ICON_BTN, y, ICON_BTN, 20).build()
         )
 
@@ -227,13 +241,13 @@ class WorldEditScreen(
 
         dataPackWidgets.add(
             addRenderableWidget(
-                Button.builder(Component.literal("Select Data Packs…")) { openDataPackSelection() }
+                Button.builder(Component.translatable("dataPack.title")) { openDataPackSelection() }
                     .bounds(rowX, listBottom() + 10, rowW, 20).build()
             )
         )
         resourcePackWidgets.add(
             addRenderableWidget(
-                Button.builder(Component.literal("Select Resource Packs…")) { openResourcePackSelection() }
+                Button.builder(Component.translatable("resourcePack.title")) { openResourcePackSelection() }
                     .bounds(rowX, listBottom() + 10, rowW, 20).build()
             )
         )
@@ -340,12 +354,14 @@ class WorldEditScreen(
 
     private fun packHeader(): String = when (tab) {
         // Count ignores bundled/feature packs
-        Tab.DATA_PACKS -> headerText("Data packs", packRows.count { it.group == WorldDataPacks.GROUP_FILE })
-        else -> headerText("Resource packs", resourceRows.size)
+        Tab.DATA_PACKS -> headerText(Tab.DATA_PACKS.key, packRows.count { it.group == WorldDataPacks.GROUP_FILE })
+        else -> headerText(Tab.RESOURCE_PACKS.key, resourceRows.size)
     }
 
-    private fun headerText(what: String, own: Int) =
-        if (own == 0) "No ${what.lowercase()} installed" else "$what ($own)"
+    private fun headerText(nameKey: String, own: Int): String {
+        val name = I18n.get(nameKey)
+        return if (own == 0) I18n.get("worlds.packs.none", name) else "$name ($own)"
+    }
 
     private fun packHeaderRect(): Rect {
         val half = font.width(packHeader()) / 2
@@ -456,7 +472,9 @@ class WorldEditScreen(
                 val filters = stack.mallocPointer(1)
                 filters.put(stack.UTF8("*.png"))
                 filters.flip()
-                TinyFileDialogs.tinyfd_openFileDialog("Choose world icon", null, filters, "PNG image", false)
+                TinyFileDialogs.tinyfd_openFileDialog(
+                    I18n.get("worlds.edit.icon_dialog"), null, filters, I18n.get("worlds.edit.icon_filter"), false,
+                )
             } ?: return@launch
             val bytes = try {
                 Files.readAllBytes(Path.of(picked))
@@ -534,19 +552,23 @@ class WorldEditScreen(
     private fun worldSettingRows(): List<ExtraSettingsList.Row> {
         val seedValue = seed
         return listOf(
-            extraList.TextRow("Seed", seedValue?.toString() ?: "unknown", onPress = seedValue?.let {
-                { minecraft.keyboardHandler.setClipboard(it.toString()) }
-            }),
-            extraList.ToggleRow("Cheats", allowCommands) {
+            extraList.TextRow(
+                I18n.get("mco.backup.entry.seed"),
+                seedValue?.toString() ?: I18n.get("selectWorld.versionUnknown"),
+                onPress = seedValue?.let { { minecraft.keyboardHandler.setClipboard(it.toString()) } },
+            ),
+            extraList.ToggleRow(I18n.get("selectWorld.allowCommands"), allowCommands) {
                 allowCommands = it
                 WorldEditor.setAllowCommands(access, it)
             },
-            extraList.CycleRow("Default Game Mode", GameType.entries, gameType, GameType::getShortDisplayName) {
+            extraList.CycleRow(
+                I18n.get("selectWorld.gameMode"), GameType.entries, gameType, GameType::getShortDisplayName,
+            ) {
                 gameType = it
                 WorldEditor.setGameType(access, it)
             },
             extraList.NumberRow(
-                "World Spawn",
+                I18n.get("worlds.setting.world_spawn"),
                 listOf(
                     numberField(spawn.x.toLong(), HORIZONTAL_RANGE) { moveSpawn(x = it.toInt()) },
                     numberField(spawn.y.toLong(), VERTICAL_RANGE) { moveSpawn(y = it.toInt()) },
@@ -554,7 +576,7 @@ class WorldEditScreen(
                 ),
             ),
             extraList.NumberRow(
-                "World Ticks",
+                I18n.get("worlds.setting.world_ticks"),
                 listOf(numberField(gameTime, 0..Long.MAX_VALUE, WIDGET_W) {
                     gameTime = it
                     WorldEditor.setGameTime(access, it)
@@ -573,10 +595,14 @@ class WorldEditScreen(
 
     /** Every `playerdata/<uuid>.dat` the save holds */
     private fun playerRows(): List<ExtraSettingsList.Row> {
-        if (players.isEmpty()) return listOf(extraList.TextRow("No player data", "", onPress = null))
+        if (players.isEmpty()) {
+            return listOf(extraList.TextRow(I18n.get("worlds.players.none"), "", onPress = null))
+        }
         return players.map { player ->
             val onStats: (() -> Unit)? = if (player.hasStats) ({ openPlayerStats(player) }) else null
-            extraList.TextRow(WorldPlayers.displayName(player.id), player.summary(), "Stats", onStats)
+            extraList.TextRow(
+                WorldPlayers.displayName(player.id), player.summary(), "gui.stats", onStats,
+            )
         }
     }
 
@@ -586,7 +612,7 @@ class WorldEditScreen(
     private fun openPlayerStats(player: WorldPlayers.PlayerData) {
         val stats = WorldPlayers.readStats(access, player.id)
         if (!ItemComponents.bound()) {
-            minecraft.gui.setScreen(GenericMessageScreen(Component.literal("Reading statistics…")))
+            minecraft.gui.setScreen(GenericMessageScreen(Component.translatable("worlds.edit.reading_stats")))
         }
         ItemComponents.prepare { ok ->
             if (!ok) {
@@ -687,8 +713,8 @@ class WorldEditScreen(
                     if (confirmed) deletePack(resource, row)
                     minecraft.gui.setScreen(this)
                 },
-                Component.literal(if (resource) "Delete resource pack" else "Delete data pack"),
-                Component.literal("Delete '${row.name}§r' from '$levelName§r'?"),
+                Component.translatable("worlds.edit.delete_pack"),
+                Component.translatable("worlds.edit.delete_pack_question", row.name, levelName),
                 CommonComponents.GUI_PROCEED,
                 CommonComponents.GUI_CANCEL,
             )
@@ -710,7 +736,7 @@ class WorldEditScreen(
     private fun syncHardcoreTooltip() {
         hardcoreButton.setTooltip(
             Tooltip.create(
-                Component.literal(if (hardcore) "Hardcore: on (click to disable)" else "Hardcore: off (click to enable)")
+                Component.translatable(if (hardcore) "worlds.edit.hardcore_on" else "worlds.edit.hardcore_off")
             )
         )
     }
@@ -728,7 +754,7 @@ class WorldEditScreen(
                     minecraft.gui.setScreen(this)
                 },
                 Component.translatable("selectWorld.gameMode.hardcore"),
-                Component.literal("Enable hardcore for '$levelName'? Dying will lock the world."),
+                Component.translatable("worlds.edit.hardcore_question", levelName),
                 CommonComponents.GUI_PROCEED,
                 CommonComponents.GUI_CANCEL,
             )
@@ -799,7 +825,7 @@ class WorldEditScreen(
         if (rows.size > shown) {
             val rect = packRowRect(shown)
             graphics.text(
-                font, "…and ${rows.size - shown} more", rect.x1 + 2,
+                font, I18n.get("worlds.packs.more", rows.size - shown), rect.x1 + 2,
                 rect.y1 + (packRowH() - font.lineHeight) / 2, SUBTEXT_COLOR,
             )
         }
@@ -838,7 +864,7 @@ class WorldEditScreen(
         }
         if (!descBox.visible) {
             // Both detail lines carry the description; an empty one invites the click instead.
-            val lines = if (description.isBlank()) listOf(EMPTY_DESCRIPTION)
+            val lines = if (description.isBlank()) listOf(I18n.get("worlds.edit.empty_description"))
             else clampLines(description, tw, DESC_LINES)
             val color = if (description.isBlank()) 0xFF707070.toInt() else SUBTEXT_COLOR
             lines.forEachIndexed { i, line ->
@@ -1000,7 +1026,6 @@ class WorldEditScreen(
         const val SEPARATOR_H = 7
         const val SUBTEXT_COLOR = -8355712
         const val ICON_HOVER_OVERLAY = -1601138544
-        const val EMPTY_DESCRIPTION = "Click to add a description…"
         const val ICON_FOLDER = "📂"
         const val ICON_BACKUP = "\uD83D\uDDD0"
         const val ICON_RESET = "🗑"

@@ -3,6 +3,7 @@ package de.miraculixx.worlds.data
 import de.miraculixx.worlds.Constants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import net.minecraft.client.resources.language.I18n
 import net.minecraft.core.registries.Registries
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.LongTag
@@ -65,8 +66,11 @@ object ChunkRegions {
                 found.putIfAbsent(normalized, WorldDimension(key, label, normalized))
             }
         }
-        listOf(Level.OVERWORLD to "Overworld", Level.NETHER to "Nether", Level.END to "The End")
-            .forEach { (key, label) -> offer(key, label, access.getDimensionPath(key)) }
+        listOf(
+            Level.OVERWORLD to "worlds.dimension.overworld",
+            Level.NETHER to "worlds.dimension.nether",
+            Level.END to "worlds.dimension.end",
+        ).forEach { (key, label) -> offer(key, I18n.get(label), access.getDimensionPath(key)) }
         val custom = access.getLevelPath(LevelResource.ROOT).resolve("dimensions")
         if (Files.isDirectory(custom)) {
             Files.newDirectoryStream(custom).use { namespaces ->
