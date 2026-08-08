@@ -25,6 +25,11 @@ This is an attempt to use Modrinth to bring back the good times of adventure/cus
   - Bundled resourcepacks, datapacks & required mods
   - Playtime, last played
   - Total disk size
+- Advanced world editing screen
+  - Simple metadata, backups & optimizing worlds
+  - Data-/resource-pack management
+  - GUI driven gamerule, player & scoreboard management
+  - Full MCASelector like Chunk-Manager (overview + trimming)
 
 I'm glad over any feedback how to improve the flow for adventure maps even more!<br>
 What do you miss?

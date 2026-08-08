@@ -116,6 +116,7 @@ class WorldEditScreen(
         ExtraCategory("World Settings"),
         ExtraCategory("Players"),
         ExtraCategory("Game Rules") { openGameRules() },
+        ExtraCategory("Chunk Map") { openChunkMap() },
     )
 
     /** The two pack tabs' lists, re-read whenever they or a picker writes to the save. */
@@ -610,6 +611,11 @@ class WorldEditScreen(
                 minecraft.gui.setScreen(this)
             }
         )
+    }
+
+    private fun openChunkMap() {
+        extraList.commitEdits()
+        minecraft.gui.setScreen(ChunkMapScreen(this, access, gameTime, spawn))
     }
 
     //
