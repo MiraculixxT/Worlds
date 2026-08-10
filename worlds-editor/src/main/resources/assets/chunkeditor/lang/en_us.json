@@ -18,6 +18,7 @@
   "chunkeditor.map.chunk": "Chunk",
   "chunkeditor.map.block": "Block",
   "chunkeditor.map.scanning": "Scanning %s/%s regions…",
+  "chunkeditor.map.biomes": "Loading biome colors…",
   "chunkeditor.map.hint": "Drag to pan · right-drag to select (shift removes) · scroll to zoom",
   "chunkeditor.trim.title": "Select chunks",
   "chunkeditor.trim.inhabited": "Played less than (minutes)",

@@ -2,6 +2,7 @@ package de.miraculixx.chunkeditor.client.ui
 
 import com.mojang.blaze3d.platform.NativeImage
 import de.miraculixx.chunkeditor.Constants
+import de.miraculixx.chunkeditor.data.BiomeTints
 import de.miraculixx.chunkeditor.data.ChunkFacts
 import de.miraculixx.chunkeditor.data.ChunkMapRenderer
 import de.miraculixx.chunkeditor.data.ChunkRegions
@@ -129,6 +130,10 @@ internal class ChunkMapScreen(
     private var scanJob: Job? = null
     private var scanProgress: Pair<Int, Int>? = null
 
+    private var tints: BiomeTints? = null
+    private var tintsLoading = false
+    private var tintsDone = false
+
     private lateinit var deleteButton: Button
     private lateinit var dimensionPicker: Dropdown<WorldDimension>
 
@@ -139,6 +144,7 @@ internal class ChunkMapScreen(
             centerZ = spawn.z.toDouble()
             loadDimension(dim)
         }
+        loadTints()
 
         dimensionPicker = Dropdown(MARGIN, 6, DROPDOWN_W, dimensions, dim, { it.label }, ::switchDimension)
         addRenderableWidget(dimensionPicker.button)
@@ -207,6 +213,25 @@ internal class ChunkMapScreen(
                 totalBytes = read.sumOf { it.bytes }
                 loading = false
                 syncDeleteButton()
+            }
+        }
+    }
+
+    private fun loadTints() {
+        if (tintsLoading || tintsDone) return
+        tintsLoading = true
+        Constants.SCOPE.launch {
+            val loaded = BiomeTints.load(access)
+            minecraft.execute {
+                tintsLoading = false
+                tintsDone = true
+                if (loaded == null) return@execute
+                tints = loaded
+                loadGen++
+                rendering.clear()
+                coarseRendering.clear()
+                terrain.releaseAll()
+                coarse.releaseAll()
             }
         }
     }
@@ -540,8 +565,11 @@ internal class ChunkMapScreen(
         x = coordGroup(graphics, "chunkeditor.map.block", blockPosX, blockPosZ, BLOCK_EXTREME, x, textY)
 
         val progress = scanProgress
-        val hint = if (progress != null) I18n.get("chunkeditor.map.scanning", progress.first, progress.second)
-        else I18n.get("chunkeditor.map.hint")
+        val hint = when {
+            progress != null -> I18n.get("chunkeditor.map.scanning", progress.first, progress.second)
+            tintsLoading -> I18n.get("chunkeditor.map.biomes")
+            else -> I18n.get("chunkeditor.map.hint")
+        }
         val hintX = width - MARGIN - 6 - font.width(hint)
         if (hintX > x) graphics.text(font, hint, hintX, textY, SUBTEXT_COLOR)
     }
@@ -611,7 +639,7 @@ internal class ChunkMapScreen(
         if (!rendering.add(regionKey)) return
         val generation = loadGen
         Constants.SCOPE.launch {
-            val rendered = ChunkMapRenderer.renderRegion(dim, region.rx, region.rz)
+            val rendered = ChunkMapRenderer.renderRegion(dim, region.rx, region.rz, tints = tints)
             minecraft.execute {
                 // A region that cannot be rendered at all keeps its in-flight marker
                 if (rendered != null) rendering.remove(regionKey)
@@ -635,7 +663,7 @@ internal class ChunkMapScreen(
         coarseJobs++
         val generation = loadGen
         Constants.SCOPE.launch {
-            val rendered = ChunkMapRenderer.renderRegion(dim, region.rx, region.rz, COARSE_STEP)
+            val rendered = ChunkMapRenderer.renderRegion(dim, region.rx, region.rz, COARSE_STEP, tints)
             minecraft.execute {
                 coarseJobs--
                 if (rendered != null) coarseRendering.remove(regionKey)

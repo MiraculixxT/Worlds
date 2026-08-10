@@ -18,6 +18,7 @@
   "chunkeditor.map.chunk": "Chunk",
   "chunkeditor.map.block": "Block",
   "chunkeditor.map.scanning": "Scanne %s/%s Regionen…",
+  "chunkeditor.map.biomes": "Lade Biomfarben…",
   "chunkeditor.map.hint": "Ziehen zum Verschieben · Rechtsziehen zum Auswählen (Umschalt entfernt) · Scrollen zum Zoomen",
   "chunkeditor.trim.title": "Chunks auswählen",
   "chunkeditor.trim.inhabited": "Weniger gespielt als (Minuten)",
