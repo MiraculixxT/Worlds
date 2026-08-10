@@ -17,3 +17,9 @@ modPublish {
     changelog.set(property("chunkEditorChangelog") as String)
     readme.set(layout.projectDirectory.file("README.md"))
 }
+
+modrinth {
+    dependencies {
+        optional.project(property("worldsModrinthId") as String)
+    }
+}
