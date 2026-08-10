@@ -223,15 +223,9 @@ internal class ChunkMapScreen(
         Constants.SCOPE.launch {
             val loaded = BiomeTints.load(access)
             minecraft.execute {
+                tints = loaded
                 tintsLoading = false
                 tintsDone = true
-                if (loaded == null) return@execute
-                tints = loaded
-                loadGen++
-                rendering.clear()
-                coarseRendering.clear()
-                terrain.releaseAll()
-                coarse.releaseAll()
             }
         }
     }
@@ -468,7 +462,7 @@ internal class ChunkMapScreen(
      * Queues overview renders for the visible regions that have none, a few at a time
      */
     private fun pumpCoarse(visible: List<RegionIndex>) {
-        if (visible.size > OVERLAY_CACHE) return
+        if (!tintsDone || visible.size > OVERLAY_CACHE) return
         for (region in visible) {
             if (coarseJobs >= MAX_COARSE_JOBS) return
             val regionKey = key(region.rx, region.rz)
@@ -634,6 +628,7 @@ internal class ChunkMapScreen(
     }
 
     private fun requestTerrain(region: RegionIndex) {
+        if (!tintsDone) return
         val dim = dimension ?: return
         val regionKey = key(region.rx, region.rz)
         if (!rendering.add(regionKey)) return
