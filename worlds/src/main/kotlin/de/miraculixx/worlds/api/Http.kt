@@ -89,9 +89,11 @@ object Http {
     }
 
     /**
-     * GET the URL straight into [dest], never holding the body in memory
+     * GET the URL straight into [dest], never holding the body in memory.
      */
-    fun download(url: String, dest: Path, maxBytes: Long = MAX_DOWNLOAD_BYTES): Boolean = try {
+    fun download(
+        url: String, dest: Path, maxBytes: Long = MAX_DOWNLOAD_BYTES, onProgress: ((done: Long, total: Long) -> Unit)? = null,
+    ): Boolean = try {
         val res = client.send(request(url), HttpResponse.BodyHandlers.ofInputStream())
         when {
             res.statusCode() !in 200..299 -> {
@@ -107,7 +109,12 @@ object Http {
             }
 
             else -> {
-                res.body().use { input -> Files.newOutputStream(dest).use { out -> copyCapped(input, out, maxBytes) } }
+                val total = res.headers().firstValueAsLong("content-length").orElse(-1L)
+                res.body().use { input ->
+                    Files.newOutputStream(dest).use { out ->
+                        copyCapped(input, out, maxBytes) { done -> onProgress?.invoke(done, total) }
+                    }
+                }
                 true
             }
         }
@@ -117,9 +124,10 @@ object Http {
     }
 
     /**
-     * Copy [input] into [out], aborting past [maxBytes]. Returns the number of bytes written
+     * Copy [input] into [out], aborting past [maxBytes]. Returns the number of bytes written.
+     * [onProgress] fires per read with the running total
      */
-    fun copyCapped(input: InputStream, out: OutputStream, maxBytes: Long): Long {
+    fun copyCapped(input: InputStream, out: OutputStream, maxBytes: Long, onProgress: ((done: Long) -> Unit)? = null): Long {
         val buffer = ByteArray(BUFFER)
         var total = 0L
         while (true) {
@@ -128,6 +136,7 @@ object Http {
             total += read
             if (total > maxBytes) throw IOException("Stream exceeds the limit of $maxBytes bytes")
             out.write(buffer, 0, read)
+            onProgress?.invoke(total)
         }
     }
 

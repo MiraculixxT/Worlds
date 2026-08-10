@@ -9,6 +9,7 @@ import de.miraculixx.worlds.client.WorldsConfig
 import de.miraculixx.worlds.client.ui.markdown.Markdown
 import de.miraculixx.worlds.client.ui.markdown.MdBlock
 import de.miraculixx.worlds.data.InstallResult
+import de.miraculixx.worlds.data.formatBytes
 import de.miraculixx.worlds.data.InstalledMap
 import de.miraculixx.worlds.data.MapEntry
 import de.miraculixx.worlds.data.MapInstaller
@@ -77,6 +78,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     // Same for loads: a tab switch, source switch or new query invalidates whatever is in flight.
     private var loadGen = 0
     private var status: String? = null
+
+    @Volatile
     private var actionMessage: String? = null
 
     private var browseSource: MapSource
@@ -688,13 +691,12 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     /** Save size, or a placeholder while the background walk in [onSelect] is still running. */
     private fun worldSize(entry: MapEntry): String {
         val bytes = entry.worldSizeBytes
-        return when {
-            bytes < 0 -> I18n.get("worlds.calculating")
-            bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1L shl 30).toDouble())
-            bytes >= 1L shl 20 -> "%.1f MB".format(bytes / (1L shl 20).toDouble())
-            else -> "%.0f KB".format(bytes / 1024.0)
-        }
+        return if (bytes < 0) I18n.get("worlds.calculating") else formatBytes(bytes)
     }
+
+    /** [text] cut to [width] with an ellipsis, for the single-line status under the buttons. */
+    private fun clampLine(text: String, width: Int): String =
+        if (font.width(text) <= width) text else font.plainSubstrByWidth(text, width - font.width("…")) + "…"
 
     /** Localized short date, matching the vanilla world list. 0 means the world was never opened. */
     private fun lastPlayed(epochMillis: Long): String {
@@ -731,7 +733,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         }
         actionMessage = I18n.get("worlds.status.installing")
         Constants.SCOPE.launch {
-            val result = MapInstaller.install(entry)
+            // The progress sink runs on this coroutine, not the render thread
+            val result = MapInstaller.install(entry) { actionMessage = it }
             Minecraft.getInstance().execute {
                 when (result) {
                     is InstallResult.Success -> {
@@ -805,7 +808,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         }
 
         status?.let { graphics.text(font, it, leftLeft + 4, listTop + 12, 0xFFA0A0A0.toInt()) }
-        actionMessage?.let { graphics.text(font, it, rightLeft, buttonsY + 22, 0xFFFFE066.toInt()) }
+        actionMessage?.let {
+            graphics.text(font, clampLine(it, rightRight - rightLeft), rightLeft, buttonsY + 22, 0xFFFFE066.toInt())
+        }
     }
 
     private fun updateWidgets() {

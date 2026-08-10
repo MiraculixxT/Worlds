@@ -61,6 +61,12 @@ fun compareMcVersions(a: String, b: String): Int {
 private fun String?.versionPart(): Int =
     this?.takeWhile { it.isDigit() }?.toIntOrNull() ?: 0
 
+fun formatBytes(bytes: Long): String = when {
+    bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1L shl 30).toDouble())
+    bytes >= 1L shl 20 -> "%.1f MB".format(bytes / (1L shl 20).toDouble())
+    else -> "%.0f KB".format(bytes / 1024.0)
+}
+
 enum class RequirementKind { MOD, RESOURCE_PACK }
 
 /** A required mod or resource pack for a map. */
