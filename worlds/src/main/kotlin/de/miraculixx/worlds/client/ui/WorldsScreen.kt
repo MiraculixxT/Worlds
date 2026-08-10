@@ -764,9 +764,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     /** Preferred external link: the source page if set, else the website. */
     private fun MapEntry.linkUrl(): String? = website?.takeIf { it.isNotBlank() }
 
-    private fun openUrl(url: String?) {
-        if (!url.isNullOrBlank()) Util.getPlatform().openUri(url)
-    }
+    private fun openUrl(url: String?) = Links.open(url)
 
     override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
         updateWidgets()

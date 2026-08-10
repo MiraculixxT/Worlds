@@ -1,6 +1,6 @@
 package de.miraculixx.worlds.client.ui.markdown
 
-import java.net.URI
+import de.miraculixx.worlds.client.ui.Links
 import net.minecraft.ChatFormatting
 import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.Component
@@ -142,11 +142,7 @@ object Markdown {
         var style: Style = Style.EMPTY
             .withColor(ChatFormatting.BLUE)
             .withUnderlined(true)
-        style = try {
-            style.withClickEvent(ClickEvent.OpenUrl(URI.create(url)))
-        } catch (_: Exception) {
-            style
-        }
+        Links.parse(url)?.let { style = style.withClickEvent(ClickEvent.OpenUrl(it)) }
         return Component.literal(label).setStyle(style)
     }
 }

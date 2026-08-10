@@ -6,7 +6,6 @@ import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
-import net.minecraft.util.Util
 
 /**
  * Shown before joining a map when one or more of its `requiredMods` is not loaded. Lists the missing
@@ -80,9 +79,7 @@ class MissingModsScreen(
             ?: req.download?.takeIf { it.isNotBlank() }
             ?: req.projectId?.let { "https://modrinth.com/mod/$it" }
 
-    private fun openUrl(url: String?) {
-        if (!url.isNullOrBlank()) Util.getPlatform().openUri(url)
-    }
+    private fun openUrl(url: String?) = Links.open(url)
 
     override fun onClose() {
         minecraft.gui.setScreen(parent)
