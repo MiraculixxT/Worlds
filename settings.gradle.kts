@@ -6,3 +6,7 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
+
+rootProject.name = "Worlds"
+
+include("common", "worlds-editor", "worlds")
