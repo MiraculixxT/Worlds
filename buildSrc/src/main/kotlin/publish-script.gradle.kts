@@ -10,7 +10,7 @@ modrinth {
     projectId.set(publish.modrinthId)
     loaders.add("fabric")
     dependencies {
-        required.project("fabric-api")
+//        required.project("fabric-api")
     }
 
     uploadFile.set(tasks.named(if (tasks.names.contains("remapJar")) "remapJar" else "jar"))

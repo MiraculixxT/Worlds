@@ -27,7 +27,7 @@ dependencies {
     println("Game Version: $gameVersion\nSupported Versions: ${outlet.mcVersionRange}")
     println("FabricLoader: ${outlet.loaderVersion()}\nFabricAPI: ${outlet.fapiVersion()}")
     implementation("net.fabricmc:fabric-loader:${outlet.loaderVersion()}")
-    implementation("net.fabricmc.fabric-api:fabric-api:${outlet.fapiVersion()}")
+//    implementation("net.fabricmc.fabric-api:fabric-api:${outlet.fapiVersion()}")
 
     //
     // Kotlin libraries
