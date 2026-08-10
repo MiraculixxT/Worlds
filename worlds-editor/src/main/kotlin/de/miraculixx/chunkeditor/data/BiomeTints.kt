@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.minecraft.client.Minecraft
 import net.minecraft.client.color.block.BlockColors
+import net.minecraft.client.renderer.BiomeColors
 import net.minecraft.client.renderer.block.BlockAndTintGetter
 import net.minecraft.commands.Commands
 import net.minecraft.core.BlockPos
@@ -27,6 +28,7 @@ import net.minecraft.world.level.block.state.BlockState
 import net.minecraft.world.level.chunk.PalettedContainer
 import net.minecraft.world.level.chunk.PalettedContainerRO
 import net.minecraft.world.level.chunk.Strategy
+import net.minecraft.world.level.material.MapColor
 import net.minecraft.world.level.storage.LevelStorageSource
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -64,21 +66,28 @@ class BiomeTints private constructor(private val registry: Registry<Biome>, priv
         }
 
         /**
-         * Shifts vanillas reported plains like tint to the biomes proper tint, based on [base]
+         * Shifts vanillas reported plains like tint to the biomes proper tint, based on [mapColor]
          */
-        fun tint(state: BlockState, biome: Biome, base: Int, x: Int, y: Int, z: Int): Int {
-            val source = COLORS.getTintSource(state, 0) ?: return base
+        fun tint(state: BlockState, biome: Biome, mapColor: MapColor, x: Int, y: Int, z: Int): Int {
             val key = Block.BLOCK_STATE_REGISTRY.getId(state).toLong() shl 32 or
                 (registry.getId(biome).toLong() and 0xFFFFFFFFL)
             cache[key]?.let { return it }
+            val result = compute(state, biome, mapColor, x, y, z)
+            cache[key] = result
+            return result
+        }
+
+        private fun compute(state: BlockState, biome: Biome, mapColor: MapColor, x: Int, y: Int, z: Int): Int {
+            if (mapColor === MapColor.WATER) {
+                return BiomeColors.WATER_COLOR_RESOLVER.getColor(biome, x.toDouble(), z.toDouble())
+            }
+            val source = COLORS.getTintSource(state, 0) ?: return mapColor.col
             cursor.set(x, y, z)
             getter.biome = reference
             val plain = source.colorInWorld(state, getter, cursor)
             getter.biome = biome
             val here = source.colorInWorld(state, getter, cursor)
-            val result = if (plain == here) base else scale(base, here, plain)
-            cache[key] = result
-            return result
+            return if (plain == here) mapColor.col else scale(mapColor.col, here, plain)
         }
     }
 

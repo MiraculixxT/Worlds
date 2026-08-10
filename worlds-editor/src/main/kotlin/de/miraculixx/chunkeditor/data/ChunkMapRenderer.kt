@@ -155,7 +155,7 @@ object ChunkMapRenderer {
                             if (session != null) {
                                 val biome = biomeAt(index, lx, ly, lz)
                                 if (biome != null) {
-                                    base = session.tint(state, biome, base, worldX + lx, height, worldZ + lz)
+                                    base = session.tint(state, biome, mapColor, worldX + lx, height, worldZ + lz)
                                 }
                             }
                             if (mapColor !== MapColor.WATER) break@columns
