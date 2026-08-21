@@ -24,12 +24,12 @@ import org.joml.Vector4f
 /**
  * Copy of [net.minecraft.client.renderer.CubeMap] with alpha option and variable texture
  */
-class WorldCubeMap(private val location: Identifier) : AutoCloseable {
+class WorldCubeMap : AutoCloseable {
     private val projection = Projection()
     private val projectionMatrixUbo = ProjectionMatrixBuffer("worlds panorama")
     private val vertexBuffer = initializeVertices()
 
-    fun render(rotXInDegrees: Float, rotYInDegrees: Float, alpha: Float) {
+    fun render(location: Identifier, rotXInDegrees: Float, rotYInDegrees: Float, alpha: Float) {
         val minecraft = Minecraft.getInstance()
         val mainRenderTarget = minecraft.gameRenderer.mainRenderTarget()
         val colorTexture = mainRenderTarget.colorTextureView ?: return

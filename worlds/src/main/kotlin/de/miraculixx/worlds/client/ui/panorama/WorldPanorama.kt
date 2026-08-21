@@ -12,18 +12,31 @@ import net.minecraft.util.Util
  * Only drawn aboth vanilla when available via custom shader.
  */
 object WorldPanorama {
-    private val TEXTURE_ID = Identifier.fromNamespaceAndPath(Constants.MOD_ID, "panorama/selected")
     private const val FADE_MS = 250L
     /** Longer than this between draws and the fade is resumed from scratch instead of continued */
     private const val STALE_MS = 1_000L
 
+    /**
+     * Two texture slots, allowing cross-fades
+     */
+    private val SLOT_IDS = listOf(
+        Identifier.fromNamespaceAndPath(Constants.MOD_ID, "panorama/slot_a"),
+        Identifier.fromNamespaceAndPath(Constants.MOD_ID, "panorama/slot_b"),
+    )
+
+    private class Layer(val dir: Path, val textureId: Identifier) {
+        var alpha = 0f
+        var ready = false
+        var loading = false
+
+        fun fade(step: Float) { alpha = (alpha + step).coerceIn(0f, 1f) }
+    }
+
     private var target: Path? = null
-    private var shown: Path? = null
-    private var loading: Path? = null
+    private var base: Layer? = null // what's the main on screen
+    private var incoming: Layer? = null // fading layer
     private val failed = HashSet<Path>()
-    private var textureReady = false
     private var loadGen = 0
-    private var alpha = 0f
     private var lastMs = 0L
     private var cubeMap: WorldCubeMap? = null
 
@@ -41,67 +54,101 @@ object WorldPanorama {
         val elapsed = now - lastMs
         lastMs = now
         // Abort animation that can not be rendered
-        if (elapsed > STALE_MS) {
-            drop()
-            alpha = 0f
-        }
+        if (elapsed > STALE_MS) reset()
         val step = elapsed.coerceIn(0, FADE_MS) / FADE_MS.toFloat()
+        // A folder that failed to load counts as none, or the outgoing panorama would stay up.
+        val want = target?.takeIf { it !in failed }
 
-        if (shown != target) {
-            // Nothing on screen to fade out (never loaded, or already gone)
-            alpha -= step
-            if (alpha <= 0f || !textureReady) {
-                alpha = 0f
-                drop()
-                shown = target
+        when (want) {
+            null -> {}
+            base?.dir -> dropIncoming() // back to what is already up, mid-switch
+            incoming?.dir -> {}
+            else -> {
+                dropIncoming()
+                incoming = Layer(want, SLOT_IDS.first { it != base?.textureId })
             }
         }
-        val dir = shown ?: return
-        if (!textureReady) {
-            ensureLoaded(dir)
-            return
+
+        val current = base
+        val next = incoming
+        when {
+            want == null -> {
+                current?.fade(-step)
+                next?.fade(-step)
+                if ((current?.alpha ?: 0f) <= 0f && (next?.alpha ?: 0f) <= 0f) {
+                    reset()
+                    return
+                }
+            }
+            next != null -> {
+                current?.fade(step) // hold the outgoing one underneath while the new one loads
+                if (!next.ready) load(next)
+                else {
+                    next.fade(step)
+                    if (next.alpha >= 1f) promote(next)
+                }
+            }
+            current != null -> current.fade(step)
         }
-        if (shown == target) alpha = (alpha + step).coerceAtMost(1f)
-        if (alpha <= 0f) return
-        val cube = cubeMap ?: WorldCubeMap(TEXTURE_ID).also { cubeMap = it }
-        cube.render(rotXInDegrees, rotYInDegrees, alpha)
+
+        val cube = cubeMap ?: WorldCubeMap().also { cubeMap = it }
+        base?.let { if (it.ready && it.alpha > 0f) cube.render(it.textureId, rotXInDegrees, rotYInDegrees, it.alpha) }
+        incoming?.let { if (it.ready && it.alpha > 0f) cube.render(it.textureId, rotXInDegrees, rotYInDegrees, it.alpha) }
     }
 
     /** Six PNG decodes: off the render thread, uploaded on it. */
-    private fun ensureLoaded(dir: Path) {
-        if (loading == dir || dir in failed) return
-        loading = dir
+    private fun load(layer: Layer) {
+        if (layer.loading) return
+        layer.loading = true
         val gen = ++loadGen
         Constants.SCOPE.launch {
             val contents = try {
-                WorldPanoramaTexture.readContents(dir)
+                WorldPanoramaTexture.readContentsParallel(layer.dir)
             } catch (e: Exception) {
-                Constants.LOG.warn("Could not read panorama {}: {}", dir, e.message)
+                Constants.LOG.warn("Could not read panorama {}: {}", layer.dir, e.message)
                 Minecraft.getInstance().execute {
-                    failed.add(dir)
-                    if (loadGen == gen) loading = null
+                    failed.add(layer.dir)
+                    layer.loading = false
                 }
                 return@launch
             }
             Minecraft.getInstance().execute {
-                if (loadGen != gen || shown != dir) {
+                if (loadGen != gen) {
                     contents.close()
                     return@execute
                 }
-                val texture = WorldPanoramaTexture(TEXTURE_ID, dir)
-                Minecraft.getInstance().textureManager.register(TEXTURE_ID, texture)
+                val texture = WorldPanoramaTexture(layer.textureId, layer.dir)
+                Minecraft.getInstance().textureManager.register(layer.textureId, texture)
                 texture.apply(contents) // uploads the cube map and closes the image
-                textureReady = true
-                loading = null
+                layer.ready = true
+                layer.loading = false
             }
         }
     }
 
-    private fun drop() {
-        if (textureReady) Minecraft.getInstance().textureManager.release(TEXTURE_ID)
-        textureReady = false
-        shown = null
-        loading = null
+    private fun promote(layer: Layer) {
+        release(base)
+        layer.alpha = 1f
+        base = layer
+        incoming = null
+    }
+
+    private fun dropIncoming() {
+        release(incoming)
+        incoming = null
+        loadGen++ // whatever was being read for it is no longer wanted
+    }
+
+    private fun reset() {
+        if (base == null && incoming == null) return // nothing to do = dont attempt render
+        release(base)
+        release(incoming)
+        base = null
+        incoming = null
         loadGen++
+    }
+
+    private fun release(layer: Layer?) {
+        if (layer != null && layer.ready) Minecraft.getInstance().textureManager.release(layer.textureId)
     }
 }

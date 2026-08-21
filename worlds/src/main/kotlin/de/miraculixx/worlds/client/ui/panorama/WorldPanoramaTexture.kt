@@ -4,6 +4,11 @@ import com.mojang.blaze3d.platform.NativeImage
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import net.minecraft.client.renderer.texture.CubeMapTexture
 import net.minecraft.client.renderer.texture.MipmapStrategy
 import net.minecraft.client.renderer.texture.TextureContents
@@ -27,35 +32,66 @@ class WorldPanoramaTexture(id: Identifier, private val dir: Path) : CubeMapTextu
         fun isComplete(dir: Path): Boolean =
             Files.isDirectory(dir) && (0..5).all { Files.isRegularFile(facePath(dir, it)) }
 
+        /** Blocking, one face after another (only for pack reloading) */
+        fun readContents(dir: Path): TextureContents = stack(dir) { image ->
+            for (layer in 1 until 6) readFace(dir, FACE_ORDER[layer]).use { copyFace(it, image, layer) }
+        }
+
         /**
-         * Read the six faces into one stacked image
+         * [readContents] but async for high quality panoramas
          */
-        fun readContents(dir: Path): TextureContents {
-            val first = readFace(dir, FACE_ORDER[0])
+        suspend fun readContentsParallel(dir: Path): TextureContents = withContext(Dispatchers.IO) {
+            stack(dir) { image ->
+                coroutineScope {
+                    (1 until 6).map { layer ->
+                        async { readFace(dir, FACE_ORDER[layer]).use { copyFace(it, image, layer) } }
+                    }.awaitAll()
+                }
+            }
+        }
+
+        /**
+         * Read face 0 before anything else, rest comes lazy via [fillRest]
+         */
+        private inline fun stack(dir: Path, fillRest: (image: NativeImage) -> Unit): TextureContents {
             var stacked: NativeImage? = null
             try {
-                val width = first.width
-                val height = first.height
-                stacked = NativeImage(width, height * 6, false)
-                first.copyRect(stacked, 0, 0, 0, 0, width, height, false, true)
-                for (i in 1 until 6) {
-                    val face = readFace(dir, FACE_ORDER[i])
-                    face.use { face ->
-                        if (face.width != width || face.height != height) {
-                            throw IOException(
-                                "Panorama faces in $dir differ in size: face ${FACE_ORDER[0]} is ${width}x$height, " +
-                                        "face ${FACE_ORDER[i]} is ${face.width}x${face.height}"
-                            )
-                        }
-                        face.copyRect(stacked, 0, 0, 0, i * height, width, height, false, true)
-                    }
+                val image = readFace(dir, FACE_ORDER[0]).use { first ->
+                    val target = NativeImage(first.width, first.height * 6, false)
+                    stacked = target
+                    copyFace(first, target, 0)
+                    target
                 }
-                val contents = TextureContents(stacked, TextureMetadataSection(true, false, MipmapStrategy.MEAN, 0f))
+                fillRest(image)
+                val contents = TextureContents(image, TextureMetadataSection(true, false, MipmapStrategy.MEAN, 0f))
                 stacked = null // handed over to the contents, which closes it after upload
                 return contents
             } finally {
-                first.close()
                 stacked?.close()
+            }
+        }
+
+        /**
+         * One face into layer [layer] of [stacked], flipped vertically the way vanilla's
+         * `copyRect(…, swapY = true)` does it
+         */
+        private fun copyFace(face: NativeImage, stacked: NativeImage, layer: Int) {
+            val width = face.width
+            val height = face.height
+            if (width != stacked.width || height * 6 != stacked.height) {
+                throw IOException(
+                    "Panorama faces differ in size: expected ${stacked.width}x${stacked.height / 6}, got ${width}x$height"
+                )
+            }
+            if (face.format() != NativeImage.Format.RGBA || stacked.format() != NativeImage.Format.RGBA) {
+                face.copyRect(stacked, 0, 0, 0, layer * height, width, height, false, true)
+                return
+            }
+            val source = face.pixelBytes
+            val target = stacked.pixelBytes
+            val rowBytes = width * 4
+            for (y in 0 until height) {
+                target.put((layer * height + (height - 1 - y)) * rowBytes, source, y * rowBytes, rowBytes)
             }
         }
 
