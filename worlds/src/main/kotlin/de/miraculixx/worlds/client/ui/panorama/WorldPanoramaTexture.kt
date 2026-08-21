@@ -27,10 +27,25 @@ class WorldPanoramaTexture(id: Identifier, private val dir: Path) : CubeMapTextu
         private val FACE_ORDER = intArrayOf(1, 3, 5, 4, 0, 2)
         const val FOLDER = "panorama"
 
+        /**
+         * Auto captures land at "<world>/panorama/screenshots" (vanilla format)
+         */
+        const val CAPTURE_FOLDER = "screenshots"
+
+        fun manualDir(saveDir: Path): Path = saveDir.resolve(FOLDER)
+        fun captureDir(saveDir: Path): Path = manualDir(saveDir).resolve(CAPTURE_FOLDER)
+
         fun facePath(dir: Path, face: Int): Path = dir.resolve("panorama_$face.png")
 
         fun isComplete(dir: Path): Boolean =
             Files.isDirectory(dir) && (0..5).all { Files.isRegularFile(facePath(dir, it)) }
+
+        /** "panorama/" > "panorama/screenshots" > null */
+        fun resolve(saveDir: Path): Path? {
+            val manual = manualDir(saveDir)
+            if (isComplete(manual)) return manual
+            return captureDir(saveDir).takeIf(::isComplete)
+        }
 
         /** Blocking, one face after another (only for pack reloading) */
         fun readContents(dir: Path): TextureContents = stack(dir) { image ->

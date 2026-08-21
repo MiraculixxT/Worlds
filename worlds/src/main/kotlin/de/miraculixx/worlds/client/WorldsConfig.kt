@@ -4,6 +4,7 @@ import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.client.ui.SortMode
 import de.miraculixx.worlds.client.ui.VersionMode
 import de.miraculixx.worlds.data.MapSource
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
@@ -25,6 +26,14 @@ class FilterSettings(@Transient var defaultSort: SortMode = SortMode.AZ) {
 }
 
 @Serializable
+data class PanoramaSettings(
+    var show: Boolean = true,
+    /** Prevent new panoramas to generate */
+    @SerialName("auto_create") var autoCreate: Boolean = true,
+    var fade: Long = 250,
+)
+
+@Serializable
 data class WorldsSettings(
     /** Left pane share of the split view */
     var ratio: Float = 0.42f,
@@ -32,6 +41,7 @@ data class WorldsSettings(
     var browseSource: MapSource = MapSource.MODRINTH,
     val installedFilter: FilterSettings = FilterSettings(),
     val browseFilter: FilterSettings = FilterSettings(SortMode.DOWNLOADS),
+    val panorama: PanoramaSettings = PanoramaSettings(),
 )
 
 object WorldsConfig {

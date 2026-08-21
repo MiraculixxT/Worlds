@@ -7,6 +7,7 @@ class WorldsClient : ClientModInitializer {
 
     override fun onInitializeClient() {
         Constants.LOG.info("Worlds loaded")
+        WorldsConfig.save()
         ModUpdate.check()
     }
 }

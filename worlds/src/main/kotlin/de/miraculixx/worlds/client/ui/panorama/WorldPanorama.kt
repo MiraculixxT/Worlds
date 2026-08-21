@@ -1,6 +1,7 @@
 package de.miraculixx.worlds.client.ui.panorama
 
 import de.miraculixx.worlds.Constants
+import de.miraculixx.worlds.client.WorldsConfig
 import java.nio.file.Path
 import kotlinx.coroutines.launch
 import net.minecraft.client.Minecraft
@@ -12,9 +13,9 @@ import net.minecraft.util.Util
  * Only drawn aboth vanilla when available via custom shader.
  */
 object WorldPanorama {
-    private const val FADE_MS = 250L
     /** Longer than this between draws and the fade is resumed from scratch instead of continued */
     private const val STALE_MS = 1_000L
+    private val fadeMs: Long get() = WorldsConfig.settings.panorama.fade.coerceAtLeast(1)
 
     /**
      * Two texture slots, allowing cross-fades
@@ -41,10 +42,9 @@ object WorldPanorama {
     private var cubeMap: WorldCubeMap? = null
 
     fun select(saveFolder: String?) {
-        target = saveFolder?.let { folder ->
-            Minecraft.getInstance().gameDirectory.toPath()
-                .resolve("saves").resolve(folder).resolve(WorldPanoramaTexture.FOLDER)
-                .takeIf(WorldPanoramaTexture::isComplete)
+        target = saveFolder?.takeIf { WorldsConfig.settings.panorama.show }?.let { folder ->
+            val saveDir = Minecraft.getInstance().gameDirectory.toPath().resolve("saves").resolve(folder)
+            WorldPanoramaTexture.resolve(saveDir)
         }
     }
 
@@ -55,7 +55,8 @@ object WorldPanorama {
         lastMs = now
         // Abort animation that can not be rendered
         if (elapsed > STALE_MS) reset()
-        val step = elapsed.coerceIn(0, FADE_MS) / FADE_MS.toFloat()
+        val fade = fadeMs
+        val step = elapsed.coerceIn(0, fade) / fade.toFloat()
         // A folder that failed to load counts as none, or the outgoing panorama would stay up.
         val want = target?.takeIf { it !in failed }
 
@@ -94,6 +95,11 @@ object WorldPanorama {
         val cube = cubeMap ?: WorldCubeMap().also { cubeMap = it }
         base?.let { if (it.ready && it.alpha > 0f) cube.render(it.textureId, rotXInDegrees, rotYInDegrees, it.alpha) }
         incoming?.let { if (it.ready && it.alpha > 0f) cube.render(it.textureId, rotXInDegrees, rotYInDegrees, it.alpha) }
+    }
+
+    fun invalidate(saveDir: Path) {
+        failed.remove(WorldPanoramaTexture.manualDir(saveDir))
+        failed.remove(WorldPanoramaTexture.captureDir(saveDir))
     }
 
     /** Six PNG decodes: off the render thread, uploaded on it. */
