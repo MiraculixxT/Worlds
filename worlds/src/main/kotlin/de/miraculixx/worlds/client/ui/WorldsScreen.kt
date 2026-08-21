@@ -7,6 +7,7 @@ import de.miraculixx.worlds.client.FilterSettings
 import de.miraculixx.worlds.client.ModUpdate
 import de.miraculixx.worlds.client.WorldsConfig
 import de.miraculixx.worlds.client.ui.markdown.Markdown
+import de.miraculixx.worlds.client.ui.panorama.WorldPanorama
 import de.miraculixx.worlds.client.ui.markdown.MdBlock
 import de.miraculixx.worlds.data.InstallResult
 import de.miraculixx.worlds.data.formatBytes
@@ -97,6 +98,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     private var queryDueAt = 0L
 
     private var selected: MapEntry? = null
+        set(value) {
+            field = value
+            WorldPanorama.select(value?.installedFolder)
+        }
     // Ids of maps already present in saves/
     private var installedIds: Set<String> = emptySet()
     // After an install we switch to Installed and auto-select the map with this id.
@@ -1172,6 +1177,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
     override fun onClose() {
         minecraft.gui.setScreen(parent)
+    }
+
+    override fun removed() {
+        WorldPanorama.select(null)
     }
 
     private companion object {
