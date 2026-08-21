@@ -4,6 +4,7 @@ plugins {
 }
 
 version = property("chunkEditorVersion") as String
+base.archivesName = "chunk-editor"
 
 
 dependencies {
