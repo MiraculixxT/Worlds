@@ -9,6 +9,7 @@ version = property("worldsVersion") as String
 
 dependencies {
     implementation(project(":worlds-editor"))
+    include(project(":worlds-editor"))
 
     implementation(project(":common"))
     include(project(":common"))
@@ -31,7 +32,7 @@ dependencies {
 
 modrinth {
     dependencies {
-        required.project(property("chunkEditorModrinthId") as String)
+        //required.project(property("chunkEditorModrinthId") as String)
     }
 }
 
