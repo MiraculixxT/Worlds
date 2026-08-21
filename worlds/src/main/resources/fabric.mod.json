@@ -13,7 +13,7 @@
   },
   "license": "All-Rights-Reserved",
   "icon": "assets/worlds/icon.png",
-  "environment": "*",
+  "environment": "client",
   "entrypoints": {
     "client": [
       "de.miraculixx.worlds.client.WorldsClient"
