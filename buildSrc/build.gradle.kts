@@ -16,4 +16,5 @@ dependencies {
     implementation("net.fabricmc:fabric-loom:1.17-SNAPSHOT")
     implementation("io.github.dexman545.outlet:io.github.dexman545.outlet.gradle.plugin:1.8.+")
     implementation("com.modrinth.minotaur:Minotaur:2.+")
+    implementation("net.darkhax.curseforgegradle:CurseForgeGradle:1.3.+")
 }

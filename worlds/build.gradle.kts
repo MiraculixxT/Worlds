@@ -38,6 +38,7 @@ modrinth {
 
 modPublish {
     modrinthId.set(property("worldsModrinthId") as String)
+    curseforgeId.set(property("worldsCurseforgeId") as String)
     displayName.set("BetterWorlds")
     changelog.set(property("worldsChangelog") as String)
     readme.set(rootProject.layout.projectDirectory.file("README.md"))

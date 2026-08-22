@@ -14,6 +14,7 @@ dependencies {
 
 modPublish {
     modrinthId.set(property("chunkEditorModrinthId") as String)
+    curseforgeId.set(property("chunkEditorCurseforgeId") as String)
     displayName.set("Chunk Editor")
     changelog.set(property("chunkEditorChangelog") as String)
     readme.set(layout.projectDirectory.file("README.md"))
