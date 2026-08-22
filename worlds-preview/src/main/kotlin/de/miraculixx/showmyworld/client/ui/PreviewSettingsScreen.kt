@@ -8,6 +8,7 @@ import de.miraculixx.showmyworld.client.PreviewConfig
 import de.miraculixx.showmyworld.client.PreviewSettings
 import de.miraculixx.showmyworld.client.ui.panorama.DefaultPanorama
 import de.miraculixx.showmyworld.client.ui.panorama.WorldPanorama
+import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
@@ -18,7 +19,9 @@ import net.minecraft.network.chat.Component
 /**
  * Edits apply immediately, the file is written once in [onClose].
  */
-class PreviewSettingsScreen(private val parent: Screen) : Screen(Component.translatable("showmyworld.settings.title")) {
+class PreviewSettingsScreen(private val onDone: Runnable) : Screen(Component.translatable("showmyworld.settings.title")) {
+
+    constructor(parent: Screen) : this(Runnable { Minecraft.getInstance().gui.setScreen(parent) })
 
     private val settings = PreviewConfig.settings
 
@@ -89,7 +92,7 @@ class PreviewSettingsScreen(private val parent: Screen) : Screen(Component.trans
     override fun onClose() {
         list.commitEdits()
         PreviewConfig.save()
-        minecraft.gui.setScreen(parent)
+        onDone.run()
     }
 
     private companion object {

@@ -17,10 +17,17 @@ object ShowMyWorld {
      */
     fun select(saveFolder: String?) = WorldPanorama.select(saveFolder)
 
-    /** The mod's settings screen, returning to [parent] on close. */
+    /** The mod's settings screen, returning to [parent] on close */
     fun settingsScreen(parent: Screen): Screen = PreviewSettingsScreen(parent)
+
+    /** The same screen, running [onDone] on close instead of setting a screen back */
+    fun settingsScreen(onDone: Runnable): Screen = PreviewSettingsScreen(onDone)
 
     fun openSettings(parent: Screen) {
         Minecraft.getInstance().gui.setScreen(settingsScreen(parent))
+    }
+
+    fun openSettings(onDone: Runnable) {
+        Minecraft.getInstance().gui.setScreen(settingsScreen(onDone))
     }
 }

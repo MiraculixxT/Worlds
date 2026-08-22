@@ -16,6 +16,8 @@ object PanoramaCapture {
      * Called by `MinecraftMixin`
      */
     fun onLeaveWorld(minecraft: Minecraft) {
+        // Playing a world ends whatever selection led into it
+        WorldPanorama.select(null)
         // A leave rewrites LastPlayed, so the default-panorama pick order is stale either way
         WorldPanorama.invalidateLibrary()
         if (!PreviewConfig.settings.autoCreate) return
