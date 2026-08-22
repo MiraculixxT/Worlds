@@ -1,6 +1,6 @@
-package de.miraculixx.worlds.client.ui.panorama
+package de.miraculixx.showmyworld.client.ui.panorama
 
-import de.miraculixx.worlds.Constants
+import de.miraculixx.showmyworld.Constants
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.SerialName
@@ -21,7 +21,7 @@ enum class DefaultPanorama {
     @SerialName("last_played") LAST_PLAYED,
     @SerialName("random") RANDOM;
 
-    val label: String get() = I18n.get("worlds.settings.panorama.default.${name.lowercase()}")
+    val label: String get() = I18n.get("showmyworld.settings.default.${name.lowercase()}")
 
     fun pick(candidates: List<PanoramaCandidate>): Path? = when (this) {
         VANILLA -> null

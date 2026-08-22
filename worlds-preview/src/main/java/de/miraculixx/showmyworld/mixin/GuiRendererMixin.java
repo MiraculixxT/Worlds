@@ -1,6 +1,6 @@
-package de.miraculixx.worlds.mixin;
+package de.miraculixx.showmyworld.mixin;
 
-import de.miraculixx.worlds.client.ui.panorama.WorldPanorama;
+import de.miraculixx.showmyworld.client.ui.panorama.WorldPanorama;
 import net.minecraft.client.gui.render.GuiRenderer;
 import net.minecraft.client.renderer.state.gui.GuiRenderState;
 import net.minecraft.client.renderer.state.gui.PanoramaRenderState;
@@ -27,7 +27,7 @@ public class GuiRendererMixin {
                     shift = At.Shift.AFTER
             )
     )
-    private void worlds_renderWorldPanorama(CallbackInfo ci) {
+    private void showmyworld$renderWorldPanorama(CallbackInfo ci) {
         PanoramaRenderState panorama = this.renderState.panoramaRenderState;
         if (panorama != null) WorldPanorama.INSTANCE.render(10.0F, panorama.spin());
     }

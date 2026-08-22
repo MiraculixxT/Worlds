@@ -1,6 +1,6 @@
-package de.miraculixx.worlds.mixin;
+package de.miraculixx.showmyworld.mixin;
 
-import de.miraculixx.worlds.client.ui.panorama.PanoramaCapture;
+import de.miraculixx.showmyworld.client.ui.panorama.PanoramaCapture;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class MinecraftMixin {
 
     @Inject(method = "disconnectFromWorld", at = @At("HEAD"))
-    private void worlds_capturePanorama(Component message, CallbackInfo ci) {
+    private void showmyworld$capturePanorama(Component message, CallbackInfo ci) {
         PanoramaCapture.INSTANCE.onLeaveWorld((Minecraft) (Object) this);
     }
 }

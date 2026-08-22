@@ -9,4 +9,4 @@ pluginManagement {
 
 rootProject.name = "Worlds"
 
-include("common", "worlds-editor", "worlds")
+include("common", "worlds-editor", "worlds-preview", "worlds")

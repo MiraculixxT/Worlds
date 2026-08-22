@@ -1,4 +1,4 @@
-package de.miraculixx.worlds.client.ui.panorama
+package de.miraculixx.showmyworld.client.ui.panorama
 
 import com.mojang.blaze3d.platform.NativeImage
 import java.io.IOException

@@ -1,4 +1,4 @@
-package de.miraculixx.worlds.client.ui.panorama
+package de.miraculixx.showmyworld.client.ui.panorama
 
 import com.mojang.blaze3d.PrimitiveTopology
 import com.mojang.blaze3d.ProjectionType
@@ -10,7 +10,7 @@ import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.vertex.BufferBuilder
 import com.mojang.blaze3d.vertex.ByteBufferBuilder
 import com.mojang.blaze3d.vertex.DefaultVertexFormat
-import de.miraculixx.worlds.Constants
+import de.miraculixx.showmyworld.Constants
 import java.util.Optional
 import java.util.OptionalDouble
 import net.minecraft.client.Minecraft

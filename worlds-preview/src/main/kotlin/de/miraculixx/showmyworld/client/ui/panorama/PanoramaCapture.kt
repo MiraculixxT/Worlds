@@ -1,7 +1,7 @@
-package de.miraculixx.worlds.client.ui.panorama
+package de.miraculixx.showmyworld.client.ui.panorama
 
-import de.miraculixx.worlds.Constants
-import de.miraculixx.worlds.client.WorldsConfig
+import de.miraculixx.showmyworld.Constants
+import de.miraculixx.showmyworld.client.PreviewConfig
 import java.nio.file.Files
 import net.minecraft.client.Minecraft
 import net.minecraft.world.level.storage.LevelResource
@@ -13,12 +13,12 @@ import net.minecraft.world.level.storage.LevelResource
  */
 object PanoramaCapture {
     /**
-     * Called by [de.miraculixx.worlds.mixin.MinecraftMixin.worlds_capturePanorama]
+     * Called by `MinecraftMixin`
      */
     fun onLeaveWorld(minecraft: Minecraft) {
         // A leave rewrites LastPlayed, so the default-panorama pick order is stale either way
         WorldPanorama.invalidateLibrary()
-        if (!WorldsConfig.settings.panorama.autoCreate) return
+        if (!PreviewConfig.settings.autoCreate) return
         val server = minecraft.singleplayerServer ?: return
         if (minecraft.player == null || minecraft.level == null) return
 

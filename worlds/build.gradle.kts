@@ -11,6 +11,9 @@ dependencies {
     implementation(project(":worlds-editor"))
     include(project(":worlds-editor"))
 
+    implementation(project(":worlds-preview"))
+    include(project(":worlds-preview"))
+
     implementation(project(":common"))
     include(project(":common"))
 
@@ -33,6 +36,7 @@ dependencies {
 modrinth {
     dependencies {
         //required.project(property("chunkEditorModrinthId") as String)
+        //required.project(property("showMyWorldModrinthId") as String)
     }
 }
 

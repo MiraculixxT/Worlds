@@ -1,7 +1,7 @@
-package de.miraculixx.worlds.client.ui.panorama
+package de.miraculixx.showmyworld.client.ui.panorama
 
-import de.miraculixx.worlds.Constants
-import de.miraculixx.worlds.client.WorldsConfig
+import de.miraculixx.showmyworld.Constants
+import de.miraculixx.showmyworld.client.PreviewConfig
 import java.nio.file.Path
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -16,7 +16,7 @@ import net.minecraft.util.Util
 object WorldPanorama {
     /** Longer than this between draws and the fade is resumed from scratch instead of continued */
     private const val STALE_MS = 1_000L
-    private val fadeMs: Long get() = WorldsConfig.settings.panorama.fade.coerceAtLeast(1)
+    private val fadeMs: Long get() = PreviewConfig.settings.fade.coerceAtLeast(1)
 
     /**
      * Two texture slots, allowing cross-fades
@@ -56,7 +56,7 @@ object WorldPanorama {
 
     /** Re-reads the settings for the current selection, so toggling `show` takes effect at once. */
     fun refresh() {
-        val settings = WorldsConfig.settings.panorama
+        val settings = PreviewConfig.settings
         val folder = selectedFolder?.takeIf { settings.show }
         if (folder != null) {
             val saveDir = Minecraft.getInstance().gameDirectory.toPath().resolve("saves").resolve(folder)

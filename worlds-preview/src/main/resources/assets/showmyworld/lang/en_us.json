@@ -1,0 +1,11 @@
+{
+  "showmyworld.settings.title": "Show My World",
+  "showmyworld.settings.panorama": "Panorama",
+  "showmyworld.settings.show": "Show World Panorama",
+  "showmyworld.settings.auto_create": "Auto Capture",
+  "showmyworld.settings.fade": "Fade (ms)",
+  "showmyworld.settings.default": "Default Panorama",
+  "showmyworld.settings.default.vanilla": "Vanilla",
+  "showmyworld.settings.default.last_played": "Last Played",
+  "showmyworld.settings.default.random": "Random"
+}

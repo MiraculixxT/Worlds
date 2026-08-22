@@ -1,5 +1,7 @@
 package de.miraculixx.worlds.client.ui
 
+import de.miraculixx.common.client.ui.IconButton
+import de.miraculixx.showmyworld.ShowMyWorld
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.CurseForgeCategories
 import de.miraculixx.worlds.api.WorldsApi
@@ -7,7 +9,6 @@ import de.miraculixx.worlds.client.FilterSettings
 import de.miraculixx.worlds.client.ModUpdate
 import de.miraculixx.worlds.client.WorldsConfig
 import de.miraculixx.worlds.client.ui.markdown.Markdown
-import de.miraculixx.worlds.client.ui.panorama.WorldPanorama
 import de.miraculixx.worlds.client.ui.markdown.MdBlock
 import de.miraculixx.worlds.data.InstallResult
 import de.miraculixx.worlds.data.formatBytes
@@ -100,7 +101,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     private var selected: MapEntry? = null
         set(value) {
             field = value
-            WorldPanorama.select(value?.installedFolder)
+            ShowMyWorld.select(value?.installedFolder)
         }
     // Ids of maps already present in saves/
     private var installedIds: Set<String> = emptySet()
@@ -125,9 +126,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     private lateinit var list: MapListWidget
     private lateinit var search: EditBox
     private lateinit var refreshButton: Button
-    private lateinit var filterButton: Button
-    private lateinit var settingsButton: Button
-    private lateinit var sourceButton: Button
+    private lateinit var filterButton: IconButton
+    private lateinit var settingsButton: IconButton
+    private lateinit var sourceButton: IconButton
     private lateinit var updateButton: Button
     private var updateShown = false
 
@@ -172,11 +173,11 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         )
 
         settingsButton = addRenderableWidget(
-            Button.builder(Component.empty()) {
+            IconButton(leftLeft, searchY, 20, ROW_H, SETTINGS_LABEL, { MENU }) {
                 minecraft.gui.setScreen(WorldsSettingsScreen(this))
-            }.tooltip(Tooltip.create(Component.translatable("worlds.tooltip.settings")))
-                .bounds(leftLeft, searchY, 20, ROW_H).build()
+            }
         )
+        settingsButton.setTooltip(Tooltip.create(SETTINGS_LABEL))
 
         search = EditBox(font, searchX(), searchY, searchWidth(), ROW_H, Component.translatable("worlds.search"))
         search.setHint(Component.translatable("worlds.search"))
@@ -192,14 +193,16 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
         // Icon-only filter toggle right of the search box; sprite swaps when a filter is active.
         filterButton = addRenderableWidget(
-            Button.builder(Component.empty()) { openFilters() }
-                .tooltip(Tooltip.create(Component.literal("Filters")))
-                .bounds(leftLeft + leftWidth - 20, searchY, 20, ROW_H).build()
+            IconButton(leftLeft + leftWidth - 20, searchY, 20, ROW_H, FILTER_LABEL, {
+                if (filters.isActive) FILTER_ACTIVE else FILTER_INACTIVE
+            }) { openFilters() }
         )
+        filterButton.setTooltip(Tooltip.create(FILTER_LABEL))
         // Browse only: cycles the exclusive map source left of the filter button.
         sourceButton = addRenderableWidget(
-            Button.builder(Component.empty()) { cycleSource() }
-                .bounds(leftLeft + leftWidth - 42, searchY, 20, ROW_H).build()
+            IconButton(leftLeft + leftWidth - 42, searchY, 20, ROW_H, Component.empty(), {
+                SOURCE_SPRITES.getValue(browseSource)
+            }) { cycleSource() }
         )
         updateSourceTooltip()
 
@@ -270,7 +273,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
         if (allEntries.isEmpty()) loadCurrentTab() else applyFilter()
         refreshInstalledIds()
-        WorldPanorama.select(selected?.installedFolder)
+        ShowMyWorld.select(selected?.installedFolder)
         selected?.let { readmeBlocks = Markdown.parse(readmeFor(it)) }
     }
 
@@ -800,13 +803,6 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         }
         graphics.fill(handleX(), listTop, handleX() + 1, listBottom, handleColor)
 
-        val sprite = if (filters.isActive) FILTER_ACTIVE else FILTER_INACTIVE
-        graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, filterButton.x + 2, filterButton.y + 2, 16, 16)
-        graphics.blitSprite(RenderPipelines.GUI_TEXTURED, MENU, settingsButton.x + 2, settingsButton.y + 2, 16, 16)
-        if (sourceButton.visible) {
-            val icon = SOURCE_SPRITES.getValue(browseSource)
-            graphics.blitSprite(RenderPipelines.GUI_TEXTURED, icon, sourceButton.x + 2, sourceButton.y + 2, 16, 16)
-        }
         if (updateButton.visible) {
             val orbY = updateButton.y + (ROW_H - ORB_SIZE) / 2
             graphics.blitSprite(RenderPipelines.GUI_TEXTURED, UPDATE_ORB, updateButton.x + 5, orbY, ORB_SIZE, ORB_SIZE)
@@ -1196,7 +1192,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     }
 
     override fun removed() {
-        WorldPanorama.select(null)
+        ShowMyWorld.select(null)
     }
 
     private companion object {
@@ -1235,6 +1231,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         val UPDATE_LABEL: String get() = I18n.get("worlds.update.label")
         const val ORB_SIZE = 8
         val UPDATE_ORB: Identifier = Identifier.withDefaultNamespace("icon/trial_available")
+        val SETTINGS_LABEL: Component = Component.translatable("worlds.tooltip.settings")
+        val FILTER_LABEL: Component = Component.literal("Filters")
+
         val MENU: Identifier = Identifier.fromNamespaceAndPath("worlds", "menu")
         val FILTER_INACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/inactive")
         val FILTER_ACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/active")

@@ -1,35 +1,30 @@
 {
   "schemaVersion": 1,
-  "id": "worlds",
+  "id": "showmyworld",
   "version": "${version}",
-  "name": "Worlds",
-  "description": "Play, manage & get worlds like adventure maps directly ingame!",
+  "name": "Show My World",
+  "description": "See your world in the world & server list before joining! The panorama adapts to where you left",
   "authors": [
     "Miraculixx"
   ],
   "contact": {
     "sources": "https://github.com/miraculixx/Worlds",
-    "homepage": "https://modrinth.com/mod/world"
+    "homepage": "https://modrinth.com/mod/show-my-world"
   },
   "license": "All-Rights-Reserved",
-  "icon": "assets/worlds/icon.png",
+  "icon": "assets/showmyworld/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": [
-      "de.miraculixx.worlds.client.WorldsClient"
-    ],
-    "main": [
-      "de.miraculixx.worlds.Worlds"
+      "de.miraculixx.showmyworld.client.ShowMyWorldClient"
     ]
   },
   "mixins": [
-    "worlds.mixins.json"
+    "showmyworld.mixins.json"
   ],
   "depends": {
     "fabricloader": ">=${loader_version}",
     "fabric-language-kotlin": ">=${kotlin_loader_version}",
-    "chunkeditor": ">=${chunkeditor_version}",
-    "showmyworld": ">=${showmyworld_version}",
     "worldscommon": ">=${common_version}",
     "minecraft": "${minecraft_version}"
   }

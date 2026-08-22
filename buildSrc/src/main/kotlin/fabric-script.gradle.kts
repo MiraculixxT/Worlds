@@ -56,6 +56,7 @@ tasks.processResources {
         "kotlin_loader_version" to KOTLIN_LOADER_VERSION,
         "common_version" to rootProject.property("commonVersion") as String,
         "chunkeditor_version" to rootProject.property("chunkEditorVersion") as String,
+        "showmyworld_version" to rootProject.property("showMyWorldVersion") as String,
     )
     inputs.properties(expansions)
     filteringCharset = "UTF-8"
