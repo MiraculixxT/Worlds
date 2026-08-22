@@ -16,4 +16,6 @@ the game regenerates them on the next visit.
 
 ![fun with zoom](https://i.postimg.cc/4yyfMz5x/MCA.webp)
 
+---
+
 Directly integrated by [**Worlds**](https://modrinth.com/mod/world) with more useful world configurations & faster loading!
