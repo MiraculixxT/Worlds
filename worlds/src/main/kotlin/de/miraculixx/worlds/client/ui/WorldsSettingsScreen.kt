@@ -4,6 +4,7 @@ import de.miraculixx.common.client.ui.NumberField
 import de.miraculixx.common.client.ui.SettingsCategory
 import de.miraculixx.common.client.ui.SettingsList
 import de.miraculixx.common.client.ui.WIDGET_W
+import de.miraculixx.worlds.client.PanoramaSettings
 import de.miraculixx.worlds.client.WorldsConfig
 import de.miraculixx.worlds.client.ui.panorama.DefaultPanorama
 import de.miraculixx.worlds.client.ui.panorama.WorldPanorama
@@ -34,9 +35,24 @@ class WorldsSettingsScreen(private val parent: Screen) : Screen(Component.transl
         addRenderableWidget(list)
 
         addRenderableWidget(
-            Button.builder(CommonComponents.GUI_DONE) { onClose() }
-                .bounds(width / 2 - 100, height - 28, 200, 20).build()
+            Button.builder(Component.translatable("controls.reset")) { resetAll() }
+                .bounds(width / 2 - 100, height - 28, 98, 20).build()
         )
+        addRenderableWidget(
+            Button.builder(CommonComponents.GUI_DONE) { onClose() }
+                .bounds(width / 2 + 2, height - 28, 98, 20).build()
+        )
+    }
+
+    private fun resetAll() {
+        list.commitEdits()
+        val defaults = PanoramaSettings()
+        panorama.show = defaults.show
+        panorama.autoCreate = defaults.autoCreate
+        panorama.default = defaults.default
+        panorama.fade = defaults.fade
+        list.rebuild()
+        WorldPanorama.refresh()
     }
 
     private fun rowsFor(category: SettingsCategory): List<SettingsList.Row> =
