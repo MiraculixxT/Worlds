@@ -126,6 +126,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     private lateinit var search: EditBox
     private lateinit var refreshButton: Button
     private lateinit var filterButton: Button
+    private lateinit var settingsButton: Button
     private lateinit var sourceButton: Button
     private lateinit var updateButton: Button
     private var updateShown = false
@@ -162,22 +163,29 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         )
         tabBar.arrangeElements(width)
 
-        val searchY = TAB_BAR_H + 6
+        val searchY = TAB_BAR_H + 4
         // Decided before to know the row width
         updateShown = ModUpdate.available
         refreshButton = addRenderableWidget(
             Button.builder(Component.translatable("selectServer.refresh")) { onRefresh() }
-                .bounds(rightRight - 70, searchY - 2, 70, 20).build()
+                .bounds(rightRight - 70, searchY, 70, ROW_H).build()
         )
 
-        search = EditBox(font, leftLeft, searchY, searchWidth(), 16, Component.translatable("worlds.search"))
+        settingsButton = addRenderableWidget(
+            Button.builder(Component.empty()) {
+                minecraft.gui.setScreen(WorldsSettingsScreen(this))
+            }.tooltip(Tooltip.create(Component.translatable("worlds.tooltip.settings")))
+                .bounds(leftLeft, searchY, 20, ROW_H).build()
+        )
+
+        search = EditBox(font, searchX(), searchY, searchWidth(), ROW_H, Component.translatable("worlds.search"))
         search.setHint(Component.translatable("worlds.search"))
         search.setResponder { onSearchChanged() }
         addRenderableWidget(search)
 
         updateButton = addRenderableWidget(
             Button.builder(Component.empty()) { openUrl(ModUpdate.url) }
-                .bounds(leftLeft + searchWidth() + 2, searchY - 2, updateButtonWidth, 20).build()
+                .bounds(searchX() + searchWidth() + 2, searchY, updateButtonWidth, ROW_H).build()
         )
         updateButton.visible = updateShown
         syncUpdateTooltip()
@@ -185,12 +193,13 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         // Icon-only filter toggle right of the search box; sprite swaps when a filter is active.
         filterButton = addRenderableWidget(
             Button.builder(Component.empty()) { openFilters() }
-                .bounds(leftLeft + leftWidth - 20, searchY - 2, 20, 20).build()
+                .tooltip(Tooltip.create(Component.literal("Filters")))
+                .bounds(leftLeft + leftWidth - 20, searchY, 20, ROW_H).build()
         )
         // Browse only: cycles the exclusive map source left of the filter button.
         sourceButton = addRenderableWidget(
             Button.builder(Component.empty()) { cycleSource() }
-                .bounds(leftLeft + leftWidth - 42, searchY - 2, 20, 20).build()
+                .bounds(leftLeft + leftWidth - 42, searchY, 20, ROW_H).build()
         )
         updateSourceTooltip()
 
@@ -261,6 +270,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
         if (allEntries.isEmpty()) loadCurrentTab() else applyFilter()
         refreshInstalledIds()
+        WorldPanorama.select(selected?.installedFolder)
     }
 
     private fun applyLayout() {
@@ -281,18 +291,20 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         search.setHighlightPos(search.cursorPosition)
         filterButton.x = leftLeft + leftWidth - 20
         sourceButton.x = leftLeft + leftWidth - 42
-        updateButton.x = leftLeft + searchWidth() + 2
+        updateButton.x = searchX() + searchWidth() + 2
         // Vanilla only repositions list entries here (never per frame), so without this call every
         // MapRow keeps drawing at its old x/width.
         list.updateSizeAndPosition(leftWidth, listBottom - listTop, leftLeft, listTop)
     }
 
+    private fun searchX(): Int = leftLeft + 22
+
     /**
      * Search box width. Browse carries the source switcher next to the filter button, so it loses
-     * 22px, and the Update button takes its own width off the top whenever it is shown.
+     * a further 22px, and the Update button takes its own width off the top whenever it is shown.
      */
     private fun searchWidth(): Int =
-        leftWidth - (if (tab == Tab.BROWSE) 44 else 22) - if (updateShown) updateButtonWidth + 2 else 0
+        leftWidth - 22 - (if (tab == Tab.BROWSE) 44 else 22) - if (updateShown) updateButtonWidth + 2 else 0
 
     private val updateButtonWidth: Int get() = ORB_SIZE + 8 + font.width(UPDATE_LABEL) + 6
 
@@ -787,12 +799,13 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
         val sprite = if (filters.isActive) FILTER_ACTIVE else FILTER_INACTIVE
         graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, filterButton.x + 2, filterButton.y + 2, 16, 16)
+        graphics.blitSprite(RenderPipelines.GUI_TEXTURED, MENU, settingsButton.x + 2, settingsButton.y + 2, 16, 16)
         if (sourceButton.visible) {
             val icon = SOURCE_SPRITES.getValue(browseSource)
             graphics.blitSprite(RenderPipelines.GUI_TEXTURED, icon, sourceButton.x + 2, sourceButton.y + 2, 16, 16)
         }
         if (updateButton.visible) {
-            val orbY = updateButton.y + (20 - ORB_SIZE) / 2
+            val orbY = updateButton.y + (ROW_H - ORB_SIZE) / 2
             graphics.blitSprite(RenderPipelines.GUI_TEXTURED, UPDATE_ORB, updateButton.x + 5, orbY, ORB_SIZE, ORB_SIZE)
             graphics.text(font, UPDATE_LABEL, updateButton.x + ORB_SIZE + 9, updateButton.y + 6, -1)
         }
@@ -1186,6 +1199,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     private companion object {
         /** Height of [MenuTabBar] (its own private constant), needed to place the row below it. */
         const val TAB_BAR_H = 24
+
+        /** Height of the search row: the box and every button in it. */
+        const val ROW_H = 20
         /** Up to this many entries, filtering runs inline */
         const val SYNC_FILTER_MAX = 2_000
         const val REFRESH_COOLDOWN_MS = 10_000L
@@ -1216,6 +1232,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         val UPDATE_LABEL: String get() = I18n.get("worlds.update.label")
         const val ORB_SIZE = 8
         val UPDATE_ORB: Identifier = Identifier.withDefaultNamespace("icon/trial_available")
+        val MENU: Identifier = Identifier.fromNamespaceAndPath("worlds", "menu")
         val FILTER_INACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/inactive")
         val FILTER_ACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/active")
         val SOURCE_SPRITES: Map<MapSource, Identifier> = MapSource.BROWSABLE.associateWith {

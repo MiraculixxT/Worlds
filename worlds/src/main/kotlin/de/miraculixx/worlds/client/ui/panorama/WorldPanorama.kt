@@ -33,6 +33,7 @@ object WorldPanorama {
         fun fade(step: Float) { alpha = (alpha + step).coerceIn(0f, 1f) }
     }
 
+    private var selectedFolder: String? = null
     private var target: Path? = null
     private var base: Layer? = null // what's the main on screen
     private var incoming: Layer? = null // fading layer
@@ -42,7 +43,13 @@ object WorldPanorama {
     private var cubeMap: WorldCubeMap? = null
 
     fun select(saveFolder: String?) {
-        target = saveFolder?.takeIf { WorldsConfig.settings.panorama.show }?.let { folder ->
+        selectedFolder = saveFolder
+        refresh()
+    }
+
+    /** Re-reads the settings for the current selection, so toggling `show` takes effect at once. */
+    fun refresh() {
+        target = selectedFolder?.takeIf { WorldsConfig.settings.panorama.show }?.let { folder ->
             val saveDir = Minecraft.getInstance().gameDirectory.toPath().resolve("saves").resolve(folder)
             WorldPanoramaTexture.resolve(saveDir)
         }

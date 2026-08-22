@@ -81,5 +81,11 @@
   "worlds.setting.world_spawn": "World Spawn",
   "worlds.setting.world_ticks": "World Ticks",
   "worlds.players.none": "No player data",
-  "worlds.extra.chunk_editor": "Chunk Editor"
+  "worlds.extra.chunk_editor": "Chunk Editor",
+  "worlds.tooltip.settings": "Settings",
+  "worlds.settings.title": "Worlds Settings",
+  "worlds.settings.panorama": "Panorama",
+  "worlds.settings.panorama.show": "Show World Panorama",
+  "worlds.settings.panorama.auto_create": "Auto Capture",
+  "worlds.settings.panorama.fade": "Fade (ms)"
 }
