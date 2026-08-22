@@ -5,6 +5,7 @@ import de.miraculixx.common.client.ui.SettingsCategory
 import de.miraculixx.common.client.ui.SettingsList
 import de.miraculixx.common.client.ui.WIDGET_W
 import de.miraculixx.worlds.client.WorldsConfig
+import de.miraculixx.worlds.client.ui.panorama.DefaultPanorama
 import de.miraculixx.worlds.client.ui.panorama.WorldPanorama
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
@@ -51,6 +52,15 @@ class WorldsSettingsScreen(private val parent: Screen) : Screen(Component.transl
         },
         list.ToggleRow(I18n.get("worlds.settings.panorama.auto_create"), panorama.autoCreate) {
             panorama.autoCreate = it
+        },
+        list.CycleRow(
+            I18n.get("worlds.settings.panorama.default"),
+            DefaultPanorama.entries,
+            panorama.default,
+            { Component.literal(it.label) },
+        ) {
+            panorama.default = it
+            WorldPanorama.refresh()
         },
         list.NumberRow(
             I18n.get("worlds.settings.panorama.fade"),

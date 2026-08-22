@@ -87,5 +87,9 @@
   "worlds.settings.panorama": "Panorama",
   "worlds.settings.panorama.show": "Welt-Panorama anzeigen",
   "worlds.settings.panorama.auto_create": "Automatisch aufnehmen",
-  "worlds.settings.panorama.fade": "Überblendung (ms)"
+  "worlds.settings.panorama.fade": "Überblendung (ms)",
+  "worlds.settings.panorama.default": "Standard-Panorama",
+  "worlds.settings.panorama.default.vanilla": "Vanilla",
+  "worlds.settings.panorama.default.last_played": "Zuletzt gespielt",
+  "worlds.settings.panorama.default.random": "Zufällig"
 }

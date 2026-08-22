@@ -16,6 +16,8 @@ object PanoramaCapture {
      * Called by [de.miraculixx.worlds.mixin.MinecraftMixin.worlds_capturePanorama]
      */
     fun onLeaveWorld(minecraft: Minecraft) {
+        // A leave rewrites LastPlayed, so the default-panorama pick order is stale either way
+        WorldPanorama.invalidateLibrary()
         if (!WorldsConfig.settings.panorama.autoCreate) return
         val server = minecraft.singleplayerServer ?: return
         if (minecraft.player == null || minecraft.level == null) return

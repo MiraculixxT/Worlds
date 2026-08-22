@@ -3,6 +3,7 @@ package de.miraculixx.worlds.client.ui.panorama
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.client.WorldsConfig
 import java.nio.file.Path
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import net.minecraft.client.Minecraft
 import net.minecraft.resources.Identifier
@@ -34,6 +35,12 @@ object WorldPanorama {
     }
 
     private var selectedFolder: String? = null
+    private var sessionRandom: Path? = null
+    private var defaultMode: DefaultPanorama? = null
+    private var defaultPick: Path? = null
+    private var defaultDone = false
+    private var library: List<PanoramaCandidate>? = null
+    private var libraryJob: Job? = null
     private var target: Path? = null
     private var base: Layer? = null // what's the main on screen
     private var incoming: Layer? = null // fading layer
@@ -49,14 +56,67 @@ object WorldPanorama {
 
     /** Re-reads the settings for the current selection, so toggling `show` takes effect at once. */
     fun refresh() {
-        target = selectedFolder?.takeIf { WorldsConfig.settings.panorama.show }?.let { folder ->
+        val settings = WorldsConfig.settings.panorama
+        val folder = selectedFolder?.takeIf { settings.show }
+        if (folder != null) {
             val saveDir = Minecraft.getInstance().gameDirectory.toPath().resolve("saves").resolve(folder)
-            WorldPanoramaTexture.resolve(saveDir)
+            target = WorldPanoramaTexture.resolve(saveDir)
+            return
+        }
+        val mode = if (settings.show) settings.default else DefaultPanorama.VANILLA
+        if (defaultMode != mode) resetDefault()
+        defaultMode = mode
+        target = defaultTarget(mode)
+    }
+
+    fun invalidateLibrary() {
+        library = null
+        resetDefault()
+    }
+
+    /**
+     * The pick is cached until the mode changes or the library is rescanned
+     */
+    private fun defaultTarget(mode: DefaultPanorama): Path? {
+        if (defaultDone) return defaultPick
+        if (mode == DefaultPanorama.VANILLA) {
+            defaultDone = true
+            return null
+        }
+        val candidates = library ?: run {
+            loadLibrary()
+            return null
+        }
+        val available = candidates.filter { it.dir !in failed }
+        defaultPick = when (mode) {
+            DefaultPanorama.RANDOM -> sessionRandom?.takeIf { pick -> available.any { it.dir == pick } }
+                ?: mode.pick(available).also { sessionRandom = it }
+            else -> mode.pick(available)
+        }
+        defaultDone = true
+        return defaultPick
+    }
+
+    private fun resetDefault() {
+        defaultDone = false
+        defaultPick = null
+    }
+
+    private fun loadLibrary() {
+        if (libraryJob?.isActive == true) return
+        libraryJob = Constants.SCOPE.launch {
+            val found = DefaultPanorama.scan()
+            Minecraft.getInstance().execute {
+                library = found
+                refresh()
+            }
         }
     }
 
     /** Called from `GuiRendererMixin`, drew after vanillas */
     fun render(rotXInDegrees: Float, rotYInDegrees: Float) {
+        // Nothing calls select() before the title screen's first frame, so the default resolves here
+        if (selectedFolder == null && !defaultDone) refresh()
         val now = Util.getMillis()
         val elapsed = now - lastMs
         lastMs = now
@@ -107,6 +167,7 @@ object WorldPanorama {
     fun invalidate(saveDir: Path) {
         failed.remove(WorldPanoramaTexture.manualDir(saveDir))
         failed.remove(WorldPanoramaTexture.captureDir(saveDir))
+        invalidateLibrary()
     }
 
     /** Six PNG decodes: off the render thread, uploaded on it. */
@@ -122,6 +183,7 @@ object WorldPanorama {
                 Minecraft.getInstance().execute {
                     failed.add(layer.dir)
                     layer.loading = false
+                    if (layer.dir == defaultPick) resetDefault()
                 }
                 return@launch
             }

@@ -87,5 +87,9 @@
   "worlds.settings.panorama": "Panorama",
   "worlds.settings.panorama.show": "Show World Panorama",
   "worlds.settings.panorama.auto_create": "Auto Capture",
-  "worlds.settings.panorama.fade": "Fade (ms)"
+  "worlds.settings.panorama.fade": "Fade (ms)",
+  "worlds.settings.panorama.default": "Default Panorama",
+  "worlds.settings.panorama.default.vanilla": "Vanilla",
+  "worlds.settings.panorama.default.last_played": "Last Played",
+  "worlds.settings.panorama.default.random": "Random"
 }

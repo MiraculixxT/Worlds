@@ -2,6 +2,7 @@ package de.miraculixx.worlds.client
 
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.client.ui.SortMode
+import de.miraculixx.worlds.client.ui.panorama.DefaultPanorama
 import de.miraculixx.worlds.client.ui.VersionMode
 import de.miraculixx.worlds.data.MapSource
 import kotlinx.serialization.SerialName
@@ -28,9 +29,9 @@ class FilterSettings(@Transient var defaultSort: SortMode = SortMode.AZ) {
 @Serializable
 data class PanoramaSettings(
     var show: Boolean = true,
-    /** Prevent new panoramas to generate */
     @SerialName("auto_create") var autoCreate: Boolean = true,
     var fade: Long = 250,
+    var default: DefaultPanorama = DefaultPanorama.VANILLA,
 )
 
 @Serializable
@@ -46,7 +47,9 @@ data class WorldsSettings(
 
 object WorldsConfig {
     private val file = FabricLoader.getInstance().configDir.resolve("worlds/settings.json")
-    private val json = Json { prettyPrint = true; ignoreUnknownKeys = true; encodeDefaults = true }
+    private val json = Json {
+        prettyPrint = true; ignoreUnknownKeys = true; encodeDefaults = true; coerceInputValues = true
+    }
 
     val settings: WorldsSettings by lazy {
         runCatching { json.decodeFromString<WorldsSettings>(file.readText()) }
