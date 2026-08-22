@@ -35,6 +35,11 @@ data class PanoramaSettings(
 )
 
 @Serializable
+data class DisplaySettings(
+    @SerialName("show_packs") var showPacks: Boolean = true,
+)
+
+@Serializable
 data class WorldsSettings(
     /** Left pane share of the split view */
     var ratio: Float = 0.42f,
@@ -43,6 +48,7 @@ data class WorldsSettings(
     val installedFilter: FilterSettings = FilterSettings(),
     val browseFilter: FilterSettings = FilterSettings(SortMode.DOWNLOADS),
     val panorama: PanoramaSettings = PanoramaSettings(),
+    val display: DisplaySettings = DisplaySettings(),
 )
 
 object WorldsConfig {

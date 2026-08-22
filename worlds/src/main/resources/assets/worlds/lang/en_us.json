@@ -91,5 +91,7 @@
   "worlds.settings.panorama.default": "Default Panorama",
   "worlds.settings.panorama.default.vanilla": "Vanilla",
   "worlds.settings.panorama.default.last_played": "Last Played",
-  "worlds.settings.panorama.default.random": "Random"
+  "worlds.settings.panorama.default.random": "Random",
+  "worlds.settings.display": "Display",
+  "worlds.settings.display.show_packs": "Show Packs"
 }

@@ -271,6 +271,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         if (allEntries.isEmpty()) loadCurrentTab() else applyFilter()
         refreshInstalledIds()
         WorldPanorama.select(selected?.installedFolder)
+        selected?.let { readmeBlocks = Markdown.parse(readmeFor(it)) }
     }
 
     private fun applyLayout() {
@@ -667,13 +668,15 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
             .append(mapVersionRow(entry))
             .append(fact("options.difficulty", "${difficultyName(info?.difficulty)} (${flags.joinToString(", ")})"))
             .append("**${I18n.get("worlds.fact.size")}:** ${worldSize(entry)}\n\n")
-            .append(
+        // Skip scanning if not showing anyways
+        if (WorldsConfig.settings.display.showPacks) {
+            md.append(
                 packSection(
                     I18n.get("selectWorld.dataPacks"),
                     info?.dataPacks?.filter { !it.contains("fabric-") } ?: emptyList(),
                 )
-            )
-            .append(packSection(I18n.get("worlds.resource_packs"), WorldResourcePacks.listPackNames(folder)))
+            ).append(packSection(I18n.get("worlds.resource_packs"), WorldResourcePacks.listPackNames(folder)))
+        }
 
         val readme = entry.readmeMarkdown?.takeIf { it.isNotBlank() && it.trim() != entry.description.trim() }
         if (readme != null) md.append("\n---\n\n").append(readme)

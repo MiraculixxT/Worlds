@@ -4,6 +4,7 @@ import de.miraculixx.common.client.ui.NumberField
 import de.miraculixx.common.client.ui.SettingsCategory
 import de.miraculixx.common.client.ui.SettingsList
 import de.miraculixx.common.client.ui.WIDGET_W
+import de.miraculixx.worlds.client.DisplaySettings
 import de.miraculixx.worlds.client.PanoramaSettings
 import de.miraculixx.worlds.client.WorldsConfig
 import de.miraculixx.worlds.client.ui.panorama.DefaultPanorama
@@ -19,8 +20,10 @@ import net.minecraft.network.chat.Component
 class WorldsSettingsScreen(private val parent: Screen) : Screen(Component.translatable("worlds.settings.title")) {
 
     private val panorama = WorldsConfig.settings.panorama
+    private val display = WorldsConfig.settings.display
 
     private val categories = listOf(
+        SettingsCategory(I18n.get("worlds.settings.display")).apply { expanded = true },
         SettingsCategory(I18n.get("worlds.settings.panorama")).apply { expanded = true },
     )
 
@@ -51,15 +54,23 @@ class WorldsSettingsScreen(private val parent: Screen) : Screen(Component.transl
         panorama.autoCreate = defaults.autoCreate
         panorama.default = defaults.default
         panorama.fade = defaults.fade
+        display.showPacks = DisplaySettings().showPacks
         list.rebuild()
         WorldPanorama.refresh()
     }
 
     private fun rowsFor(category: SettingsCategory): List<SettingsList.Row> =
         when (categories.indexOf(category)) {
-            0 -> panoramaRows()
+            0 -> displayRows()
+            1 -> panoramaRows()
             else -> emptyList()
         }
+
+    private fun displayRows(): List<SettingsList.Row> = listOf(
+        list.ToggleRow(I18n.get("worlds.settings.display.show_packs"), display.showPacks) {
+            display.showPacks = it
+        },
+    )
 
     private fun panoramaRows(): List<SettingsList.Row> = listOf(
         list.ToggleRow(I18n.get("worlds.settings.panorama.show"), panorama.show) {
