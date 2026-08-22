@@ -10,6 +10,7 @@ import de.miraculixx.common.client.ui.SettingsList
 import de.miraculixx.common.client.ui.WIDGET_W
 import de.miraculixx.common.client.ui.clickSound
 import de.miraculixx.common.client.ui.drawBox
+import de.miraculixx.showmyworld.ShowMyWorld
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.data.InstalledMap
 import de.miraculixx.worlds.data.ItemComponents
@@ -159,6 +160,7 @@ class WorldEditScreen(
     }
 
     override fun init() {
+        ShowMyWorld.select(access.levelId)
         // A resize re-runs init
         commitEdit()
         if (::extraList.isInitialized) extraList.commitEdits()
