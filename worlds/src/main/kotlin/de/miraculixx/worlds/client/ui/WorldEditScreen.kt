@@ -1,8 +1,13 @@
 package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.chunkeditor.ChunkEditor
+import de.miraculixx.common.client.ui.FIELD_W
 import de.miraculixx.common.client.ui.HOVER_COLOR
+import de.miraculixx.common.client.ui.NumberField
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
+import de.miraculixx.common.client.ui.SettingsCategory
+import de.miraculixx.common.client.ui.SettingsList
+import de.miraculixx.common.client.ui.WIDGET_W
 import de.miraculixx.common.client.ui.clickSound
 import de.miraculixx.common.client.ui.drawBox
 import de.miraculixx.worlds.Constants
@@ -106,14 +111,14 @@ class WorldEditScreen(
     private val dataPackWidgets = ArrayList<AbstractWidget>()
     private val resourcePackWidgets = ArrayList<AbstractWidget>()
     private val extraWidgets = ArrayList<AbstractWidget>()
-    private lateinit var extraList: ExtraSettingsList
+    private lateinit var extraList: SettingsList
 
     /** Not rebuilt in [init] to avoid auto-collapse */
     private val categories = listOf(
-        ExtraCategory(I18n.get("worlds.extra.world_settings")),
-        ExtraCategory(I18n.get("mco.configure.world.buttons.players")),
-        ExtraCategory(I18n.get("selectWorld.gameRules")) { openGameRules() },
-        ExtraCategory(I18n.get("worlds.extra.chunk_editor")) { openChunkMap() },
+        SettingsCategory(I18n.get("worlds.extra.world_settings")),
+        SettingsCategory(I18n.get("mco.configure.world.buttons.players")),
+        SettingsCategory(I18n.get("selectWorld.gameRules")) { openGameRules() },
+        SettingsCategory(I18n.get("worlds.extra.chunk_editor")) { openChunkMap() },
     )
 
     /** The two pack tabs' lists, re-read whenever they or a picker writes to the save. */
@@ -245,7 +250,7 @@ class WorldEditScreen(
             )
         )
 
-        extraList = ExtraSettingsList(minecraft, categories, ::extraRowsFor)
+        extraList = SettingsList(minecraft, categories, ::extraRowsFor)
         extraList.updateSizeAndPosition(cardW, listBottom() - cardY, cardX, cardY)
         extraList.rebuild()
         extraWidgets.add(addRenderableWidget(extraList))
@@ -535,20 +540,21 @@ class WorldEditScreen(
     // Extra
     //
 
-    private fun extraRowsFor(category: ExtraCategory): List<ExtraSettingsList.Row> =
+    private fun extraRowsFor(category: SettingsCategory): List<SettingsList.Row> =
         when (categories.indexOf(category)) {
             0 -> worldSettingRows()
             1 -> playerRows()
             else -> emptyList()
         }
 
-    private fun worldSettingRows(): List<ExtraSettingsList.Row> {
+    private fun worldSettingRows(): List<SettingsList.Row> {
         val seedValue = seed
         return listOf(
             extraList.TextRow(
                 I18n.get("mco.backup.entry.seed"),
                 seedValue?.toString() ?: I18n.get("selectWorld.versionUnknown"),
-                onPress = seedValue?.let { { minecraft.keyboardHandler.setClipboard(it.toString()) } },
+                Component.translatable("worlds.copy"),
+                seedValue?.let { { minecraft.keyboardHandler.setClipboard(it.toString()) } },
             ),
             extraList.ToggleRow(I18n.get("selectWorld.allowCommands"), allowCommands) {
                 allowCommands = it
@@ -587,14 +593,14 @@ class WorldEditScreen(
     }
 
     /** Every `playerdata/<uuid>.dat` the save holds */
-    private fun playerRows(): List<ExtraSettingsList.Row> {
+    private fun playerRows(): List<SettingsList.Row> {
         if (players.isEmpty()) {
             return listOf(extraList.TextRow(I18n.get("worlds.players.none"), "", onPress = null))
         }
         return players.map { player ->
             val onStats: (() -> Unit)? = if (player.hasStats) ({ openPlayerStats(player) }) else null
             extraList.TextRow(
-                WorldPlayers.displayName(player.id), player.summary(), "gui.stats", onStats,
+                WorldPlayers.displayName(player.id), player.summary(), Component.translatable("gui.stats"), onStats,
             )
         }
     }

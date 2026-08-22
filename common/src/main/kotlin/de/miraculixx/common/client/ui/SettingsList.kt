@@ -1,9 +1,5 @@
-package de.miraculixx.worlds.client.ui
+package de.miraculixx.common.client.ui
 
-import de.miraculixx.common.client.ui.HOVER_COLOR
-import de.miraculixx.common.client.ui.SUBTEXT_COLOR
-import de.miraculixx.common.client.ui.clickSound
-import de.miraculixx.common.client.ui.drawBox
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
@@ -24,27 +20,28 @@ private const val INDENT = 10
 private const val WIDGET_H = 20
 private const val FIELD_GAP = 3
 
-internal const val WIDGET_W = 63
-internal const val FIELD_W = (WIDGET_W - FIELD_GAP) / 2
+const val WIDGET_W = 63
+const val FIELD_W = (WIDGET_W - FIELD_GAP) / 2
 
 private const val VALID_COLOR = -2039584
 private const val INVALID_COLOR = -65536
 
-/** A collapsible block of settings, or a link to a screen */
-class ExtraCategory(val label: String, val action: (() -> Unit)? = null) {
+/** A collapsible block of settings or redirect */
+class SettingsCategory(val label: String, val action: (() -> Unit)? = null) {
     var expanded = false
 }
 
-
-class ExtraSettingsList(
+/**
+ * A list of collapsible setting categories, drawn in [drawBox]'s frame
+ */
+class SettingsList(
     minecraft: Minecraft,
-    private val categories: List<ExtraCategory>,
-    private val rowsFor: (ExtraCategory) -> List<Row>,
-) : ContainerObjectSelectionList<ExtraSettingsList.Row>(minecraft, 0, 0, 0, ROW_H) {
+    private val categories: List<SettingsCategory>,
+    private val rowsFor: (SettingsCategory) -> List<Row>,
+) : ContainerObjectSelectionList<SettingsList.Row>(minecraft, 0, 0, 0, ROW_H) {
 
     private var pendingRebuild = false
 
-    /** Collapsing from inside a click would drop the entry the click is still being dispatched to. */
     fun requestRebuild() {
         pendingRebuild = true
     }
@@ -100,7 +97,7 @@ class ExtraSettingsList(
             widgets().forEach { it.extractRenderState(graphics, mouseX, mouseY, partialTick) }
     }
 
-    inner class CategoryRow(private val category: ExtraCategory) : Row(category.label, INDENT) {
+    inner class CategoryRow(private val category: SettingsCategory) : Row(category.label, INDENT) {
         override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
             clickSound()
             val action = category.action
@@ -130,11 +127,11 @@ class ExtraSettingsList(
     inner class TextRow(
         label: String,
         private val value: String,
-        buttonKey: String = "worlds.copy",
+        buttonLabel: Component = Component.empty(),
         onPress: (() -> Unit)?,
     ) : Row(label, INDENT) {
         private val button = onPress?.let {
-            Button.builder(Component.translatable(buttonKey)) { _ -> it() }.bounds(0, 0, WIDGET_W, WIDGET_H).build()
+            Button.builder(buttonLabel) { _ -> it() }.bounds(0, 0, WIDGET_W, WIDGET_H).build()
         }
 
         override fun widgets(): List<AbstractWidget> = listOfNotNull(button)
@@ -143,8 +140,8 @@ class ExtraSettingsList(
             graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
         ) {
             drawLabel(graphics)
-            button?.setX(contentRight - button.width)
-            button?.setY(widgetY())
+            button?.x = contentRight - button.width
+            button?.y = widgetY()
             val valueRight = contentRight - (button?.let { it.width + 4 } ?: 0)
             val font = minecraft.font
             graphics.text(font, value, valueRight - font.width(value), labelY(), SUBTEXT_COLOR)
@@ -166,8 +163,8 @@ class ExtraSettingsList(
             graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
         ) {
             drawLabel(graphics)
-            button.setX(contentRight - button.width)
-            button.setY(widgetY())
+            button.x = contentRight - button.width
+            button.y = widgetY()
             extractWidgets(graphics, mouseX, mouseY, partialTick)
         }
     }
