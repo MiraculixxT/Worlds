@@ -17,6 +17,11 @@ object ShowMyWorld {
      */
     fun select(saveFolder: String?) = WorldPanorama.select(saveFolder)
 
+    /**
+     * Show [address]'s panorama, `null` for none
+     */
+    fun selectServer(address: String?) = WorldPanorama.selectServer(address)
+
     /** The mod's settings screen, returning to [parent] on close */
     fun settingsScreen(parent: Screen): Screen = PreviewSettingsScreen(parent)
 

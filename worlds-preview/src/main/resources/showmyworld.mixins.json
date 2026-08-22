@@ -8,6 +8,8 @@
   "client": [
     "EditWorldScreenMixin",
     "GuiRendererMixin",
+    "JoinMultiplayerScreenMixin",
+    "ManageServerScreenMixin",
     "MinecraftMixin",
     "SelectWorldScreenMixin"
   ],

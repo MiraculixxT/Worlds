@@ -11,6 +11,7 @@ import net.minecraft.util.Util
 
 /**
  * Worlds can provide their own preview under "panorama/panaorama_x.png" like vanilla resource packs.
+ * Servers get the same folder in the config folder, see [PanoramaRoots].
  * Only drawn aboth vanilla when available via custom shader.
  */
 object WorldPanorama {
@@ -34,7 +35,7 @@ object WorldPanorama {
         fun fade(step: Float) { alpha = (alpha + step).coerceIn(0f, 1f) }
     }
 
-    private var selectedFolder: String? = null
+    private var selectedRoot: Path? = null
     private var sessionRandom: Path? = null
     private var defaultMode: DefaultPanorama? = null
     private var defaultPick: Path? = null
@@ -49,18 +50,23 @@ object WorldPanorama {
     private var lastMs = 0L
     private var cubeMap: WorldCubeMap? = null
 
-    fun select(saveFolder: String?) {
-        selectedFolder = saveFolder
+    /** A save folder under `saves/` */
+    fun select(saveFolder: String?) = selectRoot(saveFolder?.let(PanoramaRoots::world))
+
+    /** A server address in the config folder */
+    fun selectServer(address: String?) = selectRoot(address?.let(PanoramaRoots::server))
+
+    private fun selectRoot(root: Path?) {
+        selectedRoot = root
         refresh()
     }
 
     /** Re-reads the settings for the current selection, so toggling `show` takes effect at once. */
     fun refresh() {
         val settings = PreviewConfig.settings
-        val folder = selectedFolder?.takeIf { settings.show }
-        if (folder != null) {
-            val saveDir = Minecraft.getInstance().gameDirectory.toPath().resolve("saves").resolve(folder)
-            target = WorldPanoramaTexture.resolve(saveDir)
+        val root = selectedRoot?.takeIf { settings.show }
+        if (root != null) {
+            target = WorldPanoramaTexture.resolve(root)
             return
         }
         val mode = if (settings.show) settings.default else DefaultPanorama.VANILLA
@@ -116,7 +122,7 @@ object WorldPanorama {
     /** Called from `GuiRendererMixin`, drew after vanillas */
     fun render(rotXInDegrees: Float, rotYInDegrees: Float) {
         // Nothing calls select() before the title screen's first frame, so the default resolves here
-        if (selectedFolder == null && !defaultDone) refresh()
+        if (selectedRoot == null && !defaultDone) refresh()
         val now = Util.getMillis()
         val elapsed = now - lastMs
         lastMs = now
@@ -164,9 +170,9 @@ object WorldPanorama {
         incoming?.let { if (it.ready && it.alpha > 0f) cube.render(it.textureId, rotXInDegrees, rotYInDegrees, it.alpha) }
     }
 
-    fun invalidate(saveDir: Path) {
-        failed.remove(WorldPanoramaTexture.manualDir(saveDir))
-        failed.remove(WorldPanoramaTexture.captureDir(saveDir))
+    fun invalidate(root: Path) {
+        failed.remove(WorldPanoramaTexture.manualDir(root))
+        failed.remove(WorldPanoramaTexture.captureDir(root))
         invalidateLibrary()
     }
 
