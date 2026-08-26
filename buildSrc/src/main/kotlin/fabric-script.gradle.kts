@@ -10,15 +10,16 @@ plugins {
 group = rootProject.property("group") as String
 
 val gameVersion = rootProject.property("gameVersion") as String
-outlet.mcVersionRange = rootProject.property("fabricSupportedVersions") as String
+outlet.mcVersionRange = rootProject.property("supportedVersions") as String
 
 repositories {
     mavenCentral()
+    maven("https://maven.neoforged.net/releases") { name = "NeoForged" }
 }
 
 dependencies {
     val gameVersion: String by properties
-    outlet.mcVersionRange = properties["fabricSupportedVersions"] as String
+    outlet.mcVersionRange = properties["supportedVersions"] as String
 
     //
     // Fabric configuration
@@ -36,14 +37,26 @@ dependencies {
     println("Fabric Language Kotlin: $flkVersion")
     implementation("net.fabricmc:fabric-language-kotlin:$flkVersion")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.+")
+
+    fun compileOnlyIsolated(notation: String) = "compileOnly"(notation) {
+        this.isTransitive = false
+    }
+    compileOnlyIsolated("net.neoforged.fancymodloader:loader:$FML_VERSION")
+    compileOnlyIsolated("net.neoforged:mergetool:$MERGETOOL_VERSION:api")
+    compileOnlyIsolated("org.apache.maven:maven-artifact:$MAVEN_ARTIFACT_VERSION")
 }
 
 loom {
     runs {
-        configureEach { runDir("../run") }
+        configureEach { runDir("../../run") }
 
         named("client") {
             programArgs("--username", "Notch")
+            // `-PmixinAudit` is the only way to see a mixin succeed
+            if (providers.gradleProperty("mixinAudit").isPresent) {
+                property("mixin.debug.verbose", "true")
+                property("mixin.debug.countInjections", "true")
+            }
         }
     }
 }
@@ -52,17 +65,13 @@ tasks.processResources {
     val expansions = mapOf(
         "version" to project.version.toString(),
         "minecraft_version" to gameVersion,
-        "loader_version" to outlet.loaderVersion(),
-        "kotlin_loader_version" to KOTLIN_LOADER_VERSION,
-        "common_version" to rootProject.property("commonVersion") as String,
-        "chunkeditor_version" to rootProject.property("chunkEditorVersion") as String,
-        "showmyworld_version" to rootProject.property("showMyWorldVersion") as String,
     )
     inputs.properties(expansions)
     filteringCharset = "UTF-8"
 
     filesMatching("fabric.mod.json") { expand(expansions) }
 }
+
 
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(TARGET_JAVA_VERSION)

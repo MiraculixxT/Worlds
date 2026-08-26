@@ -1,3 +1,10 @@
-/** fabric-language-kotlin, which also provides the Kotlin stdlib, coroutines and serialization at runtime. */
-const val KOTLIN_LOADER_VERSION = "1.13.13+kotlin.2.4.10"
 const val TARGET_JAVA_VERSION = 25
+
+/**
+ * `worldscommon`'s version, on both loaders
+ */
+const val COMMON_VERSION = "1.0.0"
+
+const val FML_VERSION = "11.0.16"
+const val MERGETOOL_VERSION = "2.0.0"
+const val MAVEN_ARTIFACT_VERSION = "3.8.5"

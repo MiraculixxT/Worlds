@@ -1,0 +1,27 @@
+modLoader = "klf"
+loaderVersion = "[1,)"
+license = "All-Rights-Reserved"
+issueTrackerURL = "https://github.com/miraculixx/Worlds/issues"
+
+[[mods]]
+modId = "chunkeditor"
+version = "${version}"
+displayName = "Chunk Editor"
+description = "Browse, select and delete chunks of a world without leaving the game."
+authors = "Miraculixx"
+iconFile = "assets/chunkeditor/icon.png"
+
+[[mixins]]
+config = "chunkeditor.mixins.json"
+
+[[dependencies.chunkeditor]]
+modId = "minecraft"
+versionRange = "[${minecraft_version},)"
+ordering = "NONE"
+side = "CLIENT"
+
+
+[[dependencies.chunkeditor]]
+modId = "worldscommon"
+ordering = "NONE"
+side = "CLIENT"

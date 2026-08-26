@@ -1,0 +1,27 @@
+modLoader = "klf"
+loaderVersion = "[1,)"
+license = "All-Rights-Reserved"
+issueTrackerURL = "https://github.com/miraculixx/Worlds/issues"
+
+[[mods]]
+modId = "showmyworld"
+version = "${version}"
+displayName = "Show My World"
+description = "Shows the selected world or server as the title screen panorama."
+authors = "Miraculixx"
+iconFile = "assets/showmyworld/icon.png"
+
+[[mixins]]
+config = "showmyworld.mixins.json"
+
+[[dependencies.showmyworld]]
+modId = "minecraft"
+versionRange = "[${minecraft_version},)"
+ordering = "NONE"
+side = "CLIENT"
+
+
+[[dependencies.showmyworld]]
+modId = "worldscommon"
+ordering = "NONE"
+side = "CLIENT"

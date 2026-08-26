@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "worlds",
+  "version": "${version}",
+  "name": "Worlds",
+  "description": "Play, manage & get worlds like adventure maps directly ingame!",
+  "authors": [
+    "Miraculixx"
+  ],
+  "contact": {
+    "sources": "https://github.com/miraculixx/Worlds",
+    "homepage": "https://modrinth.com/mod/world"
+  },
+  "license": "All-Rights-Reserved",
+  "icon": "assets/worlds/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "de.miraculixx.worlds.client.WorldsClient"
+    ],
+    "main": [
+      "de.miraculixx.worlds.Worlds"
+    ]
+  },
+  "mixins": [
+    "worlds.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": "*",
+    "fabric-language-kotlin": "*",
+    "chunkeditor": "*",
+    "showmyworld": "*",
+    "worldscommon": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "worldscommon",
+  "version": "${version}",
+  "name": "Worlds Common",
+  "description": "Shared UI toolkit for Worlds and Chunk Editor. Bundled inside both, never installed on its own.",
+  "authors": [
+    "Miraculixx"
+  ],
+  "contact": {
+    "sources": "https://github.com/miraculixx/Worlds"
+  },
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {},
+  "depends": {
+    "fabricloader": "*",
+    "fabric-language-kotlin": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}

@@ -1,0 +1,38 @@
+modLoader = "klf"
+loaderVersion = "[1,)"
+license = "All-Rights-Reserved"
+issueTrackerURL = "https://github.com/miraculixx/Worlds/issues"
+
+[[mods]]
+modId = "worlds"
+version = "${version}"
+displayName = "Worlds"
+description = "Play, manage & get worlds like adventure maps directly ingame!"
+authors = "Miraculixx"
+displayURL = "https://modrinth.com/mod/world"
+iconFile = "assets/worlds/icon.png"
+
+[[mixins]]
+config = "worlds.mixins.json"
+
+[[dependencies.worlds]]
+modId = "minecraft"
+versionRange = "[${minecraft_version},)"
+ordering = "NONE"
+side = "CLIENT"
+
+
+[[dependencies.worlds]]
+modId = "chunkeditor"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.worlds]]
+modId = "showmyworld"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.worlds]]
+modId = "worldscommon"
+ordering = "NONE"
+side = "CLIENT"

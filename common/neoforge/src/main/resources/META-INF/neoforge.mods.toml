@@ -1,0 +1,18 @@
+modLoader = "klf"
+loaderVersion = "[1,)"
+license = "All-Rights-Reserved"
+issueTrackerURL = "https://github.com/miraculixx/Worlds/issues"
+
+[[mods]]
+modId = "worldscommon"
+version = "${version}"
+displayName = "Worlds Common"
+description = "Shared UI toolkit for Worlds, Chunk Editor and Show My World. Bundled inside all three, never installed on its own."
+authors = "Miraculixx"
+
+[[dependencies.worldscommon]]
+modId = "minecraft"
+versionRange = "[${minecraft_version},)"
+ordering = "NONE"
+side = "CLIENT"
+

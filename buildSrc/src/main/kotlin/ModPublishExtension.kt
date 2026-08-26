@@ -3,10 +3,13 @@ import org.gradle.api.provider.Property
 
 
 interface ModPublishExtension {
+    /** Which loader's jar this module publishes `fabric` or `neoforge` */
+    val loader: Property<String>
+
     /** Modrinth project id or slug. */
     val modrinthId: Property<String>
 
-    /** CurseForge **numeric** project id — the site shows it under "Project ID", slugs are not accepted. */
+    /** CurseForge **numeric** project id */
     val curseforgeId: Property<String>
 
     /** Human name, used to build `"<name> - <version>"`. */
