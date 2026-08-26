@@ -25,13 +25,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import de.miraculixx.common.Loader
+import net.minecraft.ChatFormatting
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.components.Tooltip
 import net.minecraft.client.gui.components.tabs.GridLayoutTab
-import net.minecraft.client.gui.components.tabs.MenuTabBar
+import net.minecraft.client.gui.components.tabs.TabNavigationBar
 import net.minecraft.client.gui.components.tabs.TabManager
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen
@@ -48,7 +49,6 @@ import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.FormattedText
 import net.minecraft.network.chat.Style
-import net.minecraft.network.chat.TextColor
 import net.minecraft.resources.Identifier
 import net.minecraft.util.Util
 import java.time.Instant
@@ -72,7 +72,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         tabConsumer { page -> if (page != null) onTabSelected(page) },
         tabConsumer { },
     )
-    private lateinit var tabBar: MenuTabBar
+    private lateinit var tabBar: TabNavigationBar
     private var allEntries: List<MapEntry> = emptyList()
     // Render-thread only: bumped per filter pass so a superseded result is discarded on arrival.
     private var filterGen = 0
@@ -160,9 +160,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         applyLayout()
 
         tabBar = addRenderableWidget(
-            MenuTabBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
+            TabNavigationBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
         )
-        tabBar.arrangeElements(width)
+        tabBar.updateWidth(width)
+        tabBar.arrangeElements()
 
         val searchY = TAB_BAR_H + 4
         // Decided before to know the row width
@@ -174,7 +175,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
         settingsButton = addRenderableWidget(
             IconButton(leftLeft, searchY, 20, ROW_H, SETTINGS_LABEL, { MENU }) {
-                minecraft.gui.setScreen(WorldsSettingsScreen(this))
+                minecraft.setScreen(WorldsSettingsScreen(this))
             }
         )
         settingsButton.setTooltip(Tooltip.create(SETTINGS_LABEL))
@@ -247,7 +248,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         // Bottom button row
         addRenderableWidget(
             Button.builder(Component.literal("⏪")) {
-                minecraft.gui.setScreen(SelectWorldScreen(this))
+                minecraft.setScreen(SelectWorldScreen(this))
             }.tooltip(Tooltip.create(Component.translatable("worlds.tooltip.back_to_vanilla")))
                 .bounds(leftLeft, height - 26, 20, 20).build()
         )
@@ -259,7 +260,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         )
         addRenderableWidget(
             Button.builder(Component.literal("+")) {
-                CreateWorldScreen.openFresh(minecraft) { minecraft.gui.setScreen(this) }
+                CreateWorldScreen.openFresh(minecraft) { minecraft.setScreen(this) }
             }.tooltip(Tooltip.create(Component.translatable("worlds.tooltip.create_world")))
                 .bounds(leftLeft + 44, height - 26, 20, 20).build()
         )
@@ -319,8 +320,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
                 Component.translatable(
                     "worlds.update.tooltip",
                     Component.literal(ModUpdate.installedVersion ?: I18n.get("selectWorld.versionUnknown"))
-                        .withColor(TextColor.RED),
-                    Component.literal(latest).withColor(TextColor.GREEN),
+                        .withStyle(ChatFormatting.RED),
+                    Component.literal(latest).withStyle(ChatFormatting.GREEN),
                 )
             )
         )
@@ -578,7 +579,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
     private fun openFilters() {
         val state = filters
-        minecraft.gui.setScreen(
+        minecraft.setScreen(
             FilterScreen(
                 this, CategoryBadge.FILTER_CATEGORIES, state.category ?: ALL_CATEGORIES,
                 state.version, state.sort, state.reverse, state.defaultSort,
@@ -750,7 +751,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
             if (missing.isEmpty()) {
                 playWorld(folder)
             } else {
-                minecraft.gui.setScreen(MissingModsScreen(this, entry.title, missing) { playWorld(folder) })
+                minecraft.setScreen(MissingModsScreen(this, entry.title, missing) { playWorld(folder) })
             }
             return
         }
@@ -776,7 +777,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     /** Open an installed world, returning to this screen when the flow hands control back. */
     private fun playWorld(folder: String) {
         minecraft.createWorldOpenFlows().openWorld(folder) {
-            minecraft.gui.setScreen(this)
+            minecraft.setScreen(this)
         }
     }
 
@@ -943,7 +944,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         selected = null
         readmeBlocks = emptyList()
         allEntries = emptyList()
-        minecraft.gui.setScreen(this)
+        minecraft.setScreen(this)
     }
 
     private fun drawDetailHeader(graphics: GuiGraphicsExtractor, entry: MapEntry) {
@@ -1188,7 +1189,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         tabBar.keyPressed(event) || super.keyPressed(event)
 
     override fun onClose() {
-        minecraft.gui.setScreen(parent)
+        minecraft.setScreen(parent)
     }
 
     override fun removed() {
@@ -1196,7 +1197,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     }
 
     private companion object {
-        /** Height of [MenuTabBar] (its own private constant), needed to place the row below it. */
+        /** Height of [TabNavigationBar] (its own private constant), needed to place the row below it. */
         const val TAB_BAR_H = 24
 
         /** Height of the search row: the box and every button in it. */

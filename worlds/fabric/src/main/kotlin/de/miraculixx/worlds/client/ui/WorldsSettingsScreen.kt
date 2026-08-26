@@ -69,7 +69,7 @@ class WorldsSettingsScreen(private val parent: Screen) : Screen(Component.transl
     override fun onClose() {
         list.commitEdits()
         WorldsConfig.save()
-        minecraft.gui.setScreen(parent)
+        minecraft.setScreen(parent)
     }
 
     private companion object {

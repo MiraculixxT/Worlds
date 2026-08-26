@@ -82,6 +82,6 @@ class MissingModsScreen(
     private fun openUrl(url: String?) = Links.open(url)
 
     override fun onClose() {
-        minecraft.gui.setScreen(parent)
+        minecraft.setScreen(parent)
     }
 }

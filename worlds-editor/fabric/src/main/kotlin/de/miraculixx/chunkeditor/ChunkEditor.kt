@@ -12,6 +12,6 @@ import net.minecraft.world.level.storage.LevelStorageSource
  */
 object ChunkEditor {
     fun open(parent: Screen, access: LevelStorageSource.LevelStorageAccess) {
-        Minecraft.getInstance().gui.setScreen(ChunkMapScreen(parent, access))
+        Minecraft.getInstance().setScreen(ChunkMapScreen(parent, access))
     }
 }

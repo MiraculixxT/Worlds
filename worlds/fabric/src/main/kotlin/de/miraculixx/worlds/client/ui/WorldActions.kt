@@ -25,11 +25,11 @@ object WorldActions {
     private val mc: Minecraft get() = Minecraft.getInstance()
 
     fun delete(folder: String, title: String, onDone: () -> Unit) {
-        mc.gui.setScreen(
+        mc.setScreen(
             ConfirmScreen(
                 { confirmed ->
                     if (confirmed) {
-                        mc.gui.setScreen(ProgressScreen(true))
+                        mc.setScreen(ProgressScreen(true))
                         doDelete(folder)
                     }
                     onDone()
@@ -79,7 +79,7 @@ object WorldActions {
             onDone()
             return
         }
-        mc.gui.setScreen(screen)
+        mc.setScreen(screen)
     }
 
     fun recreate(parent: Screen, folder: String, onDone: () -> Unit) {
@@ -97,9 +97,9 @@ object WorldActions {
                     CreateWorldScreen.createFromExisting(mc, { onDone() }, levelSettings, context, dataPackDir)
                 }
                 if (context.options().isOldCustomizedWorld) {
-                    mc.gui.setScreen(
+                    mc.setScreen(
                         ConfirmScreen(
-                            { proceed -> mc.gui.setScreen(if (proceed) create() else parent) },
+                            { proceed -> mc.setScreen(if (proceed) create() else parent) },
                             Component.translatable("selectWorld.recreate.customized.title"),
                             Component.translatable("selectWorld.recreate.customized.text"),
                             CommonComponents.GUI_PROCEED,
@@ -107,7 +107,7 @@ object WorldActions {
                         )
                     )
                 } else {
-                    mc.gui.setScreen(create())
+                    mc.setScreen(create())
                 }
             }
         } catch (e: ContentValidationException) {
@@ -115,9 +115,9 @@ object WorldActions {
             symlinkWarning(parent)
         } catch (e: Exception) {
             Constants.LOG.error("Unable to recreate world", e)
-            mc.gui.setScreen(
+            mc.setScreen(
                 AlertScreen(
-                    { mc.gui.setScreen(parent) },
+                    { mc.setScreen(parent) },
                     Component.translatable("selectWorld.recreate.error.title"),
                     Component.translatable("selectWorld.recreate.error.text"),
                 )
@@ -126,7 +126,7 @@ object WorldActions {
     }
 
     private fun symlinkWarning(parent: Screen) {
-        mc.gui.setScreen(NoticeWithLinkScreen.createWorldSymlinkWarningScreen { mc.gui.setScreen(parent) })
+        mc.setScreen(NoticeWithLinkScreen.createWorldSymlinkWarningScreen { mc.setScreen(parent) })
     }
 
     private fun queueLoadScreen() {

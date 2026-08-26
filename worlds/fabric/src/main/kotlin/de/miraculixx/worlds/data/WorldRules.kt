@@ -20,7 +20,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * The per-save state 26.2 keeps *outside* `level.dat`, in `data/<namespace>/<path>.dat`.
+ * The per-save state 26.1 keeps *outside* `level.dat`, in `data/<namespace>/<path>.dat`.
  */
 object WorldRules {
 

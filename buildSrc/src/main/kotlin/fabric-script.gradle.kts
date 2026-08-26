@@ -28,7 +28,9 @@ dependencies {
     println("Game Version: $gameVersion\nSupported Versions: ${outlet.mcVersionRange}")
     println("FabricLoader: ${outlet.loaderVersion()}\nFabricAPI: ${outlet.fapiVersion()}")
     implementation("net.fabricmc:fabric-loader:${outlet.loaderVersion()}")
-//    implementation("net.fabricmc.fabric-api:fabric-api:${outlet.fapiVersion()}")
+    // Required for `assets/<modid>/` to be seen at all: fabric-loader ships no resource-pack
+    // integration, `ModResourcePackCreator` lives in fabric-api's `fabric-resource-loader-v1`.
+    implementation("net.fabricmc.fabric-api:fabric-api:${outlet.fapiVersion()}")
 
     //
     // Kotlin libraries

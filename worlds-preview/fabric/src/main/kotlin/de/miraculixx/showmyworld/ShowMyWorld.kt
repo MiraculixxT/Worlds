@@ -29,10 +29,10 @@ object ShowMyWorld {
     fun settingsScreen(onDone: Runnable): Screen = PreviewSettingsScreen(onDone)
 
     fun openSettings(parent: Screen) {
-        Minecraft.getInstance().gui.setScreen(settingsScreen(parent))
+        Minecraft.getInstance().setScreen(settingsScreen(parent))
     }
 
     fun openSettings(onDone: Runnable) {
-        Minecraft.getInstance().gui.setScreen(settingsScreen(onDone))
+        Minecraft.getInstance().setScreen(settingsScreen(onDone))
     }
 }

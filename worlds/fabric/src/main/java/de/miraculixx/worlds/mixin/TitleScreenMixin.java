@@ -28,6 +28,6 @@ public class TitleScreenMixin {
     private void worlds_replaceSingleplayerButton(Args args) {
         Screen screen = (Screen) (Object) this;
         args.set(0, Component.translatable("worlds.menu.worlds"));
-        args.set(1, (Button.OnPress) button -> Minecraft.getInstance().gui.setScreen(new WorldsScreen(screen)));
+        args.set(1, (Button.OnPress) button -> Minecraft.getInstance().setScreen(new WorldsScreen(screen)));
     }
 }

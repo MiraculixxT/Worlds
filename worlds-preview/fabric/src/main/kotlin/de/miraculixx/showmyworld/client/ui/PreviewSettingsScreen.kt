@@ -21,7 +21,7 @@ import net.minecraft.network.chat.Component
  */
 class PreviewSettingsScreen(private val onDone: Runnable) : Screen(Component.translatable("showmyworld.settings.title")) {
 
-    constructor(parent: Screen) : this(Runnable { Minecraft.getInstance().gui.setScreen(parent) })
+    constructor(parent: Screen) : this(Runnable { Minecraft.getInstance().setScreen(parent) })
 
     private val settings = PreviewConfig.settings
 

@@ -7,13 +7,16 @@ import net.minecraft.client.resources.language.I18n
 import net.minecraft.core.registries.Registries
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.LongTag
+import net.minecraft.nbt.NbtAccounter
+import net.minecraft.nbt.NbtIo
+import net.minecraft.nbt.StreamTagVisitor
 import net.minecraft.nbt.visitors.CollectFields
 import net.minecraft.nbt.visitors.FieldSelector
 import net.minecraft.resources.Identifier
 import net.minecraft.resources.ResourceKey
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.Level
-import net.minecraft.world.level.chunk.storage.RegionFileStorage
+import net.minecraft.world.level.chunk.storage.RegionFile
 import net.minecraft.world.level.chunk.storage.RegionStorageInfo
 import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
@@ -172,7 +175,7 @@ object ChunkRegions {
             storage(dimension, sub)?.use { store ->
                 chunks.forEach { pos ->
                     try {
-                        store.write(pos, null) // vanilla treats null as delete
+                        store.clear(pos) // what vanilla's write(pos, null) does
                         if (sub == SUB_REGION) deleted++
                     } catch (e: Exception) {
                         Constants.LOG.warn("Failed to delete chunk {} from {}: {}", pos, sub, e.message)
@@ -204,11 +207,11 @@ object ChunkRegions {
     /**
      * A storage over one of the dimension's three chunk folders, or null when it does not exist
      */
-    internal fun storage(dimension: WorldDimension, sub: String): RegionFileStorage? {
+    internal fun storage(dimension: WorldDimension, sub: String): RegionStore? {
         val dir = dimension.dir.resolve(sub)
         if (!Files.isDirectory(dir)) return null
         val type = if (sub == SUB_REGION) "chunk" else sub
-        return RegionFileStorage(RegionStorageInfo(dimension.dir.name, dimension.key, type), dir, false)
+        return RegionStore(RegionStorageInfo(dimension.dir.name, dimension.key, type), dir)
     }
 
     private fun readIndexAt(file: Path): BitSet? {
@@ -229,5 +232,47 @@ object ChunkRegions {
         } catch (e: Exception) {
             null
         }
+    }
+}
+
+/**
+ * Stand-in for vanilla's [net.minecraft.world.level.chunk.storage.RegionFileStorage]
+ */
+internal class RegionStore(private val info: RegionStorageInfo, private val folder: Path) : AutoCloseable {
+    private val cache = LinkedHashMap<Long, RegionFile>(16, 0.75f, true)
+
+    fun read(pos: ChunkPos): CompoundTag? =
+        regionFile(pos)?.getChunkDataInputStream(pos)?.use { NbtIo.read(it) }
+
+    fun scanChunk(pos: ChunkPos, visitor: StreamTagVisitor) {
+        regionFile(pos)?.getChunkDataInputStream(pos)?.use { NbtIo.parse(it, visitor, NbtAccounter.unlimitedHeap()) }
+    }
+
+    /** Drops the chunk and its external `.mcc`, leaving the region file itself in place */
+    fun clear(pos: ChunkPos) {
+        regionFile(pos)?.clear(pos)
+    }
+
+    private fun regionFile(pos: ChunkPos): RegionFile? {
+        val key = ChunkPos.pack(pos.regionX, pos.regionZ)
+        cache[key]?.let { return it }
+        val path = ChunkRegions.regionFile(folder, pos.regionX, pos.regionZ)
+        if (!Files.isRegularFile(path)) return null
+        if (cache.size >= MAX_CACHE_SIZE) cache.remove(cache.keys.first())?.let { evicted ->
+            runCatching { evicted.close() }.onFailure { Constants.LOG.warn("Failed to close region file: {}", it.message) }
+        }
+        return RegionFile(info, path, folder, false).also { cache[key] = it }
+    }
+
+    override fun close() {
+        cache.values.forEach { file ->
+            runCatching { file.close() }.onFailure { Constants.LOG.warn("Failed to close region file: {}", it.message) }
+        }
+        cache.clear()
+    }
+
+    private companion object {
+        /** [net.minecraft.world.level.chunk.storage.RegionFileStorage.MAX_CACHE_SIZE] */
+        const val MAX_CACHE_SIZE = 256
     }
 }

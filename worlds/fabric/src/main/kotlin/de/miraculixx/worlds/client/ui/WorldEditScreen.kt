@@ -30,7 +30,7 @@ import net.minecraft.client.gui.components.CycleButton
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.components.Tooltip
 import net.minecraft.client.gui.components.tabs.GridLayoutTab
-import net.minecraft.client.gui.components.tabs.MenuTabBar
+import net.minecraft.client.gui.components.tabs.TabNavigationBar
 import net.minecraft.client.gui.components.tabs.TabManager
 import net.minecraft.client.gui.screens.BackupConfirmScreen
 import net.minecraft.client.gui.screens.ConfirmScreen
@@ -87,7 +87,7 @@ class WorldEditScreen(
         tabConsumer { page -> if (page != null) onTabSelected(page) },
         tabConsumer { },
     )
-    private lateinit var tabBar: MenuTabBar
+    private lateinit var tabBar: TabNavigationBar
 
     private val saveDir: Path = access.getLevelPath(LevelResource.ROOT)
     private val iconFile: Path = access.iconFile.orElseGet { saveDir.resolve("icon.png") }
@@ -170,9 +170,10 @@ class WorldEditScreen(
         extraWidgets.clear()
 
         tabBar = addRenderableWidget(
-            MenuTabBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
+            TabNavigationBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
         )
-        tabBar.arrangeElements(width)
+        tabBar.updateWidth(width)
+        tabBar.arrangeElements()
 
         cardW = (width - 40).coerceAtMost(CARD_MAX_W)
         cardX = (width - cardW) / 2
@@ -495,7 +496,7 @@ class WorldEditScreen(
 
     private fun backup() {
         EditWorldScreen.makeBackupAndShowToast(access)
-            .thenAcceptAsync({ minecraft.gui.setScreen(this) }, minecraft)
+            .thenAcceptAsync({ minecraft.setScreen(this) }, minecraft)
     }
 
     /** World pack folders are generated if not yet present (vanilla omits them sometimes?) */
@@ -518,12 +519,12 @@ class WorldEditScreen(
      * It does weird things, so we just exit the screen and force the user to reload
      */
     private fun optimize() {
-        minecraft.gui.setScreen(
+        minecraft.setScreen(
             BackupConfirmScreen(
-                { minecraft.gui.setScreen(this) },
+                { minecraft.setScreen(this) },
                 { backup, eraseCache ->
                     EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access).thenAcceptAsync({
-                        minecraft.gui.setScreen(
+                        minecraft.setScreen(
                             OptimizeWorldScreen.create(
                                 minecraft, { onDone() }, minecraft.fixerUpper, access, eraseCache,
                             )
@@ -613,16 +614,16 @@ class WorldEditScreen(
     private fun openPlayerStats(player: WorldPlayers.PlayerData) {
         val stats = WorldPlayers.readStats(access, player.id)
         if (!ItemComponents.bound()) {
-            minecraft.gui.setScreen(GenericMessageScreen(Component.translatable("worlds.edit.reading_stats")))
+            minecraft.setScreen(GenericMessageScreen(Component.translatable("worlds.edit.reading_stats")))
         }
         ItemComponents.prepare { ok ->
             if (!ok) {
-                minecraft.gui.setScreen(this)
+                minecraft.setScreen(this)
                 return@prepare
             }
             val screen = StatsScreen(this, stats)
             (screen as OfflineStatsScreen).worlds_useLocalStats()
-            minecraft.gui.setScreen(screen)
+            minecraft.setScreen(screen)
         }
     }
 
@@ -632,10 +633,10 @@ class WorldEditScreen(
     private fun openGameRules() {
         val features = WorldEditor.readFeatures(access)
         val rules = WorldRules.readGameRules(access, features)
-        minecraft.gui.setScreen(
+        minecraft.setScreen(
             WorldCreationGameRulesScreen(rules) { result ->
                 result.ifPresent { WorldRules.writeGameRules(access, features, it) }
-                minecraft.gui.setScreen(this)
+                minecraft.setScreen(this)
             }
         )
     }
@@ -662,13 +663,13 @@ class WorldEditScreen(
         repository.setSelected(
             WorldEditor.readEnabledPacks(access).ifEmpty { listOf(WorldDataPacks.VANILLA) }
         )
-        minecraft.gui.setScreen(
+        minecraft.setScreen(
             PackSelectionScreen(
                 repository,
                 { applied ->
                     WorldDataPacks.apply(access, applied)
                     packRows = WorldDataPacks.listRows(access)
-                    minecraft.gui.setScreen(this)
+                    minecraft.setScreen(this)
                 },
                 WorldDataPacks.libraryDir(),
                 Component.translatable("dataPack.title"),
@@ -684,13 +685,13 @@ class WorldEditScreen(
         val repository = WorldResourcePacks.createRepository(access)
         repository.reload()
         repository.setSelected(WorldResourcePacks.selectedIds(access))
-        minecraft.gui.setScreen(
+        minecraft.setScreen(
             PackSelectionScreen(
                 repository,
                 { applied ->
                     WorldResourcePacks.apply(access, applied)
                     resourceRows = WorldResourcePacks.listRows(access)
-                    minecraft.gui.setScreen(this)
+                    minecraft.setScreen(this)
                 },
                 WorldResourcePacks.libraryDir(),
                 Component.translatable("resourcePack.title"),
@@ -712,11 +713,11 @@ class WorldEditScreen(
 
     private fun confirmDeletePack(row: PackRow) {
         val resource = tab == Tab.RESOURCE_PACKS
-        minecraft.gui.setScreen(
+        minecraft.setScreen(
             ConfirmScreen(
                 { confirmed ->
                     if (confirmed) deletePack(resource, row)
-                    minecraft.gui.setScreen(this)
+                    minecraft.setScreen(this)
                 },
                 Component.translatable("worlds.edit.delete_pack"),
                 Component.translatable("worlds.edit.delete_pack_question", row.name, levelName),
@@ -752,11 +753,11 @@ class WorldEditScreen(
             setHardcore(false)
             return
         }
-        minecraft.gui.setScreen(
+        minecraft.setScreen(
             ConfirmScreen(
                 { confirmed ->
                     if (confirmed) setHardcore(true)
-                    minecraft.gui.setScreen(this)
+                    minecraft.setScreen(this)
                 },
                 Component.translatable("selectWorld.gameMode.hardcore"),
                 Component.translatable("worlds.edit.hardcore_question", levelName),
@@ -1013,7 +1014,7 @@ class WorldEditScreen(
         val HORIZONTAL_RANGE = -30_000_000L..30_000_000L
         val VERTICAL_RANGE = -2048L..2047L
 
-        /** Height of [MenuTabBar] (its own private constant). */
+        /** Height of [TabNavigationBar] (its own private constant). */
         const val TAB_BAR_H = 24
         const val CARD_MAX_W = 360
         const val CARD_PAD = 6

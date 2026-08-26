@@ -20,7 +20,7 @@ import kotlinx.serialization.Serializable
  *     "download": "https://example.com/the-dropper-1.4.zip",
  *     "version": "1.4",
  *     "downloads": 128400,
- *     "mc": ["26.2"],
+ *     "mc": ["26.1.2"],
  *     "categories": ["parkour"],
  *     "website": "https://example.com/dropper",
  *     "trailer": "https://www.youtube.com/watch?v=xxxxxxxxxxx",

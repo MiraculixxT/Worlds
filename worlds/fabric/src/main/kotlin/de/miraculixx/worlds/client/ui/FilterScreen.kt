@@ -167,6 +167,6 @@ class FilterScreen(
 
     override fun onClose() {
         parent.applyFilters(if (category == ALL_CATEGORIES) null else category, version, sort, reverse)
-        minecraft.gui.setScreen(parent)
+        minecraft.setScreen(parent)
     }
 }

@@ -254,14 +254,14 @@ internal class ChunkMapScreen(
 
     private fun openTrim() {
         val dim = dimension ?: return
-        minecraft.gui.setScreen(ChunkTrimScreen(this) { criteria -> applyTrim(dim, criteria) })
+        minecraft.setScreen(ChunkTrimScreen(this) { criteria -> applyTrim(dim, criteria) })
     }
 
     /**
      * Turns the criteria into a selection. Scans all chunk data if needed.
      */
     private fun applyTrim(dim: WorldDimension, criteria: TrimCriteria) {
-        minecraft.gui.setScreen(this)
+        minecraft.setScreen(this)
         if (criteria.isEmpty) return
         if (!criteria.needsScan) {
             select(criteria, emptyMap())
@@ -319,9 +319,9 @@ internal class ChunkMapScreen(
     private fun confirmDelete() {
         val dim = dimension ?: return
         val count = selected.size
-        minecraft.gui.setScreen(
+        minecraft.setScreen(
             BackupConfirmScreen(
-                { minecraft.gui.setScreen(this) },
+                { minecraft.setScreen(this) },
                 { backup, _ ->
                     EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access)
                         .thenAcceptAsync({ runDelete(dim) }, minecraft)
@@ -337,7 +337,7 @@ internal class ChunkMapScreen(
     private fun runDelete(dim: WorldDimension) {
         val chunks = selected.toLongArray().map { ChunkPos.unpack(it) }
         val generation = loadGen
-        minecraft.gui.setScreen(this)
+        minecraft.setScreen(this)
         Constants.SCOPE.launch {
             ChunkRegions.deleteChunks(dim, chunks)
             val touched = chunks.map { it.regionX to it.regionZ }.distinct()
@@ -809,7 +809,7 @@ internal class ChunkMapScreen(
         // of registering it into a cache nothing will release again.
         loadGen++
         dropTextures()
-        minecraft.gui.setScreen(parent)
+        minecraft.setScreen(parent)
     }
 
     private companion object {
@@ -928,5 +928,5 @@ internal class ChunkTrimScreen(
         )
     }
 
-    override fun onClose() = minecraft.gui.setScreen(parent)
+    override fun onClose() = minecraft.setScreen(parent)
 }

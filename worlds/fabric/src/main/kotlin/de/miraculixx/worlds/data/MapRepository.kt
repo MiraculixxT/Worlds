@@ -355,7 +355,7 @@ object MapRepository {
     private data class LevelData(val name: String?, val info: WorldInfo)
 
     /**
-     * Read the `Data` compound of a save's `level.dat`, or null when it is unreadable. 26.2 keeps
+     * Read the `Data` compound of a save's `level.dat`, or null when it is unreadable. 26.1 keeps
      * difficulty in `difficulty_settings` (`difficulty`/`hardcore`/`locked`) rather than a plain byte.
      */
     private fun readLevelData(dir: java.nio.file.Path): LevelData? = try {

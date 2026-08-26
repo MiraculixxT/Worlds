@@ -39,7 +39,10 @@ afterEvaluate {
     modrinth {
         if (isFabric.get()) {
             loaders.addAll("fabric", "quilt")
-            dependencies { required.project("fabric-language-kotlin") }
+            dependencies {
+                required.project("fabric-language-kotlin")
+                required.project("fabric-api")
+            }
         } else {
             loaders.addAll("neoforge")
             dependencies { required.project("kotlin-lang-forge") }
@@ -69,6 +72,7 @@ val publishCurseforge = tasks.register<TaskPublishCurseForge>("publishCurseforge
         mainFile.addModLoader("Fabric")
         mainFile.addModLoader("Quilt")
         mainFile.addRequirement("fabric-language-kotlin")
+        mainFile.addRequirement("fabric-api")
     } else {
         mainFile.addModLoader("NeoForge")
         mainFile.addRequirement("kotlinlangforge")

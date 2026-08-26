@@ -28,6 +28,7 @@
   "depends": {
     "fabricloader": "*",
     "fabric-language-kotlin": "*",
+    "fabric-api": "*",
     "chunkeditor": "*",
     "showmyworld": "*",
     "worldscommon": "*",

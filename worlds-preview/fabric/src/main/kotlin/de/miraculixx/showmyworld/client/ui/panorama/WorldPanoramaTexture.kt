@@ -15,6 +15,7 @@ import net.minecraft.client.renderer.texture.TextureContents
 import net.minecraft.client.resources.metadata.texture.TextureMetadataSection
 import net.minecraft.resources.Identifier
 import net.minecraft.server.packs.resources.ResourceManager
+import org.lwjgl.system.MemoryUtil
 
 /**
  * A cube map read from a world's own `panorama/` folder instead of from a resource pack.
@@ -102,8 +103,9 @@ class WorldPanoramaTexture(id: Identifier, private val dir: Path) : CubeMapTextu
                 face.copyRect(stacked, 0, 0, 0, layer * height, width, height, false, true)
                 return
             }
-            val source = face.pixelBytes
-            val target = stacked.pixelBytes
+            // 26.1 exposes no ByteBuffer over the pixels, only the raw address behind them.
+            val source = MemoryUtil.memByteBuffer(face.pointer, width * height * 4)
+            val target = MemoryUtil.memByteBuffer(stacked.pointer, stacked.width * stacked.height * 4)
             val rowBytes = width * 4
             for (y in 0 until height) {
                 target.put((layer * height + (height - 1 - y)) * rowBytes, source, y * rowBytes, rowBytes)
