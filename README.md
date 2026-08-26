@@ -35,5 +35,5 @@ Task shortcuts for easier testing.
 ```shell
 ./gradlew :worlds:worlds-fabric:publishMods :worlds:worlds-neoforge:publishMods
 ./gradlew :worlds-editor:worlds-editor-fabric:publishMods :worlds-editor:worlds-editor-neoforge:publishMods
-./gradlew :worlds-viewer:worlds-viewer-fabric:publishMods :worlds-viewer:worlds-viewer-neoforge:publishMods
+./gradlew :worlds-preview:worlds-preview-fabric:publishMods :worlds-preview:worlds-preview-neoforge:publishMods
 ```
