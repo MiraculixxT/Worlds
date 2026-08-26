@@ -8,7 +8,7 @@ plugins {
 }
 
 val publish = extensions.create<ModPublishExtension>("modPublish")
-publish.loader.convention("fabric")
+publish.loader.convention(if (project.name.endsWith("-neoforge")) "neoforge" else "fabric")
 
 // On Mojang mappings loom produces no `remapJar`, so `jar` is the production artifact
 val modJar = tasks.named(if (tasks.names.contains("remapJar")) "remapJar" else "jar")
@@ -20,20 +20,31 @@ val publishedVersion = publish.loader.map { "${project.version}+$it" }
 modrinth {
     token.set(providers.gradleProperty("modrinthToken").orElse(""))
     projectId.set(publish.modrinthId)
-    loaders.addAll(publish.loader.map { if (it == "fabric") listOf("fabric", "quilt") else listOf("neoforge") })
-    dependencies {
-//        required.project("fabric-api")
-    }
-
     uploadFile.set(modJar)
     versionName.set(publish.displayName.map { "$it - ${project.version} (${publish.loader.get()})" })
     versionNumber.set(publishedVersion)
     changelog.set(publish.changelog)
     versionType.set("release")
     outlet.mcVersionRange = rootProject.property("supportedVersions") as String
+    gameVersions.addAll(outlet.mcVersions())
 
     // Only the Fabric module carries the readme, so only it syncs the shared project body.
     syncBodyFrom.set(publish.readme.map { it.asFile.readText() }.orElse(""))
+
+    // `-PmodrinthDryRun` validates and logs the request
+    debugMode.set(providers.gradleProperty("modrinthDryRun").isPresent)
+}
+
+afterEvaluate {
+    modrinth {
+        if (isFabric.get()) {
+            loaders.addAll("fabric", "quilt")
+            dependencies { required.project("fabric-language-kotlin") }
+        } else {
+            loaders.addAll("neoforge")
+            dependencies { required.project("kotlin-lang-forge") }
+        }
+    }
 }
 
 
@@ -60,7 +71,7 @@ val publishCurseforge = tasks.register<TaskPublishCurseForge>("publishCurseforge
         mainFile.addRequirement("fabric-language-kotlin")
     } else {
         mainFile.addModLoader("NeoForge")
-        mainFile.addRequirement("kotlin-lang-forge")
+        mainFile.addRequirement("kotlinlangforge")
     }
 }
 
