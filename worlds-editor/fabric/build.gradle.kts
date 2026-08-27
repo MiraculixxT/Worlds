@@ -8,7 +8,7 @@ base.archivesName = "chunk-editor-fabric"
 
 
 dependencies {
-    implementation(project(":common:common-fabric"))
+    implementation(project(path = ":common:common-fabric", configuration = "namedElements"))
     include(project(":common:common-fabric"))
 }
 

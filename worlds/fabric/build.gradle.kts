@@ -9,13 +9,13 @@ base.archivesName = "worlds-fabric"
 
 
 dependencies {
-    implementation(project(":worlds-editor:worlds-editor-fabric"))
+    implementation(project(path = ":worlds-editor:worlds-editor-fabric", configuration = "namedElements"))
     include(project(":worlds-editor:worlds-editor-fabric"))
 
-    implementation(project(":worlds-preview:worlds-preview-fabric"))
+    implementation(project(path = ":worlds-preview:worlds-preview-fabric", configuration = "namedElements"))
     include(project(":worlds-preview:worlds-preview-fabric"))
 
-    implementation(project(":common:common-fabric"))
+    implementation(project(path = ":common:common-fabric", configuration = "namedElements"))
     include(project(":common:common-fabric"))
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.+")

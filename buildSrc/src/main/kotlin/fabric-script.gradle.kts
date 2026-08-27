@@ -1,3 +1,4 @@
+import net.fabricmc.loom.api.fabricapi.FabricApiExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -35,7 +36,7 @@ dependencies {
     "modImplementation"("net.fabricmc:fabric-loader:${outlet.loaderVersion()}")
     // Required for `assets/<modid>/` to be seen at all: fabric-loader ships no resource-pack
     // integration, `ModResourcePackCreator` lives in fabric-api's `fabric-resource-loader-v1`.
-    "modImplementation"("net.fabricmc.fabric-api:fabric-api:${outlet.fapiVersion()}")
+    "modImplementation"(project.extensions.getByType<FabricApiExtension>().module("fabric-resource-loader-v1", outlet.fapiVersion()))
 
     //
     // Kotlin libraries
