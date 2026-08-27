@@ -151,7 +151,7 @@ object ChunkRegions {
                     try {
                         store.scanChunk(pos, collector)
                         val tag = collector.result as? CompoundTag ?: return@forEachChunk
-                        facts[pos.pack()] = ChunkFacts(
+                        facts[pos.toLong()] = ChunkFacts(
                             tag.getLongOr("InhabitedTime", 0L),
                             tag.getLongOr("LastUpdate", 0L),
                         )
@@ -254,7 +254,7 @@ internal class RegionStore(private val info: RegionStorageInfo, private val fold
     }
 
     private fun regionFile(pos: ChunkPos): RegionFile? {
-        val key = ChunkPos.pack(pos.regionX, pos.regionZ)
+        val key = ChunkPos.asLong(pos.regionX, pos.regionZ)
         cache[key]?.let { return it }
         val path = ChunkRegions.regionFile(folder, pos.regionX, pos.regionZ)
         if (!Files.isRegularFile(path)) return null

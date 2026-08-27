@@ -2,7 +2,7 @@ package de.miraculixx.common.client.ui
 
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.Font
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.AbstractWidget
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.ContainerObjectSelectionList
@@ -61,21 +61,21 @@ class SettingsList(
     /** Write whatever is typed into the rows' edit boxes */
     fun commitEdits() = children().forEach { it.commit() }
 
-    override fun extractWidgetRenderState(
-        graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float,
+    override fun renderWidget(
+        graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float,
     ) {
         if (pendingRebuild) rebuild()
-        super.extractWidgetRenderState(graphics, mouseX, mouseY, partialTick)
+        super.renderWidget(graphics, mouseX, mouseY, partialTick)
     }
 
     override fun getRowWidth(): Int = width - 12
 
     override fun scrollBarX(): Int = x + width - 8
 
-    override fun extractListBackground(graphics: GuiGraphicsExtractor) =
+    override fun renderListBackground(graphics: GuiGraphics) =
         drawBox(graphics, x, y, x + width, y + height)
 
-    override fun extractListSeparators(graphics: GuiGraphicsExtractor) = Unit
+    override fun renderListSeparators(graphics: GuiGraphics) = Unit
 
     abstract inner class Row(private val label: String, private val indent: Int = 0) : Entry<Row>() {
         protected open fun widgets(): List<AbstractWidget> = emptyList()
@@ -90,11 +90,11 @@ class SettingsList(
 
         protected fun widgetY() = contentY + (contentHeight - WIDGET_H) / 2
 
-        protected fun drawLabel(graphics: GuiGraphicsExtractor, color: Int = -1) =
-            graphics.text(minecraft.font, label, contentX + indent, labelY(), color)
+        protected fun drawLabel(graphics: GuiGraphics, color: Int = -1) =
+            graphics.drawString(minecraft.font, label, contentX + indent, labelY(), color)
 
-        protected fun extractWidgets(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) =
-            widgets().forEach { it.extractRenderState(graphics, mouseX, mouseY, partialTick) }
+        protected fun renderWidgets(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) =
+            widgets().forEach { it.render(graphics, mouseX, mouseY, partialTick) }
     }
 
     inner class CategoryRow(private val category: SettingsCategory) : Row(category.label, INDENT) {
@@ -108,8 +108,8 @@ class SettingsList(
             return true
         }
 
-        override fun extractContent(
-            graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
+        override fun renderContent(
+            graphics: GuiGraphics, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
         ) {
             if (hovered) graphics.fill(contentX - 2, contentY, contentRight + 2, contentBottom, HOVER_COLOR)
             val arrow = when {
@@ -117,7 +117,7 @@ class SettingsList(
                 category.expanded -> "▼"
                 else -> "▶"
             }
-            graphics.text(minecraft.font, arrow, contentX, labelY(), SUBTEXT_COLOR)
+            graphics.drawString(minecraft.font, arrow, contentX, labelY(), SUBTEXT_COLOR)
             drawLabel(graphics)
             graphics.fill(contentX, contentBottom - 1, contentRight, contentBottom, 0xFF505050.toInt())
         }
@@ -136,16 +136,16 @@ class SettingsList(
 
         override fun widgets(): List<AbstractWidget> = listOfNotNull(button)
 
-        override fun extractContent(
-            graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
+        override fun renderContent(
+            graphics: GuiGraphics, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
         ) {
             drawLabel(graphics)
             button?.x = contentRight - button.width
             button?.y = widgetY()
             val valueRight = contentRight - (button?.let { it.width + 4 } ?: 0)
             val font = minecraft.font
-            graphics.text(font, value, valueRight - font.width(value), labelY(), SUBTEXT_COLOR)
-            extractWidgets(graphics, mouseX, mouseY, partialTick)
+            graphics.drawString(font, value, valueRight - font.width(value), labelY(), SUBTEXT_COLOR)
+            renderWidgets(graphics, mouseX, mouseY, partialTick)
         }
     }
 
@@ -159,13 +159,13 @@ class SettingsList(
 
         override fun widgets(): List<AbstractWidget> = listOf(button)
 
-        override fun extractContent(
-            graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
+        override fun renderContent(
+            graphics: GuiGraphics, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
         ) {
             drawLabel(graphics)
             button.x = contentRight - button.width
             button.y = widgetY()
-            extractWidgets(graphics, mouseX, mouseY, partialTick)
+            renderWidgets(graphics, mouseX, mouseY, partialTick)
         }
     }
 
@@ -181,13 +181,13 @@ class SettingsList(
 
         override fun widgets(): List<AbstractWidget> = listOf(button)
 
-        override fun extractContent(
-            graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
+        override fun renderContent(
+            graphics: GuiGraphics, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
         ) {
             drawLabel(graphics)
             button.x = contentRight - button.width
             button.y = widgetY()
-            extractWidgets(graphics, mouseX, mouseY, partialTick)
+            renderWidgets(graphics, mouseX, mouseY, partialTick)
         }
     }
 
@@ -210,8 +210,8 @@ class SettingsList(
             return super.keyPressed(event)
         }
 
-        override fun extractContent(
-            graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
+        override fun renderContent(
+            graphics: GuiGraphics, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
         ) {
             drawLabel(graphics)
             var x = contentRight
@@ -221,7 +221,7 @@ class SettingsList(
                 field.box.setY(widgetY())
                 x -= FIELD_GAP
             }
-            extractWidgets(graphics, mouseX, mouseY, partialTick)
+            renderWidgets(graphics, mouseX, mouseY, partialTick)
         }
     }
 }

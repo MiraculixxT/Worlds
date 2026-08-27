@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 import de.miraculixx.common.Loader
 import net.minecraft.ChatFormatting
 import net.minecraft.client.Minecraft
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.components.Tooltip
@@ -162,7 +162,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         tabBar = addRenderableWidget(
             TabNavigationBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
         )
-        tabBar.updateWidth(width)
+        tabBar.setWidth(width)
         tabBar.arrangeElements()
 
         val searchY = TAB_BAR_H + 4
@@ -793,9 +793,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
     private fun openUrl(url: String?) = Links.open(url)
 
-    override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
+    override fun render(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         updateWidgets()
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick)
+        super.render(graphics, mouseX, mouseY, partialTick)
 
         val handleColor = when {
             splitDragging -> 0xFFFFFFFF.toInt()
@@ -807,7 +807,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         if (updateButton.visible) {
             val orbY = updateButton.y + (ROW_H - ORB_SIZE) / 2
             graphics.blitSprite(RenderPipelines.GUI_TEXTURED, UPDATE_ORB, updateButton.x + 5, orbY, ORB_SIZE, ORB_SIZE)
-            graphics.text(font, UPDATE_LABEL, updateButton.x + ORB_SIZE + 9, updateButton.y + 6, -1)
+            graphics.drawString(font, UPDATE_LABEL, updateButton.x + ORB_SIZE + 9, updateButton.y + 6, -1)
         }
 
         if (separatorX >= 0) graphics.fill(separatorX, buttonsY + 2, separatorX + 1, buttonsY + 18, 0x60FFFFFF)
@@ -817,7 +817,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
         val entry = selected
         if (entry == null) {
-            graphics.text(
+            graphics.drawString(
                 font, Component.translatable("worlds.detail.hint"), rightLeft, listTop + 4, 0xFFA0A0A0.toInt(),
             )
         } else {
@@ -825,9 +825,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
             drawReadme(graphics, mouseX, mouseY)
         }
 
-        status?.let { graphics.text(font, it, leftLeft + 4, listTop + 12, 0xFFA0A0A0.toInt()) }
+        status?.let { graphics.drawString(font, it, leftLeft + 4, listTop + 12, 0xFFA0A0A0.toInt()) }
         actionMessage?.let {
-            graphics.text(font, clampLine(it, rightRight - rightLeft), rightLeft, buttonsY + 22, 0xFFFFE066.toInt())
+            graphics.drawString(font, clampLine(it, rightRight - rightLeft), rightLeft, buttonsY + 22, 0xFFFFE066.toInt())
         }
     }
 
@@ -947,7 +947,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         minecraft.setScreen(this)
     }
 
-    private fun drawDetailHeader(graphics: GuiGraphicsExtractor, entry: MapEntry) {
+    private fun drawDetailHeader(graphics: GuiGraphics, entry: MapEntry) {
         val iconSize = 36
         val icon = MapTextures.get(entry.iconUrl)
         if (icon != null) {
@@ -959,10 +959,10 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
             graphics.fill(rightLeft, listTop, rightLeft + iconSize, listTop + iconSize, 0xFF2A2A2A.toInt())
         }
         val textX = rightLeft + iconSize + 8
-        graphics.text(font, Component.literal(entry.title).withStyle { it.withBold(true) }, textX, listTop + 2, -1)
+        graphics.drawString(font, Component.literal(entry.title).withStyle { it.withBold(true) }, textX, listTop + 2, -1)
         // Capped to the icon's height so a long description can't run under the category pill.
         clampLines(entry.description, rightRight - textX, DESC_LINES).forEachIndexed { i, line ->
-            graphics.text(font, line, textX, listTop + 14 + i * font.lineHeight, 0xFFB0B0B0.toInt())
+            graphics.drawString(font, line, textX, listTop + 14 + i * font.lineHeight, 0xFFB0B0B0.toInt())
         }
         // Only a real category earns a pill
         entry.categories.firstOrNull()?.let { category ->
@@ -981,7 +981,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         return kept
     }
 
-    private fun drawReadme(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+    private fun drawReadme(graphics: GuiGraphics, mouseX: Int, mouseY: Int) {
         val bottom = listBottom
         linkRects.clear()
         // Soft black backing so the readme stays legible over bright title-screen backgrounds.
@@ -1035,7 +1035,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     }
 
     /** Draw a block at (x,y); returns the vertical space it consumed. */
-    private fun renderBlock(graphics: GuiGraphicsExtractor, block: MdBlock, x: Int, y: Int, width: Int): Int {
+    private fun renderBlock(graphics: GuiGraphics, block: MdBlock, x: Int, y: Int, width: Int): Int {
         val lh = font.lineHeight + 1
         return when (block) {
             MdBlock.Spacer -> 4
@@ -1047,20 +1047,20 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
                 pose.pushMatrix()
                 pose.translate(x.toFloat(), y.toFloat())
                 pose.scale(scale, scale)
-                wrapped.forEachIndexed { i, seq -> graphics.text(font, seq, 0, (i * lh), -1) }
+                wrapped.forEachIndexed { i, seq -> graphics.drawString(font, seq, 0, (i * lh), -1) }
                 pose.popMatrix()
                 (wrapped.size * lh * scale).toInt() + 3
             }
             is MdBlock.Paragraph -> drawWrappedWithLinks(graphics, block.text, x, y, width, 0xFFDDDDDD.toInt()) + 2
             is MdBlock.ListItem -> {
                 val indent = 10
-                graphics.text(font, block.bullet, x, y, 0xFFDDDDDD.toInt())
+                graphics.drawString(font, block.bullet, x, y, 0xFFDDDDDD.toInt())
                 drawWrappedWithLinks(graphics, block.text, x + indent, y, width - indent, 0xFFDDDDDD.toInt()) + 1
             }
             is MdBlock.Code -> {
                 val wrapped = font.split(block.text, width)
                 graphics.fill(x - 2, y - 1, x + width, y + wrapped.size * lh + 1, 0x40000000)
-                wrapped.forEachIndexed { i, seq -> graphics.text(font, seq, x, y + i * lh, 0xFFBBBBBB.toInt()) }
+                wrapped.forEachIndexed { i, seq -> graphics.drawString(font, seq, x, y + i * lh, 0xFFBBBBBB.toInt()) }
                 wrapped.size * lh + 4
             }
             is MdBlock.Image -> {
@@ -1081,7 +1081,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
      * spans carrying an [ClickEvent.OpenUrl] so [mouseClicked] can open them. Returns height used.
      */
     private fun drawWrappedWithLinks(
-        graphics: GuiGraphicsExtractor, text: Component, x: Int, y: Int, width: Int, color: Int,
+        graphics: GuiGraphics, text: Component, x: Int, y: Int, width: Int, color: Int,
     ): Int {
         val lh = font.lineHeight + 1
         val lines: List<FormattedText> = font.splitIgnoringLanguage(text, width)
@@ -1097,7 +1097,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
                 cx += w
                 Optional.empty<Unit>()
             }, Style.EMPTY)
-            graphics.text(font, Language.getInstance().getVisualOrder(line), x, ly, color)
+            graphics.drawString(font, Language.getInstance().getVisualOrder(line), x, ly, color)
         }
         return lines.size * lh
     }

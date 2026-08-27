@@ -3,7 +3,9 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
-    id("net.fabricmc.fabric-loom")
+    // `-remap`, not plain `net.fabricmc.fabric-loom`: that id is `LoomNoRemapGradlePlugin`, which
+    // finalizes `disableObfuscation = true` and so rejects Mojang mappings outright
+    id("net.fabricmc.fabric-loom-remap")
     id("io.github.dexman545.outlet")
 }
 
@@ -25,19 +27,22 @@ dependencies {
     // Fabric configuration
     //
     minecraft("com.mojang:minecraft:$gameVersion")
+    // 1.21.x is a *mapped* target: the runtime namespace is intermediary, so the compile stays on
+    // Mojang mappings (what the NeoForge copy needs) and `remapJar` produces the Fabric artifact.
+    "mappings"(loom.officialMojangMappings())
     println("Game Version: $gameVersion\nSupported Versions: ${outlet.mcVersionRange}")
     println("FabricLoader: ${outlet.loaderVersion()}\nFabricAPI: ${outlet.fapiVersion()}")
-    implementation("net.fabricmc:fabric-loader:${outlet.loaderVersion()}")
+    "modImplementation"("net.fabricmc:fabric-loader:${outlet.loaderVersion()}")
     // Required for `assets/<modid>/` to be seen at all: fabric-loader ships no resource-pack
     // integration, `ModResourcePackCreator` lives in fabric-api's `fabric-resource-loader-v1`.
-    implementation("net.fabricmc.fabric-api:fabric-api:${outlet.fapiVersion()}")
+    "modImplementation"("net.fabricmc.fabric-api:fabric-api:${outlet.fapiVersion()}")
 
     //
     // Kotlin libraries
     //
     val flkVersion = outlet.latestModrinthModVersion("fabric-language-kotlin", outlet.mcVersions())
     println("Fabric Language Kotlin: $flkVersion")
-    implementation("net.fabricmc:fabric-language-kotlin:$flkVersion")
+    "modImplementation"("net.fabricmc:fabric-language-kotlin:$flkVersion")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.+")
 
     fun compileOnlyIsolated(notation: String) = "compileOnly"(notation) {
@@ -49,8 +54,13 @@ dependencies {
 }
 
 loom {
+    mixin {
+        useLegacyMixinAp = true
+        defaultRefmapName = "${project.name}.refmap.json"
+    }
+
     runs {
-        configureEach { runDir("../../run") }
+        configureEach { runDir("../../run-legacy") }
 
         named("client") {
             programArgs("--username", "Notch")

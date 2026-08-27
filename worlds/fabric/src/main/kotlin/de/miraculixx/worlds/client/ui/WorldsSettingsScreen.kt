@@ -5,7 +5,7 @@ import de.miraculixx.common.client.ui.SettingsList
 import de.miraculixx.showmyworld.ShowMyWorld
 import de.miraculixx.worlds.client.DisplaySettings
 import de.miraculixx.worlds.client.WorldsConfig
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.resources.language.I18n
@@ -61,9 +61,9 @@ class WorldsSettingsScreen(private val parent: Screen) : Screen(Component.transl
         },
     )
 
-    override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick)
-        graphics.centeredText(font, title, width / 2, 12, -1)
+    override fun render(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        super.render(graphics, mouseX, mouseY, partialTick)
+        graphics.drawCenteredString(font, title, width / 2, 12, -1)
     }
 
     override fun onClose() {

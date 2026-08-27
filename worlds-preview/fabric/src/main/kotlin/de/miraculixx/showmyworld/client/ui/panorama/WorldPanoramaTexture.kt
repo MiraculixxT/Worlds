@@ -103,7 +103,7 @@ class WorldPanoramaTexture(id: Identifier, private val dir: Path) : CubeMapTextu
                 face.copyRect(stacked, 0, 0, 0, layer * height, width, height, false, true)
                 return
             }
-            // 26.1 exposes no ByteBuffer over the pixels, only the raw address behind them.
+            // NativeImage exposes no ByteBuffer over its pixels, only the raw address behind them.
             val source = MemoryUtil.memByteBuffer(face.pointer, width * height * 4)
             val target = MemoryUtil.memByteBuffer(stacked.pointer, stacked.width * stacked.height * 4)
             val rowBytes = width * 4

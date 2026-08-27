@@ -56,7 +56,7 @@ afterEvaluate {
         runs {
             register("client") {
                 client()
-                gameDirectory = rootProject.layout.projectDirectory.dir("run").asFile
+                gameDirectory = rootProject.layout.projectDirectory.dir("run-legacy").asFile
                 programArguments.addAll("--username", "Notch")
                 // `-PmixinAudit` makes Mixin name every config and target it applies
                 if (providers.gradleProperty("mixinAudit").isPresent) {
@@ -69,7 +69,11 @@ afterEvaluate {
 }
 
 tasks.jar {
-    from(fabricTwin.extensions.getByType<SourceSetContainer>()["main"].output) { exclude("fabric.mod.json") }
+    from(fabricTwin.extensions.getByType<SourceSetContainer>()["main"].output) {
+        // The refmap is Loom's intermediary lookup for the Fabric jar; NeoForge is Mojmap and its
+        // copy of the shared `*.mixins.json` names no refmap, so carrying one here is dead weight.
+        exclude("fabric.mod.json", "*.refmap.json")
+    }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 

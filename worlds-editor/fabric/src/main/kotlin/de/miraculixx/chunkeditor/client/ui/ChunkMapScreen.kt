@@ -16,7 +16,7 @@ import de.miraculixx.common.client.ui.drawBox
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.Checkbox
 import net.minecraft.client.gui.components.EditBox
@@ -231,7 +231,7 @@ internal class ChunkMapScreen(
     }
 
     private fun selectAll() {
-        indices.values.forEach { ChunkRegions.forEachChunk(it) { pos -> selected.add(pos.pack()) } }
+        indices.values.forEach { ChunkRegions.forEachChunk(it) { pos -> selected.add(pos.toLong()) } }
         onSelectionChanged()
     }
 
@@ -239,7 +239,7 @@ internal class ChunkMapScreen(
         val inverted = LongOpenHashSet()
         indices.values.forEach {
             ChunkRegions.forEachChunk(it) { pos ->
-                if (!selected.contains(pos.pack())) inverted.add(pos.pack())
+                if (!selected.contains(pos.toLong())) inverted.add(pos.toLong())
             }
         }
         selected.clear()
@@ -286,7 +286,7 @@ internal class ChunkMapScreen(
         val spawnChunk = ChunkPos(spawn.x shr 4, spawn.z shr 4)
         indices.values.forEach { region ->
             ChunkRegions.forEachChunk(region) { pos ->
-                val packed = pos.pack()
+                val packed = pos.toLong()
                 val fact = facts[packed]
                 val hit = (criteria.minSpawnDistance == null ||
                     pos.getChessboardDistance(spawnChunk) > criteria.minSpawnDistance) &&
@@ -323,8 +323,8 @@ internal class ChunkMapScreen(
             BackupConfirmScreen(
                 { minecraft.setScreen(this) },
                 { backup, _ ->
-                    EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access)
-                        .thenAcceptAsync({ runDelete(dim) }, minecraft)
+                    if (backup) EditWorldScreen.makeBackupAndShowToast(access)
+                    runDelete(dim)
                 },
                 Component.translatable("chunkeditor.map.delete_title", count),
                 Component.translatable("chunkeditor.map.delete_warning", dim.label),
@@ -335,7 +335,7 @@ internal class ChunkMapScreen(
     }
 
     private fun runDelete(dim: WorldDimension) {
-        val chunks = selected.toLongArray().map { ChunkPos.unpack(it) }
+        val chunks = selected.toLongArray().map { ChunkPos(it) }
         val generation = loadGen
         minecraft.setScreen(this)
         Constants.SCOPE.launch {
@@ -389,8 +389,8 @@ internal class ChunkMapScreen(
     // Render
     //
 
-    override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick)
+    override fun render(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        super.render(graphics, mouseX, mouseY, partialTick)
         val left = mapLeft()
         val top = mapTop()
         val right = mapRight()
@@ -426,7 +426,7 @@ internal class ChunkMapScreen(
     }
 
     private fun drawRegion(
-        graphics: GuiGraphicsExtractor, region: RegionIndex, withTerrain: Boolean, perChunk: Boolean,
+        graphics: GuiGraphics, region: RegionIndex, withTerrain: Boolean, perChunk: Boolean,
     ) {
         val regionKey = key(region.rx, region.rz)
         val x = screenX(region.rx.toDouble() * REGION_BLOCKS).roundToInt()
@@ -477,10 +477,10 @@ internal class ChunkMapScreen(
         return (alpha shl 24) or (PRESENT_COLOR and 0xFFFFFF)
     }
 
-    private fun blit(graphics: GuiGraphicsExtractor, id: Identifier, x: Int, y: Int, w: Int, h: Int, size: Int) =
+    private fun blit(graphics: GuiGraphics, id: Identifier, x: Int, y: Int, w: Int, h: Int, size: Int) =
         graphics.blit(RenderPipelines.GUI_TEXTURED, id, x, y, 0f, 0f, w, h, size, size, size, size)
 
-    private fun drawGrid(graphics: GuiGraphicsExtractor, visible: List<RegionIndex>) {
+    private fun drawGrid(graphics: GuiGraphics, visible: List<RegionIndex>) {
         val left = mapLeft() + 1
         val top = mapTop() + 1
         val right = mapRight() - 1
@@ -519,7 +519,7 @@ internal class ChunkMapScreen(
         }
     }
 
-    private fun drawDragRect(graphics: GuiGraphicsExtractor) {
+    private fun drawDragRect(graphics: GuiGraphics) {
         val from = dragFrom ?: return
         val to = dragTo ?: return
         val x = screenX(min(from.x, to.x) * 16.0).roundToInt()
@@ -533,14 +533,14 @@ internal class ChunkMapScreen(
         graphics.fill(x2 - 1, y, x2, y2, REGION_LINE_COLOR)
     }
 
-    private fun drawInfo(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+    private fun drawInfo(graphics: GuiGraphics, mouseX: Int, mouseY: Int) {
         val infoX = MARGIN + 312
         val summary = when {
             dimension == null -> I18n.get("chunkeditor.map.no_regions")
             loading -> I18n.get("chunkeditor.map.reading")
             else -> I18n.get("chunkeditor.map.summary", indices.size, totalChunks, bytes(totalBytes))
         }
-        graphics.text(font, summary, infoX, 12, -1)
+        graphics.drawString(font, summary, infoX, 12, -1)
 
         // Starts on the map's own bottom border rather than below it, or the two boxes would stack
         // their 1 px edges into a 2 px rule.
@@ -565,19 +565,19 @@ internal class ChunkMapScreen(
             else -> I18n.get("chunkeditor.map.hint")
         }
         val hintX = width - MARGIN - 6 - font.width(hint)
-        if (hintX > x) graphics.text(font, hint, hintX, textY, SUBTEXT_COLOR)
+        if (hintX > x) graphics.drawString(font, hint, hintX, textY, SUBTEXT_COLOR)
     }
 
     /**
      * One `<label>: <x>,<z>` group
      */
     private fun coordGroup(
-        graphics: GuiGraphicsExtractor, labelKey: String, vx: Int?, vz: Int?, extreme: String, x: Int, y: Int,
+        graphics: GuiGraphics, labelKey: String, vx: Int?, vz: Int?, extreme: String, x: Int, y: Int,
     ): Int {
         val label = "${I18n.get(labelKey)}:"
-        graphics.text(font, label, x, y, SUBTEXT_COLOR)
+        graphics.drawString(font, label, x, y, SUBTEXT_COLOR)
         val valueX = x + font.width(label) + 4
-        graphics.text(font, "${vx ?: "–"},${vz ?: "–"}", valueX, y, -1)
+        graphics.drawString(font, "${vx ?: "–"},${vz ?: "–"}", valueX, y, -1)
         return valueX + font.width("$extreme,$extreme") + 14
     }
 
@@ -595,7 +595,7 @@ internal class ChunkMapScreen(
                 val present = region.present[z * REGION_SIZE + x]
                 val pos = ChunkPos(region.rx * REGION_SIZE + x, region.rz * REGION_SIZE + z)
                 val color = when {
-                    unreadable.contains(pos.pack()) -> UNREADABLE_COLOR
+                    unreadable.contains(pos.toLong()) -> UNREADABLE_COLOR
                     present -> PRESENT_COLOR
                     else -> 0
                 }
@@ -615,7 +615,7 @@ internal class ChunkMapScreen(
         for (z in 0 until REGION_SIZE) {
             for (x in 0 until REGION_SIZE) {
                 val pos = ChunkPos(region.rx * REGION_SIZE + x, region.rz * REGION_SIZE + z)
-                val on = selected.contains(pos.pack())
+                val on = selected.contains(pos.toLong())
                 if (on) any = true
                 image.setPixelABGR(x, z, if (on) abgr(SELECTED_COLOR) else 0)
             }
@@ -786,7 +786,7 @@ internal class ChunkMapScreen(
 
     private fun toggle(pos: ChunkPos) {
         if (!exists(pos)) return
-        if (!selected.remove(pos.pack())) selected.add(pos.pack())
+        if (!selected.remove(pos.toLong())) selected.add(pos.toLong())
         onSelectionChanged()
     }
 
@@ -795,7 +795,7 @@ internal class ChunkMapScreen(
             for (x in min(from.x, to.x)..max(from.x, to.x)) {
                 val pos = ChunkPos(x, z)
                 if (!exists(pos)) continue
-                if (dragRemoves) selected.remove(pos.pack()) else selected.add(pos.pack())
+                if (dragRemoves) selected.remove(pos.toLong()) else selected.add(pos.toLong())
             }
         }
         onSelectionChanged()
@@ -915,14 +915,14 @@ internal class ChunkTrimScreen(
 
     private fun minutes(field: EditBox): Long? = field.value.trim().toLongOrNull()?.times(TICKS_PER_MINUTE)
 
-    override fun extractBackground(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
-        super.extractBackground(graphics, mouseX, mouseY, partialTick)
+    override fun renderBackground(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        super.renderBackground(graphics, mouseX, mouseY, partialTick)
         drawBox(graphics, width / 2 - panelW / 2, panelTop, width / 2 + panelW / 2, panelBottom)
     }
 
-    override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick)
-        graphics.text(
+    override fun render(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        super.render(graphics, mouseX, mouseY, partialTick)
+        graphics.drawString(
             font, Component.translatable("chunkeditor.trim.title").withStyle { it.withBold(true) },
             width / 2 - panelW / 2 + 10, panelTop + 9, -1,
         )

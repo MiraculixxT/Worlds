@@ -2,6 +2,7 @@ package de.miraculixx.worlds.data
 
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
+import de.miraculixx.common.LevelDat
 import de.miraculixx.worlds.client.ui.MapTextures
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.ListTag
@@ -42,12 +43,10 @@ object WorldEditor {
 
     fun readFacts(access: LevelStorageSource.LevelStorageAccess): LevelFacts {
         val data = readData(access)
-        val settings = data.getCompoundOrEmpty("difficulty_settings")
         return LevelFacts(
             name = data.getString("LevelName").orElse("").ifBlank { access.levelId },
-            difficulty = settings.getString("difficulty").orElse(null)
-                ?.let { Difficulty.byName(it) } ?: Difficulty.NORMAL,
-            hardcore = settings.getBooleanOr("hardcore", false),
+            difficulty = Difficulty.byId(data.getByteOr("Difficulty", DEFAULT_DIFFICULTY).toInt()),
+            hardcore = data.getBooleanOr("hardcore", false),
             allowCommands = data.getBooleanOr("allowCommands", false),
             gameType = GameType.byId(data.getIntOr("GameType", 0)),
             spawn = data.read("spawn", LevelData.RespawnData.CODEC).orElse(LevelData.RespawnData.DEFAULT),
@@ -56,10 +55,10 @@ object WorldEditor {
     }
 
     fun setDifficulty(access: LevelStorageSource.LevelStorageAccess, difficulty: Difficulty) =
-        modifySettings(access) { it.putString("difficulty", difficulty.serializedName) }
+        modifyData(access) { it.putByte("Difficulty", difficulty.id.toByte()) }
 
     fun setHardcore(access: LevelStorageSource.LevelStorageAccess, hardcore: Boolean) =
-        modifySettings(access) { it.putBoolean("hardcore", hardcore) }
+        modifyData(access) { it.putBoolean("hardcore", hardcore) }
 
     fun setAllowCommands(access: LevelStorageSource.LevelStorageAccess, value: Boolean) =
         modifyData(access) { it.putBoolean("allowCommands", value) }
@@ -113,13 +112,13 @@ object WorldEditor {
         requiredFeatures: FeatureFlagSet = FeatureFlagSet.of(),
     ) {
         try {
-            val data = readData(access)
-            val packs = CompoundTag()
-            packs.put("Enabled", packList(enabled))
-            packs.put("Disabled", packList(disabled))
-            data.put("DataPacks", packs)
-            mergeFeatures(data, requiredFeatures)
-            access.saveLevelData(Dynamic(NbtOps.INSTANCE, data))
+            LevelDat.modify(access) { data ->
+                val packs = CompoundTag()
+                packs.put("Enabled", packList(enabled))
+                packs.put("Disabled", packList(disabled))
+                data.put("DataPacks", packs)
+                mergeFeatures(data, requiredFeatures)
+            }
         } catch (e: Exception) {
             Constants.LOG.error("Failed to write data packs of {}", access.levelId, e)
         }
@@ -145,26 +144,19 @@ object WorldEditor {
 
     private fun packList(ids: List<String>) = ListTag().apply { ids.forEach { add(StringTag.valueOf(it)) } }
 
-    private fun modifySettings(access: LevelStorageSource.LevelStorageAccess, updater: (CompoundTag) -> Unit) =
-        modifyData(access) { data ->
-            // getCompoundOrEmpty hands back a detached tag when the key is missing, so re-put it.
-            val settings = data.getCompound("difficulty_settings").orElseGet { CompoundTag() }
-            updater(settings)
-            data.put("difficulty_settings", settings)
-        }
-
     private fun modifyData(access: LevelStorageSource.LevelStorageAccess, updater: (CompoundTag) -> Unit) {
         try {
-            val data = readData(access)
-            updater(data)
-            access.saveLevelData(Dynamic(NbtOps.INSTANCE, data))
+            LevelDat.modify(access, updater)
         } catch (e: Exception) {
             Constants.LOG.error("Failed to write level.dat of {}", access.levelId, e)
         }
     }
 
     private fun readData(access: LevelStorageSource.LevelStorageAccess): CompoundTag =
-        access.getUnfixedDataTag(false).convert(NbtOps.INSTANCE).value as CompoundTag
+        LevelDat.read(access) ?: CompoundTag()
+
+    /** [Difficulty.NORMAL], what a `level.dat` missing the field is treated as */
+    private const val DEFAULT_DIFFICULTY: Byte = 2
 
     fun readMeta(dir: Path): InstalledMeta? {
         val file = dir.resolve(InstalledMeta.FILE_NAME)

@@ -67,7 +67,6 @@ object WorldActions {
         }
         val screen = try {
             // Lock world & open our custom edit screen
-            access.fixAndGetSummary()
             WorldEditScreen(access) {
                 access.safeClose()
                 onDone()

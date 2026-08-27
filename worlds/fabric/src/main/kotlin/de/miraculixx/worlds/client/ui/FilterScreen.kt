@@ -1,6 +1,6 @@
 package de.miraculixx.worlds.client.ui
 
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.CycleButton
 import net.minecraft.client.gui.screens.Screen
@@ -136,15 +136,15 @@ class FilterScreen(
         rebuildWidgets()
     }
 
-    override fun extractBackground(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
-        super.extractBackground(graphics, mouseX, mouseY, partialTick)
+    override fun renderBackground(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        super.renderBackground(graphics, mouseX, mouseY, partialTick)
         // Soft black panel behind the controls (background pass → sits under the widgets).
         val px = width / 2 - panelW / 2
         graphics.fill(px, panelTop, px + panelW, panelBottom, 0x8D000000.toInt())
     }
 
-    override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick)
+    override fun render(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        super.render(graphics, mouseX, mouseY, partialTick)
         val px = width / 2 - panelW / 2
         val pr = px + panelW
 
@@ -154,12 +154,12 @@ class FilterScreen(
         graphics.fill(px, panelTop, px + 1, panelBottom, border)
         graphics.fill(pr - 1, panelTop, pr, panelBottom, border)
 
-        graphics.text(
+        graphics.drawString(
             font, Component.translatable("worlds.filter.title").withStyle { it.withBold(true) },
             px + 8, panelTop + 10, -1,
         )
         for ((label, y) in labels) {
-            graphics.text(font, label, px + 8, y + 6, 0xFFC0C0C0.toInt())
+            graphics.drawString(font, label, px + 8, y + 6, 0xFFC0C0C0.toInt())
         }
         // Separator between filters and ordering controls.
         graphics.fill(px + 8, dividerY, pr - 8, dividerY + 1, 0xFF505050.toInt())

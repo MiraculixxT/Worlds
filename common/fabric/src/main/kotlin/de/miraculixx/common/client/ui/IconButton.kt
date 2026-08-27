@@ -1,6 +1,6 @@
 package de.miraculixx.common.client.ui
 
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.AbstractButton
 import net.minecraft.client.gui.narration.NarrationElementOutput
 import net.minecraft.client.input.InputWithModifiers
@@ -27,8 +27,8 @@ class IconButton(
 
     override fun updateWidgetNarration(output: NarrationElementOutput) = defaultButtonNarrationText(output)
 
-    override fun extractContents(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
-        extractDefaultSprite(graphics)
+    override fun renderContents(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        renderDefaultSprite(graphics)
         graphics.blitSprite(
             RenderPipelines.GUI_TEXTURED, sprite(),
             x + (width - ICON) / 2, y + (height - ICON) / 2, ICON, ICON,

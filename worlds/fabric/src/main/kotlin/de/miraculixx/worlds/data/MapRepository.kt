@@ -18,6 +18,7 @@ import de.miraculixx.worlds.api.MrVersion
 import de.miraculixx.worlds.api.WorldsApi
 import net.minecraft.client.Minecraft
 import net.minecraft.nbt.NbtAccounter
+import net.minecraft.world.Difficulty
 import net.minecraft.nbt.NbtIo
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
@@ -355,13 +356,13 @@ object MapRepository {
     private data class LevelData(val name: String?, val info: WorldInfo)
 
     /**
-     * Read the `Data` compound of a save's `level.dat`, or null when it is unreadable. 26.1 keeps
-     * difficulty in `difficulty_settings` (`difficulty`/`hardcore`/`locked`) rather than a plain byte.
+     * Read the `Data` compound of a save's `level.dat`, or null when it is unreadable. 1.21 keeps
+     * difficulty as a plain `Difficulty` byte and `hardcore` as a sibling boolean, both top level;
+     * 26.x moved them into a `difficulty_settings` compound.
      */
     private fun readLevelData(dir: java.nio.file.Path): LevelData? = try {
         val data = NbtIo.readCompressed(dir.resolve("level.dat"), NbtAccounter.unlimitedHeap())
             .getCompoundOrEmpty("Data")
-        val difficulty = data.getCompoundOrEmpty("difficulty_settings")
         val enabledPacks = data.getCompoundOrEmpty("DataPacks").getListOrEmpty("Enabled")
         LevelData(
             name = data.getString("LevelName").orElse(null)?.takeIf { it.isNotBlank() },
@@ -370,8 +371,9 @@ object MapRepository {
                     ?.takeIf { it.isNotBlank() },
                 lastPlayed = data.getLongOr("LastPlayed", 0L),
                 playTicks = data.getLongOr("Time", 0L),
-                difficulty = difficulty.getString("difficulty").orElse(null),
-                hardcore = difficulty.getBooleanOr("hardcore", false),
+                difficulty = data.getByte("Difficulty").orElse(null)
+                    ?.let { Difficulty.byId(it.toInt()).serializedName },
+                hardcore = data.getBooleanOr("hardcore", false),
                 allowCommands = data.getBooleanOr("allowCommands", false),
                 dataPacks = enabledPacks.indices
                     .map { enabledPacks.getStringOr(it, "") }

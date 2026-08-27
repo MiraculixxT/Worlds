@@ -13,7 +13,6 @@ import de.miraculixx.common.client.ui.drawBox
 import de.miraculixx.showmyworld.ShowMyWorld
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.data.InstalledMap
-import de.miraculixx.worlds.data.ItemComponents
 import de.miraculixx.worlds.data.PackRow
 import de.miraculixx.worlds.data.WorldDataPacks
 import de.miraculixx.worlds.data.WorldEditor
@@ -23,7 +22,7 @@ import de.miraculixx.worlds.data.WorldRules
 import kotlinx.coroutines.launch
 import net.minecraft.client.Minecraft
 import net.minecraft.core.BlockPos
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.AbstractWidget
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.CycleButton
@@ -34,13 +33,12 @@ import net.minecraft.client.gui.components.tabs.TabNavigationBar
 import net.minecraft.client.gui.components.tabs.TabManager
 import net.minecraft.client.gui.screens.BackupConfirmScreen
 import net.minecraft.client.gui.screens.ConfirmScreen
-import net.minecraft.client.gui.screens.GenericMessageScreen
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.achievement.StatsScreen
 import net.minecraft.client.gui.screens.packs.PackSelectionScreen
 import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.client.gui.screens.worldselection.OptimizeWorldScreen
-import net.minecraft.client.gui.screens.worldselection.WorldCreationGameRulesScreen
+import net.minecraft.client.gui.screens.worldselection.EditGameRulesScreen
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.resources.language.I18n
@@ -172,7 +170,7 @@ class WorldEditScreen(
         tabBar = addRenderableWidget(
             TabNavigationBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
         )
-        tabBar.updateWidth(width)
+        tabBar.setWidth(width)
         tabBar.arrangeElements()
 
         cardW = (width - 40).coerceAtMost(CARD_MAX_W)
@@ -496,7 +494,7 @@ class WorldEditScreen(
 
     private fun backup() {
         EditWorldScreen.makeBackupAndShowToast(access)
-            .thenAcceptAsync({ minecraft.setScreen(this) }, minecraft)
+        minecraft.setScreen(this)
     }
 
     /** World pack folders are generated if not yet present (vanilla omits them sometimes?) */
@@ -523,13 +521,12 @@ class WorldEditScreen(
             BackupConfirmScreen(
                 { minecraft.setScreen(this) },
                 { backup, eraseCache ->
-                    EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access).thenAcceptAsync({
-                        minecraft.setScreen(
-                            OptimizeWorldScreen.create(
-                                minecraft, { onDone() }, minecraft.fixerUpper, access, eraseCache,
-                            )
+                    if (backup) EditWorldScreen.makeBackupAndShowToast(access)
+                    minecraft.setScreen(
+                        OptimizeWorldScreen.create(
+                            minecraft, { onDone() }, minecraft.fixerUpper, access, eraseCache,
                         )
-                    }, minecraft)
+                    )
                 },
                 Component.translatable("optimizeWorld.confirm.title"),
                 Component.translatable("optimizeWorld.confirm.description"),
@@ -609,22 +606,16 @@ class WorldEditScreen(
     }
 
     /**
-     * Vanilla's stats screen, rebuild to support server-less. Item-Cmps have to be bound for this
+     * Vanilla's stats screen, rebuilt to support server-less.
+     *
+     * Unlike 26.x this needs no component binding first: 1.21 sets an item's data components when
+     * the item is constructed, so `Item.getDefaultInstance()` already works out of world.
      */
     private fun openPlayerStats(player: WorldPlayers.PlayerData) {
         val stats = WorldPlayers.readStats(access, player.id)
-        if (!ItemComponents.bound()) {
-            minecraft.setScreen(GenericMessageScreen(Component.translatable("worlds.edit.reading_stats")))
-        }
-        ItemComponents.prepare { ok ->
-            if (!ok) {
-                minecraft.setScreen(this)
-                return@prepare
-            }
-            val screen = StatsScreen(this, stats)
-            (screen as OfflineStatsScreen).worlds_useLocalStats()
-            minecraft.setScreen(screen)
-        }
+        val screen = StatsScreen(this, stats)
+        (screen as OfflineStatsScreen).worlds_useLocalStats()
+        minecraft.setScreen(screen)
     }
 
     /**
@@ -634,7 +625,7 @@ class WorldEditScreen(
         val features = WorldEditor.readFeatures(access)
         val rules = WorldRules.readGameRules(access, features)
         minecraft.setScreen(
-            WorldCreationGameRulesScreen(rules) { result ->
+            EditGameRulesScreen(rules) { result ->
                 result.ifPresent { WorldRules.writeGameRules(access, features, it) }
                 minecraft.setScreen(this)
             }
@@ -778,8 +769,8 @@ class WorldEditScreen(
     // Render Stuff
     //
 
-    override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick)
+    override fun render(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        super.render(graphics, mouseX, mouseY, partialTick)
         when (tab) {
             Tab.GENERAL -> drawCard(graphics, mouseX, mouseY)
             Tab.DATA_PACKS, Tab.RESOURCE_PACKS -> drawPackList(graphics, mouseX, mouseY)
@@ -790,7 +781,7 @@ class WorldEditScreen(
     /**
      * A list of all available packs. RPs are a simple folder walk, DPs also contain featured packs
      */
-    private fun drawPackList(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+    private fun drawPackList(graphics: GuiGraphics, mouseX: Int, mouseY: Int) {
         drawBox(graphics, cardX, cardY, cardX + cardW, listBottom())
         val rows = rows()
         val point = mouseX.toDouble() to mouseY.toDouble()
@@ -798,7 +789,7 @@ class WorldEditScreen(
         val hoverHeader = point in packHeaderRect()
         val header = Component.literal(packHeader())
             .withStyle { if (hoverHeader) it.withUnderlined(true) else it }
-        graphics.centeredText(font, header, width / 2, cardY + CARD_PAD, 0xFFFFFFFF.toInt())
+        graphics.drawCenteredString(font, header, width / 2, cardY + CARD_PAD, 0xFFFFFFFF.toInt())
 
         val shown = shownPackRows()
         if (separated() && shown > firstGroup()) {
@@ -816,13 +807,13 @@ class WorldEditScreen(
             val textY = rect.y1 + (packRowH() - font.lineHeight) / 2 + 1
             val nameX = toggle.x2 + 6
             val nameEnd = if (row.deletable) delete.x1 - 4 else rect.x2 - 2
-            graphics.text(
+            graphics.drawString(
                 font, trim(row.name, nameEnd - nameX), nameX, textY,
                 if (row.enabled) 0xFFFFFFFF.toInt() else SUBTEXT_COLOR,
             )
             // A feature pack lives in the jar, so it gets no delete glyph at all rather than a dead one.
             if (row.deletable) {
-                graphics.centeredText(
+                graphics.drawCenteredString(
                     font, Component.literal(ICON_RESET), (delete.x1 + delete.x2) / 2, textY,
                     if (point in delete) 0xFFFF6060.toInt() else SUBTEXT_COLOR,
                 )
@@ -830,14 +821,14 @@ class WorldEditScreen(
         }
         if (rows.size > shown) {
             val rect = packRowRect(shown)
-            graphics.text(
+            graphics.drawString(
                 font, I18n.get("worlds.packs.more", rows.size - shown), rect.x1 + 2,
                 rect.y1 + (packRowH() - font.lineHeight) / 2, SUBTEXT_COLOR,
             )
         }
     }
 
-    private fun drawToggle(graphics: GuiGraphicsExtractor, rect: Rect, on: Boolean, hover: Boolean) {
+    private fun drawToggle(graphics: GuiGraphics, rect: Rect, on: Boolean, hover: Boolean) {
         graphics.fill(rect.x1, rect.y1, rect.x2, rect.y2, 0xFF1A1A1A.toInt())
         val border = if (hover) -1 else 0xFF808080.toInt()
         graphics.fill(rect.x1, rect.y1, rect.x2, rect.y1 + 1, border)
@@ -847,7 +838,7 @@ class WorldEditScreen(
         if (on) graphics.fill(rect.x1 + 3, rect.y1 + 3, rect.x2 - 3, rect.y2 - 3, 0xFF55DD55.toInt())
     }
 
-    private fun drawCard(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+    private fun drawCard(graphics: GuiGraphics, mouseX: Int, mouseY: Int) {
         drawBox(graphics, cardX, cardY, cardX + cardW, cardY + cardH)
 
         drawIcon(graphics, mouseX, mouseY)
@@ -863,7 +854,7 @@ class WorldEditScreen(
         }
 
         if (!titleBox.visible) {
-            graphics.text(
+            graphics.drawString(
                 font, trim(levelName, tw), tx, cardY + CARD_PAD + 2,
                 if (hoverTitle) -1 else 0xFFFFFFFF.toInt(),
             )
@@ -874,7 +865,7 @@ class WorldEditScreen(
             else clampLines(description, tw, DESC_LINES)
             val color = if (description.isBlank()) 0xFF707070.toInt() else SUBTEXT_COLOR
             lines.forEachIndexed { i, line ->
-                graphics.text(font, line, tx, cardY + descTop + i * font.lineHeight, color)
+                graphics.drawString(font, line, tx, cardY + descTop + i * font.lineHeight, color)
             }
         }
 
@@ -886,7 +877,7 @@ class WorldEditScreen(
         CategoryBadge.draw(graphics, font, category, tx, cardY + pillTop + 2)
     }
 
-    private fun drawIcon(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+    private fun drawIcon(graphics: GuiGraphics, mouseX: Int, mouseY: Int) {
         val x = iconX()
         val y = iconY()
         val icon = MapTextures.get(iconKey())
@@ -907,8 +898,8 @@ class WorldEditScreen(
         if (overReset) graphics.fill(x, y, x + half, y + iconSize, 0x40FFFFFF)
         else graphics.fill(x + half, y, x + iconSize, y + iconSize, 0x40FFFFFF)
         val glyphY = y + (iconSize - font.lineHeight) / 2
-        graphics.centeredText(font, Component.literal(ICON_RESET), x + half / 2, glyphY, -1)
-        graphics.centeredText(font, Component.literal(ICON_CHANGE), x + half + half / 2, glyphY, -1)
+        graphics.drawCenteredString(font, Component.literal(ICON_RESET), x + half / 2, glyphY, -1)
+        graphics.drawCenteredString(font, Component.literal(ICON_CHANGE), x + half + half / 2, glyphY, -1)
     }
 
     /** Word-wrap [text] to [width] and keep at most [maxLines], ending the last one with an ellipsis. */

@@ -3,7 +3,7 @@ package de.miraculixx.worlds.client.ui
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
 import de.miraculixx.worlds.data.MapEntry
 import net.minecraft.client.Minecraft
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.ObjectSelectionList
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.renderer.RenderPipelines
@@ -86,8 +86,8 @@ class MapListWidget(
             mouseX >= contentX && mouseX < contentX + ICON_SIZE &&
                 mouseY >= contentY && mouseY < contentY + ICON_SIZE
 
-        override fun extractContent(
-            graphics: GuiGraphicsExtractor,
+        override fun renderContent(
+            graphics: GuiGraphics,
             mouseX: Int,
             mouseY: Int,
             hovered: Boolean,
@@ -129,7 +129,7 @@ class MapListWidget(
             val categoryW = if (category != null) CategoryBadge.width(font, category) + 4 else 0
             val updateW = if (entry.updateAvailable) CategoryBadge.updateWidth(font) + 4 else 0
             val title = trim(entry.title, right - textX - categoryW - updateW, font)
-            graphics.text(font, title, textX, y + 1, -1)
+            graphics.drawString(font, title, textX, y + 1, -1)
             var pillX = textX + font.width(title) + 4
             if (category != null && pillX + categoryW - 4 <= right) {
                 pillX += CategoryBadge.draw(graphics, font, category, pillX, y + 1) + 4
@@ -138,8 +138,8 @@ class MapListWidget(
                 CategoryBadge.drawUpdate(graphics, font, pillX, y + 1)
             }
             // Same three-row rhythm as vanilla's world list: name, then two gray detail rows.
-            graphics.text(font, trim(entry.description, right - textX, font), textX, y + 12, SUBTEXT_COLOR)
-            graphics.text(font, trim(infoLine(), right - textX, font), textX, y + 21, SUBTEXT_COLOR)
+            graphics.drawString(font, trim(entry.description, right - textX, font), textX, y + 12, SUBTEXT_COLOR)
+            graphics.drawString(font, trim(infoLine(), right - textX, font), textX, y + 21, SUBTEXT_COLOR)
         }
 
         private fun infoLine(): String {

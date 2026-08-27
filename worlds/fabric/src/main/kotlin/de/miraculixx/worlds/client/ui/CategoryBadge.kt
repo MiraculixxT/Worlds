@@ -2,7 +2,7 @@ package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.worlds.data.InstalledMap
 import net.minecraft.client.gui.Font
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.locale.Language
 
@@ -38,16 +38,16 @@ object CategoryBadge {
 
     fun updateWidth(font: Font): Int = font.width(updateLabel) + PAD_X * 2
 
-    fun draw(graphics: GuiGraphicsExtractor, font: Font, category: String, x: Int, y: Int): Int =
+    fun draw(graphics: GuiGraphics, font: Font, category: String, x: Int, y: Int): Int =
         pill(graphics, font, label(category), color(category), x, y)
 
-    fun drawUpdate(graphics: GuiGraphicsExtractor, font: Font, x: Int, y: Int): Int =
+    fun drawUpdate(graphics: GuiGraphics, font: Font, x: Int, y: Int): Int =
         pill(graphics, font, updateLabel, UPDATE_COLOR, x, y)
 
     /**
      * Draw the pill
      */
-    private fun pill(graphics: GuiGraphicsExtractor, font: Font, text: String, border: Int, x: Int, y: Int): Int {
+    private fun pill(graphics: GuiGraphics, font: Font, text: String, border: Int, x: Int, y: Int): Int {
         val w = font.width(text)
         val fill = darken(border, 0.35f)
         val left = x
@@ -61,7 +61,7 @@ object CategoryBadge {
         graphics.fill(left, top + 1, left + 1, bottom - 1, border)
         graphics.fill(right - 1, top + 1, right, bottom - 1, border)
 
-        graphics.text(font, text, x + PAD_X, y, 0xFFFFFFFF.toInt())
+        graphics.drawString(font, text, x + PAD_X, y, 0xFFFFFFFF.toInt())
         return w + PAD_X * 2
     }
 

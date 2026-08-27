@@ -84,7 +84,7 @@ object ChunkMapRenderer {
                             tag, cx * perChunk, cz * perChunk, pos.minBlockX, pos.minBlockZ, step, pixels,
                             colors, bases, heights, depths, session,
                         )
-                        if (!ok) unreadable.add(pos.pack())
+                        if (!ok) unreadable.add(pos.toLong())
                     }
                 }
             } finally {

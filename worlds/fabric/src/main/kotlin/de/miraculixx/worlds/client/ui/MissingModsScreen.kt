@@ -1,7 +1,7 @@
 package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.worlds.data.MapRequirement
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.CommonComponents
@@ -53,13 +53,13 @@ class MissingModsScreen(
     /** First row y — below the two-line header. */
     private fun listTop(): Int = 56
 
-    override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick)
-        graphics.centeredText(
+    override fun render(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        super.render(graphics, mouseX, mouseY, partialTick)
+        graphics.drawCenteredString(
             font, Component.translatable("worlds.missing_mods.title").withStyle { it.withBold(true) },
             width / 2, 18, 0xFFFF6B6B.toInt(),
         )
-        graphics.centeredText(
+        graphics.drawCenteredString(
             font, Component.translatable("worlds.missing_mods.subtitle", mapTitle),
             width / 2, 34, 0xFFB0B0B0.toInt(),
         )
@@ -68,8 +68,8 @@ class MissingModsScreen(
         val rowX = width / 2 - rowW / 2
         var y = listTop()
         for (req in missing) {
-            graphics.text(font, "• ${req.name}", rowX, y + 6, -1)
-            req.modId?.let { graphics.text(font, it, rowX + 12, y + 6 + font.lineHeight + 1, 0xFF808080.toInt()) }
+            graphics.drawString(font, "• ${req.name}", rowX, y + 6, -1)
+            req.modId?.let { graphics.drawString(font, it, rowX + 12, y + 6 + font.lineHeight + 1, 0xFF808080.toInt()) }
             y += 24
         }
     }

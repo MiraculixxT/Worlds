@@ -7,7 +7,9 @@ import kotlinx.coroutines.withContext
 import net.minecraft.client.Minecraft
 import net.minecraft.client.color.block.BlockColors
 import net.minecraft.client.renderer.BiomeColors
-import net.minecraft.client.renderer.block.BlockAndTintGetter
+import de.miraculixx.common.LevelDat
+import net.minecraft.world.level.BlockAndTintGetter
+import net.minecraft.world.level.EmptyBlockAndTintGetter
 import net.minecraft.commands.Commands
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Holder
@@ -81,18 +83,21 @@ class BiomeTints private constructor(private val registry: Registry<Biome>, priv
             if (mapColor === MapColor.WATER) {
                 return BiomeColors.WATER_COLOR_RESOLVER.getColor(biome, x.toDouble(), z.toDouble())
             }
-            val source = COLORS.getTintSource(state, 0) ?: return mapColor.col
             cursor.set(x, y, z)
             getter.biome = reference
-            val plain = source.colorInWorld(state, getter, cursor)
+            val plain = COLORS.getColor(state, getter, cursor, 0)
+            if (plain == UNTINTED) return mapColor.col
             getter.biome = biome
-            val here = source.colorInWorld(state, getter, cursor)
+            val here = COLORS.getColor(state, getter, cursor, 0)
             return if (plain == here) mapColor.col else scale(mapColor.col, here, plain)
         }
     }
 
     companion object {
         private val COLORS: BlockColors by lazy { BlockColors.createDefault() }
+
+        /** What [BlockColors.getColor] answers for a block nothing tints */
+        private const val UNTINTED = -1
 
         /** A broken palette breaks every section of every region, so it is logged once, not per chunk. */
         private val warned = AtomicBoolean(false)
@@ -131,7 +136,7 @@ class BiomeTints private constructor(private val registry: Registry<Biome>, priv
         /** The save's own packs and feature flags, or a datapack's biomes would never be loaded. */
         private fun readDataConfiguration(access: LevelStorageSource.LevelStorageAccess): WorldDataConfiguration =
             try {
-                val data = access.getUnfixedDataTag(false).convert(NbtOps.INSTANCE).value as CompoundTag
+                val data = LevelDat.read(access) ?: return WorldDataConfiguration.DEFAULT
                 WorldDataConfiguration.CODEC.parse(NbtOps.INSTANCE, data).result()
                     .orElse(WorldDataConfiguration.DEFAULT)
             } catch (e: Exception) {
@@ -152,7 +157,7 @@ class BiomeTints private constructor(private val registry: Registry<Biome>, priv
 }
 
 /** Everything but the biome tint is answered by the empty level. */
-private class TintGetter : BlockAndTintGetter by BlockAndTintGetter.EMPTY {
+private class TintGetter : BlockAndTintGetter by EmptyBlockAndTintGetter.INSTANCE {
     var biome: Biome? = null
 
     override fun getBlockTint(pos: BlockPos, resolver: ColorResolver): Int {

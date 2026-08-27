@@ -1,9 +1,8 @@
 package de.miraculixx.chunkeditor.data
 
 import de.miraculixx.chunkeditor.Constants
+import de.miraculixx.common.LevelDat
 import net.minecraft.core.BlockPos
-import net.minecraft.nbt.CompoundTag
-import net.minecraft.nbt.NbtOps
 import net.minecraft.world.level.storage.LevelData
 import net.minecraft.world.level.storage.LevelStorageSource
 
@@ -15,7 +14,7 @@ data class LevelFacts(val gameTime: Long, val spawn: BlockPos) {
         val EMPTY = LevelFacts(0L, BlockPos.ZERO)
 
         fun read(access: LevelStorageSource.LevelStorageAccess): LevelFacts = try {
-            val data = access.getUnfixedDataTag(false).convert(NbtOps.INSTANCE).value as CompoundTag
+            val data = LevelDat.read(access) ?: return EMPTY
             LevelFacts(
                 gameTime = data.getLongOr("Time", 0L),
                 spawn = data.read("spawn", LevelData.RespawnData.CODEC)

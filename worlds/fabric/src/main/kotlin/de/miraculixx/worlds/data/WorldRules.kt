@@ -1,50 +1,35 @@
 package de.miraculixx.worlds.data
 
+import de.miraculixx.common.LevelDat
 import de.miraculixx.worlds.Constants
-import net.minecraft.client.Minecraft
-import net.minecraft.nbt.CompoundTag
-import net.minecraft.nbt.NbtAccounter
-import net.minecraft.nbt.NbtIo
 import net.minecraft.nbt.NbtOps
-import net.minecraft.nbt.NbtUtils
-import net.minecraft.util.FileUtil
-import net.minecraft.util.datafix.DataFixTypes
 import net.minecraft.world.flag.FeatureFlagSet
-import net.minecraft.world.level.gamerules.GameRuleMap
 import net.minecraft.world.level.gamerules.GameRules
-import net.minecraft.world.level.levelgen.WorldGenSettings
-import net.minecraft.world.level.saveddata.SavedDataType
-import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
-import java.nio.file.Files
-import java.nio.file.Path
 
 /**
- * The per-save state 26.1 keeps *outside* `level.dat`, in `data/<namespace>/<path>.dat`.
+ * The per-save state 1.21 keeps *inside* `level.dat`'s `Data` compound, the seed, under
+ * `WorldGenSettings`, and the game rules under `game_rules`.
+ *
+ * 26.x moved both out into `data/<namespace>/<path>.dat` SavedData files, so this is the one place
+ * that reads noticeably different between the two eras.
  */
 object WorldRules {
 
-    fun readSeed(access: LevelStorageSource.LevelStorageAccess): Long? {
-        val file = savedDataFile(access, WorldGenSettings.TYPE)
-        if (!Files.isRegularFile(file)) return null
-        return try {
-            NbtIo.readCompressed(file, NbtAccounter.unlimitedHeap())
-                .getCompoundOrEmpty("data").getLong("seed").orElse(null)
-        } catch (e: Exception) {
-            Constants.LOG.warn("Failed to read seed of {}: {}", access.levelId, e.message)
-            null
-        }
+    fun readSeed(access: LevelStorageSource.LevelStorageAccess): Long? = try {
+        LevelDat.read(access)
+            ?.getCompoundOrEmpty(WORLD_GEN_SETTINGS)
+            ?.getLong(SEED)?.orElse(null)
+    } catch (e: Exception) {
+        Constants.LOG.warn("Failed to read seed of {}: {}", access.levelId, e.message)
+        null
     }
 
     fun readGameRules(access: LevelStorageSource.LevelStorageAccess, features: FeatureFlagSet): GameRules {
-        val file = savedDataFile(access, GameRuleMap.TYPE)
-        if (!Files.isRegularFile(file)) return GameRules(features)
+        val data = LevelDat.read(access) ?: return GameRules(features)
         return try {
-            val root = NbtIo.readCompressed(file, NbtAccounter.unlimitedHeap())
-            val fixed = DataFixTypes.SAVED_DATA_GAME_RULES.updateToCurrentVersion(
-                Minecraft.getInstance().fixerUpper, root, NbtUtils.getDataVersion(root, 0),
-            )
-            GameRules.codec(features).parse(NbtOps.INSTANCE, fixed.getCompoundOrEmpty("data"))
+            val tag = data.get(GAME_RULES) ?: return GameRules(features)
+            GameRules.codec(features).parse(NbtOps.INSTANCE, tag)
                 .result().orElseGet { GameRules(features) }
         } catch (e: Exception) {
             Constants.LOG.warn("Failed to read game rules of {}: {}", access.levelId, e.message)
@@ -57,18 +42,15 @@ object WorldRules {
         features: FeatureFlagSet,
         rules: GameRules,
     ): Boolean = try {
-        val root = CompoundTag()
-        root.put("data", GameRules.codec(features).encodeStart(NbtOps.INSTANCE, rules).getOrThrow())
-        NbtUtils.addCurrentDataVersion(root)
-        val file = savedDataFile(access, GameRuleMap.TYPE)
-        FileUtil.createDirectoriesSafe(file.parent)
-        NbtIo.writeCompressed(root, file)
+        val encoded = GameRules.codec(features).encodeStart(NbtOps.INSTANCE, rules).getOrThrow()
+        LevelDat.modify(access) { it.put(GAME_RULES, encoded) }
         true
     } catch (e: Exception) {
         Constants.LOG.error("Failed to write game rules of {}", access.levelId, e)
         false
     }
 
-    private fun savedDataFile(access: LevelStorageSource.LevelStorageAccess, type: SavedDataType<*>): Path =
-        type.id().withSuffix(".dat").resolveAgainst(access.getLevelPath(LevelResource.DATA))
+    private const val WORLD_GEN_SETTINGS = "WorldGenSettings"
+    private const val GAME_RULES = "game_rules"
+    private const val SEED = "seed"
 }

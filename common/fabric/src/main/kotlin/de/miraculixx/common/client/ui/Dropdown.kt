@@ -1,7 +1,7 @@
 package de.miraculixx.common.client.ui
 
 import net.minecraft.client.gui.Font
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.network.chat.Component
@@ -17,7 +17,7 @@ private const val ARROW = "  ▾"
  *
  * ```
  * override fun init() { addRenderableWidget(dropdown.button) }
- * override fun extractRenderState(…) { …; dropdown.renderOverlay(graphics, font, mouseX, mouseY) }
+ * override fun render(…) { …; dropdown.renderOverlay(graphics, font, mouseX, mouseY) }
  * override fun mouseClicked(event, doubleClick) { if (dropdown.mouseClicked(x, y)) return true; … }
  * override fun keyPressed(event) = dropdown.keyPressed(event) || super.keyPressed(event)
  * ```
@@ -65,7 +65,7 @@ class Dropdown<T>(
     }
 
     /** Call **last** in the screen's render pass, so the list covers whatever it overlaps. */
-    fun renderOverlay(graphics: GuiGraphicsExtractor, font: Font, mouseX: Int, mouseY: Int) {
+    fun renderOverlay(graphics: GuiGraphics, font: Font, mouseX: Int, mouseY: Int) {
         if (!open) return
         val top = y + BUTTON_H
         drawBox(graphics, x, top, x + width, top + height())
@@ -75,7 +75,7 @@ class Dropdown<T>(
                 graphics.fill(x + 1, rowTop, x + width - 1, rowTop + ROW_H, HOVER_COLOR)
             }
             val color = if (entry == selected) -1 else SUBTEXT_COLOR
-            graphics.text(font, label(entry), x + 6, rowTop + (ROW_H - font.lineHeight) / 2 + 1, color)
+            graphics.drawString(font, label(entry), x + 6, rowTop + (ROW_H - font.lineHeight) / 2 + 1, color)
         }
     }
 

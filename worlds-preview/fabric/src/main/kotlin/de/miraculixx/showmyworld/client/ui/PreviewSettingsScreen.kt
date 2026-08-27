@@ -9,7 +9,7 @@ import de.miraculixx.showmyworld.client.PreviewSettings
 import de.miraculixx.showmyworld.client.ui.panorama.DefaultPanorama
 import de.miraculixx.showmyworld.client.ui.panorama.WorldPanorama
 import net.minecraft.client.Minecraft
-import net.minecraft.client.gui.GuiGraphicsExtractor
+import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.resources.language.I18n
@@ -84,9 +84,9 @@ class PreviewSettingsScreen(private val onDone: Runnable) : Screen(Component.tra
         ),
     )
 
-    override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick)
-        graphics.centeredText(font, title, width / 2, 12, -1)
+    override fun render(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
+        super.render(graphics, mouseX, mouseY, partialTick)
+        graphics.drawCenteredString(font, title, width / 2, 12, -1)
     }
 
     override fun onClose() {

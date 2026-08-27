@@ -3,7 +3,6 @@ package de.miraculixx.showmyworld.client.ui.panorama
 import com.mojang.blaze3d.ProjectionType
 import com.mojang.blaze3d.buffers.GpuBuffer
 import com.mojang.blaze3d.pipeline.BlendFunction
-import com.mojang.blaze3d.pipeline.ColorTargetState
 import com.mojang.blaze3d.pipeline.RenderPipeline
 import com.mojang.blaze3d.shaders.UniformType
 import com.mojang.blaze3d.systems.RenderSystem
@@ -15,8 +14,7 @@ import de.miraculixx.showmyworld.Constants
 import java.util.OptionalDouble
 import java.util.OptionalInt
 import net.minecraft.client.Minecraft
-import net.minecraft.client.renderer.Projection
-import net.minecraft.client.renderer.ProjectionMatrixBuffer
+import net.minecraft.client.renderer.CachedPerspectiveProjectionMatrixBuffer
 import net.minecraft.resources.Identifier
 import org.joml.Matrix4f
 import org.joml.Vector3f
@@ -26,8 +24,7 @@ import org.joml.Vector4f
  * Copy of [net.minecraft.client.renderer.CubeMap] with alpha option and variable texture
  */
 class WorldCubeMap : AutoCloseable {
-    private val projection = Projection()
-    private val projectionMatrixUbo = ProjectionMatrixBuffer("worlds panorama")
+    private val projectionMatrixUbo = CachedPerspectiveProjectionMatrixBuffer("worlds panorama", Z_NEAR, Z_FAR)
     private val vertexBuffer = initializeVertices()
 
     fun render(location: Identifier, rotXInDegrees: Float, rotYInDegrees: Float, alpha: Float) {
@@ -35,9 +32,10 @@ class WorldCubeMap : AutoCloseable {
         val mainRenderTarget = minecraft.mainRenderTarget
         val colorTexture = mainRenderTarget.colorTextureView ?: return
         val texture = minecraft.textureManager.getTexture(location)
-        val windowState = minecraft.gameRenderer.gameRenderState.windowRenderState
-        projection.setupPerspective(0.05f, 10f, 85f, windowState.width.toFloat(), windowState.height.toFloat())
-        RenderSystem.setProjectionMatrix(projectionMatrixUbo.getBuffer(projection), ProjectionType.PERSPECTIVE)
+        val window = minecraft.window
+        RenderSystem.setProjectionMatrix(
+            projectionMatrixUbo.getBuffer(window.width, window.height, FOV), ProjectionType.PERSPECTIVE,
+        )
         val indices = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS)
         val indexBuffer = indices.getBuffer(36)
         val modelViewStack = RenderSystem.getModelViewStack()
@@ -52,7 +50,7 @@ class WorldCubeMap : AutoCloseable {
         val encoder = RenderSystem.getDevice().createCommandEncoder()
         val label = { "Worlds panorama" }
         val depth = mainRenderTarget.depthTextureView
-        // The pipeline declares no depth state, so the attachment is only along for the ride.
+        // The pipeline never writes depth, so the attachment is only along for the ride.
         val pass = if (depth != null) {
             encoder.createRenderPass(label, colorTexture, OptionalInt.empty(), depth, OptionalDouble.empty())
         } else {
@@ -76,6 +74,9 @@ class WorldCubeMap : AutoCloseable {
 
     private companion object {
         const val DEG_TO_RAD = (Math.PI / 180.0).toFloat()
+        const val Z_NEAR = 0.05f
+        const val Z_FAR = 10f
+        const val FOV = 85f
 
         val PIPELINE: RenderPipeline = RenderPipeline.builder()
             .withUniform("DynamicTransforms", UniformType.UNIFORM_BUFFER)
@@ -84,7 +85,9 @@ class WorldCubeMap : AutoCloseable {
             .withVertexShader(Identifier.fromNamespaceAndPath(Constants.MOD_ID, "core/world_panorama"))
             .withFragmentShader(Identifier.fromNamespaceAndPath(Constants.MOD_ID, "core/world_panorama"))
             .withSampler("Sampler0")
-            .withColorTargetState(ColorTargetState(BlendFunction.TRANSLUCENT))
+            .withBlend(BlendFunction.TRANSLUCENT)
+            .withDepthWrite(false)
+            .withColorWrite(true, false)
             .withVertexFormat(DefaultVertexFormat.POSITION, VertexFormat.Mode.QUADS)
             .build()
 

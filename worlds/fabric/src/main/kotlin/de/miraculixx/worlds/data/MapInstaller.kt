@@ -3,9 +3,15 @@ package de.miraculixx.worlds.data
 import com.mojang.serialization.Lifecycle
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.Collections
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import net.minecraft.client.Minecraft
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.commands.Commands
+import net.minecraft.core.registries.Registries
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.NbtIo
 import net.minecraft.nbt.NbtOps
@@ -20,52 +26,41 @@ import net.minecraft.world.level.DataPackConfig
 import net.minecraft.world.level.GameType
 import net.minecraft.world.level.LevelSettings
 import net.minecraft.world.level.WorldDataConfiguration
+import net.minecraft.world.level.gamerules.GameRules
 import net.minecraft.world.level.levelgen.WorldGenSettings
 import net.minecraft.world.level.levelgen.WorldOptions
 import net.minecraft.world.level.levelgen.presets.WorldPresets
 import net.minecraft.world.level.storage.LevelStorageSource
 import net.minecraft.world.level.storage.PrimaryLevelData
-import java.nio.file.Files
-import java.nio.file.Path
-import java.util.Collections
-import java.util.zip.ZipEntry
-import java.util.zip.ZipFile
-
 /** Result of an install attempt. */
 sealed interface InstallResult {
     data class Success(val saveFolder: String) : InstallResult
     data class Failure(val message: String) : InstallResult
 }
-
 /** How often a progress line may be pushed */
 private const val PROGRESS_INTERVAL_MS = 100L
-
 /**
  * Rate-limited progress sink
  */
 private class Progress(private val sink: (String) -> Unit) {
     private var nextAt = 0L
-
     fun push(message: String) {
         val now = Util.getMillis()
         if (now < nextAt) return
         nextAt = now + PROGRESS_INTERVAL_MS
         sink(message)
     }
-
     /** Push regardless of the interval, for stage changes that must not be swallowed. */
     fun stage(message: String) {
         nextAt = Util.getMillis() + PROGRESS_INTERVAL_MS
         sink(message)
     }
 }
-
 /**
  * Downloads a map's world file and unpacks it into the `saves/` directory, then writes an
  * [InstalledMeta] marker so the map is recognised offline.
  */
 object MapInstaller {
-
     /**
      * The archive is streamed to a temporary file next to `saves/`.
      */
@@ -73,11 +68,9 @@ object MapInstaller {
         MapRepository.loadDetail(entry)
         val url = entry.downloadUrl
             ?: return InstallResult.Failure(I18n.get("worlds.install.no_file", entry.title))
-
-        val gameDir = Minecraft.getInstance().gameDirectory.toPath()
+        val gameDir = Minecraft.getInstance().gameDirectory.toPath().toAbsolutePath().normalize()
         val savesDir = gameDir.resolve("saves")
         Files.createDirectories(savesDir)
-
         val progress = Progress(onProgress)
         val archive = Files.createTempFile(gameDir, "worlds-download", ".zip")
         return try {
@@ -91,14 +84,12 @@ object MapInstaller {
             runCatching { Files.deleteIfExists(archive) }
         }
     }
-
     /** `Downloading… 37% (1.1 GB / 2.9 GB)`, or without the share when the server declared no length. */
     private fun downloadMessage(done: Long, total: Long, prefix: String = ""): String {
         val detail = if (total > 0) "${done * 100 / total}% (${formatBytes(done)} / ${formatBytes(total)})"
         else formatBytes(done)
         return I18n.get("worlds.status.downloading", prefix + detail)
     }
-
     private fun unpack(entry: MapEntry, archive: Path, savesDir: Path, progress: Progress): InstallResult {
         val zip = try {
             ZipFile(archive.toFile())
@@ -114,7 +105,6 @@ object MapInstaller {
                 ?: return if (isDatapack(entries)) installDatapack(entry, archive, savesDir, progress)
                 else InstallResult.Failure(I18n.get("worlds.install.not_a_world", entry.title))
             val prefix = levelEntry.removeSuffix("level.dat") // "" or "world/" or "overrides/saves/world/"
-
             val target = uniqueFolder(savesDir, entry.title)
             try {
                 extract(zip, entries, prefix, target, progress)
@@ -127,7 +117,6 @@ object MapInstaller {
             return InstallResult.Success(target.fileName.toString())
         }
     }
-
     /**
      * Stream every entry under [prefix] into [target]. A zip's declared entry sizes are written by
      * whoever built it, so the budget is spent against the bytes actually inflated.
@@ -150,10 +139,8 @@ object MapInstaller {
             }
         }
     }
-
     private fun isDatapack(entries: List<ZipEntry>) =
         entries.any { it.name == "pack.mcmeta" } && entries.any { it.name.startsWith("data/") }
-
     /**
      * The download is a world-generation datapack, not a world -> create new world
      * - random seed, no cheats, normal difficulty
@@ -166,20 +153,20 @@ object MapInstaller {
             val packsDir = target.resolve("datapacks")
             Files.createDirectories(packsDir)
             Files.copy(archive, packsDir.resolve(packName))
-
             val dataConfig = WorldDataConfiguration(
                 DataPackConfig(listOf("vanilla", "file/$packName"), emptyList()), FeatureFlags.DEFAULT_FLAGS
             )
             val settings = LevelSettings(
                 entry.title,
                 GameType.SURVIVAL,
-                LevelSettings.DifficultySettings(Difficulty.NORMAL, false, false),
                 false,
+                Difficulty.NORMAL,
+                false,
+                GameRules(dataConfig.enabledFeatures()),
                 dataConfig,
             )
             Minecraft.getInstance().levelSource.createAccess(target.fileName.toString()).use { access ->
-                writeWorldGenSettings(target, access, dataConfig)
-                access.saveDataTag(PrimaryLevelData(settings, PrimaryLevelData.SpecialWorldProperty.NONE, Lifecycle.stable()))
+                writeLevelData(access, settings, dataConfig)
             }
             downloadIcon(target, entry)
             writeMarker(target, entry)
@@ -190,37 +177,38 @@ object MapInstaller {
         }
         return InstallResult.Success(target.fileName.toString())
     }
-
     /**
-     * Prepare a new random world with datapack context, for map creation
+     * Prepare a new random world with datapack context, for map creation.
+     *
+     * 1.21 keeps world-gen settings *inside* `level.dat`, so unlike 26.x there is no separate
+     * `data/world_gen_settings.dat` to write
      */
-    private fun writeWorldGenSettings(target: Path, access: LevelStorageSource.LevelStorageAccess, dataConfig: WorldDataConfiguration) {
+    private fun writeLevelData(
+        access: LevelStorageSource.LevelStorageAccess,
+        settings: LevelSettings,
+        dataConfig: WorldDataConfiguration,
+    ) {
         val packConfig = WorldLoader.PackConfig(ServerPacksSource.createPackRepository(access), dataConfig, false, false)
+        val options = WorldOptions.defaultWithRandomSeed()
         WorldLoader.load(
             WorldLoader.InitConfig(packConfig, Commands.CommandSelection.INTEGRATED, LevelBasedPermissionSet.GAMEMASTER),
             { context ->
+                // Datapack dimensions win over the preset; the preset is only the fallback.
+                val complete = WorldPresets.createNormalWorldDimensions(context.datapackWorldgen())
+                    .bake(context.datapackDimensions().lookupOrThrow(Registries.LEVEL_STEM))
                 WorldLoader.DataLoadOutput(
-                    WorldGenSettings(
-                        WorldOptions.defaultWithRandomSeed(), WorldPresets.createNormalWorldDimensions(context.datapackWorldgen())
-                    ),
-                    context.datapackDimensions()
+                    PrimaryLevelData(settings, options, complete.specialWorldProperty(), complete.lifecycle()),
+                    complete.dimensionsRegistryAccess(),
                 )
             },
-            { resources, _, registries, genSettings ->
+            { resources, _, registries, levelData ->
                 resources.close()
-                val ops = registries.compositeAccess().createSerializationContext(NbtOps.INSTANCE)
-                val root = CompoundTag()
-                root.put("data", WorldGenSettings.CODEC.encodeStart(ops, genSettings).getOrThrow())
-                NbtUtils.addCurrentDataVersion(root)
-                val file = WorldGenSettings.TYPE.id().withSuffix(".dat").resolveAgainst(target.resolve("data"))
-                Files.createDirectories(file.parent)
-                NbtIo.writeCompressed(root, file)
+                access.saveDataTag(registries.compositeAccess(), levelData)
             },
             Util.backgroundExecutor(),
             Minecraft.getInstance(),
         ).join()
     }
-
     /**
      * Use datapack projects icon as world icon, re-encodes image into 64x64 png if possible
      */
@@ -228,7 +216,6 @@ object MapInstaller {
         val bytes = entry.iconUrl?.let { Http.getBytes(it) } ?: return
         WorldEditor.writeIcon(target.resolve("icon.png"), bytes)
     }
-
     private fun writeMarker(target: Path, entry: MapEntry) {
         val meta = InstalledMeta(
             id = entry.id,
@@ -249,7 +236,6 @@ object MapInstaller {
         )
         Files.writeString(target.resolve(InstalledMeta.FILE_NAME), Http.json.encodeToString(meta))
     }
-
     /**
      * Download every *external* required resource pack into the save's own `resourcepacks/` folder so [WorldResourcePacks]
      * can enable them on join. Unresolvable packs are just skipped
@@ -278,7 +264,6 @@ object MapInstaller {
             }
         }
     }
-
     /** A `.zip` filename for a downloaded pack: prefer the URL's own name, else derive from title. */
     private fun packFilename(pack: MapRequirement, url: String): String {
         val fromUrl = url.substringAfterLast('/').substringBefore('?')
@@ -286,7 +271,6 @@ object MapInstaller {
         val base = pack.name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "pack" }
         return "$base.zip"
     }
-
     private fun uniqueFolder(savesDir: Path, title: String): Path {
         val base = title.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "Map" }
         var candidate = savesDir.resolve(base)
