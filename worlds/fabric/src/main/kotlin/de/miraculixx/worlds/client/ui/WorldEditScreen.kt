@@ -41,6 +41,7 @@ import net.minecraft.client.gui.screens.packs.PackSelectionScreen
 import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.client.gui.screens.worldselection.OptimizeWorldScreen
 import net.minecraft.client.gui.screens.worldselection.WorldCreationGameRulesScreen
+import net.minecraft.client.gui.narration.NarrationElementOutput
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.resources.language.I18n
@@ -112,6 +113,13 @@ class WorldEditScreen(
     private val dataPackWidgets = ArrayList<AbstractWidget>()
     private val resourcePackWidgets = ArrayList<AbstractWidget>()
     private val extraWidgets = ArrayList<AbstractWidget>()
+    private val packRowHits = ArrayList<PackHit>()
+    private val packDeleteHits = ArrayList<PackHit>()
+    private lateinit var titleHit: CardHit
+    private lateinit var descHit: CardHit
+    private lateinit var pillHit: CardHit
+    private lateinit var iconResetHit: CardHit
+    private lateinit var iconPickHit: CardHit
     private lateinit var extraList: SettingsList
 
     /** Not rebuilt in [init] to avoid auto-collapse */
@@ -168,6 +176,8 @@ class WorldEditScreen(
         dataPackWidgets.clear()
         resourcePackWidgets.clear()
         extraWidgets.clear()
+        packRowHits.clear()
+        packDeleteHits.clear()
 
         tabBar = addRenderableWidget(
             MenuTabBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
@@ -252,6 +262,17 @@ class WorldEditScreen(
             )
         )
 
+        titleHit = addRenderableWidget(CardHit(::titleRect) { beginEdit(Field.TITLE) })
+        descHit = addRenderableWidget(CardHit(::descRect) { beginEdit(Field.DESCRIPTION) })
+        pillHit = addRenderableWidget(CardHit(::pillRect) { commitEdit(); clickSound(); cycleCategory() })
+        iconResetHit = addRenderableWidget(CardHit(::iconResetRect) { commitEdit(); clickSound(); resetIcon() })
+        iconPickHit = addRenderableWidget(CardHit(::iconPickRect) { commitEdit(); clickSound(); pickIcon() })
+
+        repeat(packRowCapacity()) { index ->
+            packRowHits.add(addRenderableWidget(PackHit(index, delete = false)))
+            packDeleteHits.add(addRenderableWidget(PackHit(index, delete = true)))
+        }
+
         extraList = SettingsList(minecraft, categories, ::extraRowsFor)
         extraList.updateSizeAndPosition(cardW, listBottom() - cardY, cardX, cardY)
         extraList.rebuild()
@@ -298,10 +319,13 @@ class WorldEditScreen(
         dataPackWidgets.forEach { it.visible = tab == Tab.DATA_PACKS }
         resourcePackWidgets.forEach { it.visible = tab == Tab.RESOURCE_PACKS }
         extraWidgets.forEach { it.visible = tab == Tab.EXTRA }
-        if (tab != Tab.EXTRA && focused === extraList) focused = null
+        syncPackHits()
+        // A widget the tab switch just hid must not keep the focus, or its keys still reach it.
+        (focused as? AbstractWidget)?.let { if (!it.isActive) focused = null }
         // The two in-place editors only exist while a field is being edited.
         titleBox.visible = general && editing == Field.TITLE
         descBox.visible = general && editing == Field.DESCRIPTION
+        syncCardHits()
     }
 
     //
@@ -329,6 +353,10 @@ class WorldEditScreen(
         val fits = (space / packRowH()).coerceAtLeast(0)
         return if (rows().size <= fits) rows().size else (fits - 1).coerceAtLeast(0)
     }
+
+    /** Row slots the box can hold, e.g. how many hit widgets both pack tabs ever need. */
+    private fun packRowCapacity(): Int =
+        ((listBottom() - CARD_PAD - packRowsTop()) / packRowH()).coerceAtLeast(0)
 
     private fun packRowRect(index: Int): Rect {
         val gap = if (separated() && index >= firstGroup()) SEPARATOR_H else 0
@@ -379,6 +407,10 @@ class WorldEditScreen(
     /** Left half of the icon resets it to none, right half opens the file picker. */
     private fun overResetIcon(mx: Double, my: Double) = overIcon(mx, my) && mx < iconX() + iconSize / 2
 
+    private fun iconResetRect() = Rect(iconX(), iconY(), iconX() + iconSize / 2, iconY() + iconSize)
+
+    private fun iconPickRect() = Rect(iconX() + iconSize / 2, iconY(), iconX() + iconSize, iconY() + iconSize)
+
     private fun titleRect() = Rect(textX(), cardY + CARD_PAD, textX() + textWidth(), cardY + CARD_PAD + TITLE_H)
 
     private fun descRect() = Rect(
@@ -413,10 +445,12 @@ class WorldEditScreen(
 
     /** Close the open editor without writing anything. */
     private fun cancelEdit() {
-        val box = boxOf(editing ?: return)
+        val field = editing ?: return
+        val box = boxOf(field)
         editing = null
         box.visible = false
         box.isFocused = false
+        returnCardFocus(field, box)
     }
 
     /** Write whatever the open editor holds and close it. No-op when nothing is being edited. */
@@ -426,6 +460,7 @@ class WorldEditScreen(
         editing = null
         box.visible = false
         box.isFocused = false
+        returnCardFocus(field, box)
         when (field) {
             Field.TITLE -> {
                 val value = box.value.trim()
@@ -789,7 +824,46 @@ class WorldEditScreen(
     /**
      * A list of all available packs. RPs are a simple folder walk, DPs also contain featured packs
      */
+    private inner class PackHit(val index: Int, val delete: Boolean) :
+        AbstractWidget(0, 0, 0, 0, Component.empty()) {
+
+        override fun extractWidgetRenderState(
+            graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float,
+        ) = Unit
+
+        override fun updateWidgetNarration(output: NarrationElementOutput) = defaultButtonNarrationText(output)
+
+        override fun keyPressed(event: KeyEvent): Boolean {
+            if (!event.isConfirmation) return false
+            val row = rows().getOrNull(index) ?: return false
+            clickSound()
+            if (delete) confirmDeletePack(row) else togglePack(index)
+            return true
+        }
+    }
+
+    private fun syncPackHits() {
+        val shown = if (tab == Tab.DATA_PACKS || tab == Tab.RESOURCE_PACKS) shownPackRows() else 0
+        val rows = rows()
+        packRowHits.indices.forEach { index ->
+            val row = rows.getOrNull(index)?.takeIf { index < shown }
+            val rowHit = packRowHits[index]
+            val deleteHit = packDeleteHits[index]
+            rowHit.visible = row != null
+            deleteHit.visible = row != null && row.deletable
+            if (row == null) return@forEach
+            val rect = packRowRect(index)
+            val trash = packDeleteRect(index)
+            val nameEnd = if (row.deletable) trash.x1 - 4 else rect.x2
+            rowHit.setRectangle(nameEnd - rect.x1, rect.y2 - rect.y1, rect.x1, rect.y1)
+            rowHit.message = Component.literal(row.name)
+            deleteHit.setRectangle(trash.x2 - trash.x1, trash.y2 - trash.y1, trash.x1, trash.y1)
+            deleteHit.message = Component.translatable("worlds.edit.delete_pack")
+        }
+    }
+
     private fun drawPackList(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+        syncPackHits()
         drawBox(graphics, cardX, cardY, cardX + cardW, listBottom())
         val rows = rows()
         val point = mouseX.toDouble() to mouseY.toDouble()
@@ -809,9 +883,10 @@ class WorldEditScreen(
             val rect = packRowRect(index)
             val toggle = packToggleRect(index)
             val delete = packDeleteRect(index)
-            if (point in rect) graphics.fill(rect.x1, rect.y1, rect.x2, rect.y2, HOVER_COLOR)
+            val rowFocused = packRowHits[index].isFocused
+            if (point in rect || rowFocused) graphics.fill(rect.x1, rect.y1, rect.x2, rect.y2, HOVER_COLOR)
 
-            drawToggle(graphics, toggle, row.enabled, point in toggle)
+            drawToggle(graphics, toggle, row.enabled, point in toggle || rowFocused)
             val textY = rect.y1 + (packRowH() - font.lineHeight) / 2 + 1
             val nameX = toggle.x2 + 6
             val nameEnd = if (row.deletable) delete.x1 - 4 else rect.x2 - 2
@@ -823,7 +898,7 @@ class WorldEditScreen(
             if (row.deletable) {
                 graphics.centeredText(
                     font, Component.literal(ICON_RESET), (delete.x1 + delete.x2) / 2, textY,
-                    if (point in delete) 0xFFFF6060.toInt() else SUBTEXT_COLOR,
+                    if (point in delete || packDeleteHits[index].isFocused) 0xFFFF6060.toInt() else SUBTEXT_COLOR,
                 )
             }
         }
@@ -846,15 +921,63 @@ class WorldEditScreen(
         if (on) graphics.fill(rect.x1 + 3, rect.y1 + 3, rect.x2 - 3, rect.y2 - 3, 0xFF55DD55.toInt())
     }
 
+    /**
+     * Also apply hidden hit fields for direct selections (tab, controller)
+     */
+    private class CardHit(private val rect: () -> Rect, private val onPress: () -> Unit) :
+        AbstractWidget(0, 0, 0, 0, Component.empty()) {
+
+        fun sync(shown: Boolean, label: Component) {
+            visible = shown
+            message = label
+            if (!shown) return
+            val r = rect()
+            setRectangle(r.x2 - r.x1, r.y2 - r.y1, r.x1, r.y1)
+        }
+
+        override fun extractWidgetRenderState(
+            graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float,
+        ) = Unit
+
+        override fun updateWidgetNarration(output: NarrationElementOutput) = defaultButtonNarrationText(output)
+
+        override fun keyPressed(event: KeyEvent): Boolean {
+            if (!event.isConfirmation) return false
+            onPress()
+            return true
+        }
+    }
+
+    private fun syncCardHits() {
+        if (!::titleHit.isInitialized) return
+        val general = tab == Tab.GENERAL
+        // The open editor replaces the text it sits on, so its hit goes away with it
+        titleHit.sync(general && !titleBox.visible, Component.literal(levelName))
+        val desc = description.ifBlank { I18n.get("worlds.edit.empty_description") }
+        descHit.sync(general && !descBox.visible, Component.literal(desc))
+        pillHit.sync(general, Component.literal(category))
+        iconResetHit.sync(general, Component.literal(ICON_RESET))
+        iconPickHit.sync(general, Component.literal(ICON_CHANGE))
+    }
+
+    /** Hand the focus back to the region that opened the editor, or it stays on a hidden box. */
+    private fun returnCardFocus(field: Field, box: EditBox) {
+        if (focused !== box) return
+        focused = if (field == Field.TITLE) titleHit else descHit
+        syncCardHits()
+    }
+
     private fun drawCard(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+        syncCardHits()
         drawBox(graphics, cardX, cardY, cardX + cardW, cardY + cardH)
 
         drawIcon(graphics, mouseX, mouseY)
 
         val tx = textX()
         val tw = textWidth()
-        val hoverTitle = !titleBox.visible && (mouseX.toDouble() to mouseY.toDouble()) in titleRect()
-        val hoverDesc = !descBox.visible && (mouseX.toDouble() to mouseY.toDouble()) in descRect()
+        val point = mouseX.toDouble() to mouseY.toDouble()
+        val hoverTitle = !titleBox.visible && (point in titleRect() || titleHit.isFocused)
+        val hoverDesc = !descBox.visible && (point in descRect() || descHit.isFocused)
         if (hoverTitle) graphics.fill(tx - 2, cardY + CARD_PAD - 2, tx + tw + 2, cardY + CARD_PAD + TITLE_H, HOVER_COLOR)
         if (hoverDesc) {
             val r = descRect()
@@ -879,7 +1002,7 @@ class WorldEditScreen(
 
         // Category pill: a click cycles it, so it gets the same hover wash as the text rows.
         val pill = pillRect()
-        if ((mouseX.toDouble() to mouseY.toDouble()) in pill) {
+        if (point in pill || pillHit.isFocused) {
             graphics.fill(pill.x1 - 1, pill.y1 - 1, pill.x2 + 1, pill.y2 + 1, HOVER_COLOR)
         }
         CategoryBadge.draw(graphics, font, category, tx, cardY + pillTop + 2)
@@ -897,12 +1020,14 @@ class WorldEditScreen(
         } else {
             graphics.fill(x, y, x + iconSize, y + iconSize, 0xFF2A2A2A.toInt())
         }
-        if (!overIcon(mouseX.toDouble(), mouseY.toDouble())) return
+        val focusedHalf = iconResetHit.isFocused || iconPickHit.isFocused
+        if (!focusedHalf && !overIcon(mouseX.toDouble(), mouseY.toDouble())) return
 
         // Same wash the list row uses for its play overlay, but split into reset | replace.
         graphics.fill(x, y, x + iconSize, y + iconSize, ICON_HOVER_OVERLAY)
         val half = iconSize / 2
-        val overReset = overResetIcon(mouseX.toDouble(), mouseY.toDouble())
+        val overReset = if (focusedHalf) iconResetHit.isFocused
+        else overResetIcon(mouseX.toDouble(), mouseY.toDouble())
         if (overReset) graphics.fill(x, y, x + half, y + iconSize, 0x40FFFFFF)
         else graphics.fill(x + half, y, x + iconSize, y + iconSize, 0x40FFFFFF)
         val glyphY = y + (iconSize - font.lineHeight) / 2

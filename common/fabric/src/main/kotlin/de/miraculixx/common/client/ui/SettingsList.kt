@@ -1,6 +1,7 @@
 package de.miraculixx.common.client.ui
 
 import net.minecraft.client.Minecraft
+import net.minecraft.client.gui.ComponentPath
 import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.AbstractWidget
@@ -10,6 +11,8 @@ import net.minecraft.client.gui.components.CycleButton
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.components.events.GuiEventListener
 import net.minecraft.client.gui.narration.NarratableEntry
+import net.minecraft.client.gui.narration.NarrationElementOutput
+import net.minecraft.client.gui.navigation.FocusNavigationEvent
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.network.chat.Component
@@ -49,11 +52,17 @@ class SettingsList(
     fun rebuild() {
         pendingRebuild = false
         val scroll = scrollAmount()
+        // Expanding is a rebuild, so the row that was just activated is thrown away
+        val refocus = (focused as? CategoryRow)?.category
         commitEdits()
         clearEntries()
         categories.forEach { category ->
             addEntry(CategoryRow(category), CATEGORY_H)
             if (category.action == null && category.expanded) rowsFor(category).forEach { addEntry(it, ROW_H) }
+        }
+        if (refocus != null) {
+            children().filterIsInstance<CategoryRow>().firstOrNull { it.category === refocus }
+                ?.let { row -> row.focusPath()?.let { ComponentPath.path(this, it)?.applyFocus(true) } }
         }
         setScrollAmount(scroll)
     }
@@ -67,6 +76,12 @@ class SettingsList(
         if (pendingRebuild) rebuild()
         super.extractWidgetRenderState(graphics, mouseX, mouseY, partialTick)
     }
+
+    override fun nextFocusPath(event: FocusNavigationEvent): ComponentPath? =
+        if (isActive) super.nextFocusPath(event) else null
+
+    override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean =
+        isActive && super.mouseClicked(event, doubleClick)
 
     override fun getRowWidth(): Int = width - 12
 
@@ -97,21 +112,47 @@ class SettingsList(
             widgets().forEach { it.extractRenderState(graphics, mouseX, mouseY, partialTick) }
     }
 
-    inner class CategoryRow(private val category: SettingsCategory) : Row(category.label, INDENT) {
-        override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
+    inner class CategoryRow(val category: SettingsCategory) : Row(category.label, INDENT) {
+        private val hit = object : AbstractWidget(0, 0, 0, 0, Component.literal(category.label)) {
+            override fun extractWidgetRenderState(
+                graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float,
+            ) = Unit
+
+            override fun updateWidgetNarration(output: NarrationElementOutput) = defaultButtonNarrationText(output)
+
+            override fun keyPressed(event: KeyEvent): Boolean {
+                if (!event.isConfirmation) return false
+                activate()
+                return true
+            }
+        }
+
+        override fun widgets(): List<AbstractWidget> = listOf(hit)
+
+        internal fun focusPath(): ComponentPath? = ComponentPath.path(this, ComponentPath.leaf(hit))
+
+        private fun activate() {
             clickSound()
             val action = category.action
             if (action != null) action() else {
                 category.expanded = !category.expanded
                 requestRebuild()
             }
+        }
+
+        override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
+            setFocused(hit)
+            activate()
             return true
         }
 
         override fun extractContent(
             graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
         ) {
-            if (hovered) graphics.fill(contentX - 2, contentY, contentRight + 2, contentBottom, HOVER_COLOR)
+            hit.setRectangle(contentWidth, contentHeight, contentX, contentY)
+            if (hovered || hit.isFocused) {
+                graphics.fill(contentX - 2, contentY, contentRight + 2, contentBottom, HOVER_COLOR)
+            }
             val arrow = when {
                 category.action != null -> "›"
                 category.expanded -> "▼"
