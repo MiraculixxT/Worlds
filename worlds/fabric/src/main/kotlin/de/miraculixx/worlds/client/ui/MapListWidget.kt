@@ -5,6 +5,7 @@ import de.miraculixx.worlds.data.MapEntry
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.ObjectSelectionList
+import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.client.gui.screens.worldselection.WorldSelectionList
@@ -43,10 +44,18 @@ class MapListWidget(
     /** Select and scroll to the first row whose entry matches [predicate]; fires onSelect. */
     fun selectEntry(predicate: (MapEntry) -> Boolean): Boolean {
         val row = children().firstOrNull { predicate(it.entry) } ?: return false
-        selected = row
+        setSelected(row)
         scrollToEntry(row)
-        onSelect(row.entry)
         return true
+    }
+
+    /**
+     * Set selection also by direct movement (tab, controller) for better interaction
+     */
+    override fun setSelected(entry: MapRow?) {
+        val changed = selected !== entry
+        super.setSelected(entry)
+        if (changed && entry != null) onSelect(entry.entry)
     }
 
     override fun getRowWidth(): Int = width - 12
@@ -71,12 +80,22 @@ class MapListWidget(
 
         override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
             this@MapListWidget.setSelected(this)
-            onSelect(entry)
-            if (canPlay() && (doubleClick || overIcon(event.x().toInt(), event.y().toInt()))) {
-                minecraft.soundManager.play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0f))
-                onActivate(entry)
-            }
+            if (canPlay() && (doubleClick || overIcon(event.x().toInt(), event.y().toInt()))) activate()
             return true
+        }
+
+        /**
+         * Enter on the focused row joins it. Navigating to a row already selects it
+         */
+        override fun keyPressed(event: KeyEvent): Boolean {
+            if (!event.isConfirmation || !canPlay()) return false
+            activate()
+            return true
+        }
+
+        private fun activate() {
+            minecraft.soundManager.play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0f))
+            onActivate(entry)
         }
 
         /** Only installed worlds can be entered */

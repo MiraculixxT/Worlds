@@ -74,7 +74,7 @@ object MapInstaller {
         val url = entry.downloadUrl
             ?: return InstallResult.Failure(I18n.get("worlds.install.no_file", entry.title))
 
-        val gameDir = Minecraft.getInstance().gameDirectory.toPath()
+        val gameDir = Minecraft.getInstance().gameDirectory.toPath().toAbsolutePath().normalize()
         val savesDir = gameDir.resolve("saves")
         Files.createDirectories(savesDir)
 
