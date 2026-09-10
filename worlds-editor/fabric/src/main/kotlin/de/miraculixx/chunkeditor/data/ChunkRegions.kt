@@ -12,7 +12,7 @@ import net.minecraft.nbt.NbtIo
 import net.minecraft.nbt.StreamTagVisitor
 import net.minecraft.nbt.visitors.CollectFields
 import net.minecraft.nbt.visitors.FieldSelector
-import net.minecraft.resources.Identifier
+import net.minecraft.resources.ResourceLocation
 import net.minecraft.resources.ResourceKey
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.Level
@@ -80,7 +80,7 @@ object ChunkRegions {
                 namespaces.filter { Files.isDirectory(it) }.forEach { ns ->
                     Files.newDirectoryStream(ns).use { paths ->
                         paths.filter { Files.isDirectory(it) }.forEach { dir ->
-                            val id = Identifier.fromNamespaceAndPath(ns.name, dir.name)
+                            val id = ResourceLocation.fromNamespaceAndPath(ns.name, dir.name)
                             offer(ResourceKey.create(Registries.DIMENSION, id), id.toString(), dir)
                         }
                     }
@@ -152,8 +152,8 @@ object ChunkRegions {
                         store.scanChunk(pos, collector)
                         val tag = collector.result as? CompoundTag ?: return@forEachChunk
                         facts[pos.toLong()] = ChunkFacts(
-                            tag.getLongOr("InhabitedTime", 0L),
-                            tag.getLongOr("LastUpdate", 0L),
+                            tag.getLong("InhabitedTime"),
+                            tag.getLong("LastUpdate"),
                         )
                     } catch (e: Exception) {
                         Constants.LOG.warn("Failed to scan chunk {}: {}", pos, e.message)

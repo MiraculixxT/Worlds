@@ -7,7 +7,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen;
 import net.minecraft.client.gui.screens.worldselection.WorldSelectionList;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.storage.LevelSummary;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -23,7 +23,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(SelectWorldScreen.class)
 public abstract class SelectWorldScreenMixin extends Screen {
     @Unique
-    private static final Identifier SHOWMYWORLD$ICON = Identifier.fromNamespaceAndPath("showmyworld", "menu");
+    private static final ResourceLocation SHOWMYWORLD$ICON = ResourceLocation.fromNamespaceAndPath("showmyworld", "menu");
     @Unique
     private static final int SHOWMYWORLD$BUTTON_SIZE = 20;
     @Unique
@@ -35,13 +35,18 @@ public abstract class SelectWorldScreenMixin extends Screen {
     @Unique
     private IconButton showmyworld$button;
 
+    /** 1.21's {@code WorldListEntry} exposes no summary, so the pushed selection is remembered here */
+    @Unique
+    private String showmyworld$selected;
+
     private SelectWorldScreenMixin(Component title) {
         super(title);
     }
 
     @Inject(method = "updateButtonStatus", at = @At("HEAD"))
     private void showmyworld$select(LevelSummary summary, CallbackInfo ci) {
-        ShowMyWorld.INSTANCE.select(summary == null ? null : summary.getLevelId());
+        showmyworld$selected = summary == null ? null : summary.getLevelId();
+        ShowMyWorld.INSTANCE.select(showmyworld$selected);
     }
 
     @Inject(method = "removed", at = @At("HEAD"))
@@ -49,6 +54,9 @@ public abstract class SelectWorldScreenMixin extends Screen {
         ShowMyWorld.INSTANCE.select(null);
     }
 
+    /**
+     * 1.21's has no {@code repositionElements}, so a resize is managed by Screens default
+     */
     @Inject(method = "init", at = @At("TAIL"))
     private void showmyworld$addButton(CallbackInfo ci) {
         showmyworld$button = new IconButton(
@@ -63,15 +71,9 @@ public abstract class SelectWorldScreenMixin extends Screen {
 
     @Unique
     private void showmyworld$openSettings() {
-        String selected = this.list.getSelectedOpt().map(entry -> entry.getLevelSummary().getLevelId()).orElse(null);
-        ShowMyWorld.INSTANCE.openSettings(() -> this.list.returnToScreen());
+        String selected = showmyworld$selected;
+        ShowMyWorld.INSTANCE.openSettings(() -> this.minecraft.setScreen((Screen) (Object) this));
         ShowMyWorld.INSTANCE.select(selected);
-    }
-
-    /** The header layout is arranged before {@code init} returns, so the button is placed by hand */
-    @Inject(method = "repositionElements", at = @At("TAIL"))
-    private void showmyworld$repositionButton(CallbackInfo ci) {
-        if (showmyworld$button != null) showmyworld$place();
     }
 
     @Unique

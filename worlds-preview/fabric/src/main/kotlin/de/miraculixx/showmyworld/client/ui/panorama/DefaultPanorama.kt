@@ -51,7 +51,7 @@ enum class DefaultPanorama {
 
         private fun lastPlayed(saveDir: Path): Long = try {
             NbtIo.readCompressed(saveDir.resolve("level.dat"), NbtAccounter.unlimitedHeap())
-                .getCompoundOrEmpty("Data").getLongOr("LastPlayed", 0L)
+                .getCompound("Data").getLong("LastPlayed")
         } catch (_: Exception) {
             0L
         }

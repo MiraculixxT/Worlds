@@ -9,9 +9,10 @@ import net.minecraft.client.color.block.BlockColors
 import net.minecraft.client.renderer.BiomeColors
 import de.miraculixx.common.LevelDat
 import net.minecraft.world.level.BlockAndTintGetter
-import net.minecraft.world.level.EmptyBlockAndTintGetter
+import net.minecraft.world.level.EmptyBlockGetter
 import net.minecraft.commands.Commands
 import net.minecraft.core.BlockPos
+import net.minecraft.core.Direction
 import net.minecraft.core.Holder
 import net.minecraft.core.Registry
 import net.minecraft.core.registries.Registries
@@ -19,9 +20,12 @@ import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.NbtOps
 import net.minecraft.server.WorldLoader
 import net.minecraft.server.packs.repository.ServerPacksSource
-import net.minecraft.server.permissions.LevelBasedPermissionSet
-import net.minecraft.util.Util
+import net.minecraft.Util
 import net.minecraft.world.level.ColorResolver
+import net.minecraft.world.level.LightLayer
+import net.minecraft.world.level.block.entity.BlockEntity
+import net.minecraft.world.level.lighting.LevelLightEngine
+import net.minecraft.world.level.material.FluidState
 import net.minecraft.world.level.WorldDataConfiguration
 import net.minecraft.world.level.biome.Biome
 import net.minecraft.world.level.biome.Biomes
@@ -29,7 +33,6 @@ import net.minecraft.world.level.block.Block
 import net.minecraft.world.level.block.state.BlockState
 import net.minecraft.world.level.chunk.PalettedContainer
 import net.minecraft.world.level.chunk.PalettedContainerRO
-import net.minecraft.world.level.chunk.Strategy
 import net.minecraft.world.level.material.MapColor
 import net.minecraft.world.level.storage.LevelStorageSource
 import java.util.concurrent.atomic.AtomicBoolean
@@ -41,8 +44,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 class BiomeTints private constructor(private val registry: Registry<Biome>, private val reference: Biome) {
 
     private val biomeCodec: Codec<PalettedContainerRO<Holder<Biome>>> = PalettedContainer.codecRO(
+        registry.asHolderIdMap(),
         registry.holderByNameCodec(),
-        Strategy.createForBiomes(registry.asHolderIdMap()),
+        PalettedContainer.Strategy.SECTION_BIOMES,
         registry.wrapAsHolder(reference),
     )
 
@@ -61,7 +65,8 @@ class BiomeTints private constructor(private val registry: Registry<Biome>, priv
         private val cache = HashMap<Long, Int>()
 
         fun biomes(section: CompoundTag): PalettedContainerRO<Holder<Biome>>? {
-            val tag = section.getCompound("biomes").orElse(null) ?: return null
+            if (!section.contains("biomes")) return null
+            val tag = section.getCompound("biomes")
             return biomeCodec.parse(NbtOps.INSTANCE, tag)
                 .resultOrPartial { if (warned.compareAndSet(false, true)) Constants.LOG.warn("Failed to read biomes: {}", it) }
                 .orElse(null)
@@ -99,6 +104,9 @@ class BiomeTints private constructor(private val registry: Registry<Biome>, priv
         /** What [BlockColors.getColor] answers for a block nothing tints */
         private const val UNTINTED = -1
 
+        /** `WorldLoader.InitConfig` takes a plain permission level on 1.21, 2 is a datapack's default */
+        private const val FUNCTION_PERMISSION_LEVEL = 2
+
         /** A broken palette breaks every section of every region, so it is logged once, not per chunk. */
         private val warned = AtomicBoolean(false)
 
@@ -115,17 +123,17 @@ class BiomeTints private constructor(private val registry: Registry<Biome>, priv
                     )
                     val registry = WorldLoader.load(
                         WorldLoader.InitConfig(
-                            packConfig, Commands.CommandSelection.INTEGRATED, LevelBasedPermissionSet.GAMEMASTER,
+                            packConfig, Commands.CommandSelection.INTEGRATED, FUNCTION_PERMISSION_LEVEL,
                         ),
                         { context -> WorldLoader.DataLoadOutput(Unit, context.datapackDimensions()) },
                         { resources, _, registries, _ ->
                             resources.close()
-                            registries.compositeAccess().lookup(Registries.BIOME).orElseThrow()
+                            registries.compositeAccess().registryOrThrow(Registries.BIOME)
                         },
                         Util.backgroundExecutor(),
                         Minecraft.getInstance(),
                     ).join()
-                    val reference = registry.getValue(Biomes.PLAINS) ?: registry.firstOrNull()
+                    val reference = registry.get(Biomes.PLAINS) ?: registry.firstOrNull()
                     if (reference == null) null else BiomeTints(registry, reference)
                 } catch (e: Exception) {
                     Constants.LOG.warn("Failed to load biomes of {}", access.levelId, e)
@@ -156,12 +164,35 @@ class BiomeTints private constructor(private val registry: Registry<Biome>, priv
     }
 }
 
-/** Everything but the biome tint is answered by the empty level. */
-private class TintGetter : BlockAndTintGetter by EmptyBlockAndTintGetter.INSTANCE {
+/**
+ * Everything but the biome tint is answered by the empty level.
+ *
+ * 1.21's `EmptyBlockGetter` is only a `BlockGetter`, so the three light/shade members of
+ * [BlockAndTintGetter] are answered here rather than delegated.
+ */
+private class TintGetter : BlockAndTintGetter {
     var biome: Biome? = null
 
     override fun getBlockTint(pos: BlockPos, resolver: ColorResolver): Int {
         val value = biome ?: return -1
         return resolver.getColor(value, pos.x.toDouble(), pos.z.toDouble())
     }
+
+    override fun getShade(direction: Direction, shade: Boolean): Float = 1f
+
+    override fun getLightEngine(): LevelLightEngine? = null
+
+    override fun getBrightness(layer: LightLayer, pos: BlockPos): Int = 0
+
+    override fun getRawBrightness(pos: BlockPos, amount: Int): Int = 0
+
+    override fun getBlockEntity(pos: BlockPos): BlockEntity? = EmptyBlockGetter.INSTANCE.getBlockEntity(pos)
+
+    override fun getBlockState(pos: BlockPos): BlockState = EmptyBlockGetter.INSTANCE.getBlockState(pos)
+
+    override fun getFluidState(pos: BlockPos): FluidState = EmptyBlockGetter.INSTANCE.getFluidState(pos)
+
+    override fun getHeight(): Int = EmptyBlockGetter.INSTANCE.height
+
+    override fun getMinBuildHeight(): Int = EmptyBlockGetter.INSTANCE.minBuildHeight
 }

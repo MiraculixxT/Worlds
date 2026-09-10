@@ -1,7 +1,7 @@
 package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.worlds.Constants
-import net.minecraft.util.Util
+import net.minecraft.Util
 import java.net.URI
 import java.net.URISyntaxException
 

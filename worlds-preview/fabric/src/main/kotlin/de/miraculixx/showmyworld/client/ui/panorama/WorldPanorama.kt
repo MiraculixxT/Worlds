@@ -6,13 +6,13 @@ import java.nio.file.Path
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import net.minecraft.client.Minecraft
-import net.minecraft.resources.Identifier
-import net.minecraft.util.Util
+import net.minecraft.resources.ResourceLocation
+import net.minecraft.Util
 
 /**
  * Worlds can provide their own preview under "panorama/panaorama_x.png" like vanilla resource packs.
  * Servers get the same folder in the config folder, see [PanoramaRoots].
- * Only drawn aboth vanilla when available via custom shader.
+ * Only drawn above vanilla's own cube map, with vanilla's alpha blend.
  */
 object WorldPanorama {
     /** Longer than this between draws and the fade is resumed from scratch instead of continued */
@@ -23,11 +23,11 @@ object WorldPanorama {
      * Two texture slots, allowing cross-fades
      */
     private val SLOT_IDS = listOf(
-        Identifier.fromNamespaceAndPath(Constants.MOD_ID, "panorama/slot_a"),
-        Identifier.fromNamespaceAndPath(Constants.MOD_ID, "panorama/slot_b"),
+        ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "panorama/slot_a"),
+        ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "panorama/slot_b"),
     )
 
-    private class Layer(val dir: Path, val textureId: Identifier) {
+    private class Layer(val dir: Path, val textureId: ResourceLocation) {
         var alpha = 0f
         var ready = false
         var loading = false
@@ -182,8 +182,8 @@ object WorldPanorama {
         layer.loading = true
         val gen = ++loadGen
         Constants.SCOPE.launch {
-            val contents = try {
-                WorldPanoramaTexture.readContentsParallel(layer.dir)
+            val faces = try {
+                WorldPanoramaTexture.readFaces(layer.dir)
             } catch (e: Exception) {
                 Constants.LOG.warn("Could not read panorama {}: {}", layer.dir, e.message)
                 Minecraft.getInstance().execute {
@@ -195,12 +195,11 @@ object WorldPanorama {
             }
             Minecraft.getInstance().execute {
                 if (loadGen != gen) {
-                    contents.close()
+                    faces.forEach { it.close() }
                     return@execute
                 }
-                val texture = WorldPanoramaTexture(layer.textureId, layer.dir)
-                Minecraft.getInstance().textureManager.register(layer.textureId, texture)
-                texture.apply(contents) // uploads the cube map and closes the image
+                // The texture manager owns the images from here and closes them on release
+                WorldPanoramaTexture.register(layer.textureId, faces)
                 layer.ready = true
                 layer.loading = false
             }
@@ -230,6 +229,6 @@ object WorldPanorama {
     }
 
     private fun release(layer: Layer?) {
-        if (layer != null && layer.ready) Minecraft.getInstance().textureManager.release(layer.textureId)
+        if (layer != null && layer.ready) WorldPanoramaTexture.release(layer.textureId)
     }
 }

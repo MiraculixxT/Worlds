@@ -11,7 +11,7 @@ import net.minecraft.SharedConstants
 import net.minecraft.client.resources.language.I18n
 
 
-val mcVersion: String get() = SharedConstants.getCurrentVersion().name()
+val mcVersion: String get() = SharedConstants.getCurrentVersion().name
 
 /**
  * Where a listing came from

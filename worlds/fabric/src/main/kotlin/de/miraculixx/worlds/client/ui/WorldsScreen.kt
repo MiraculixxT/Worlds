@@ -1,5 +1,6 @@
 package de.miraculixx.worlds.client.ui
 
+import com.mojang.blaze3d.systems.RenderSystem
 import de.miraculixx.common.client.ui.IconButton
 import de.miraculixx.showmyworld.ShowMyWorld
 import de.miraculixx.worlds.Constants
@@ -38,24 +39,20 @@ import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen
 import net.minecraft.client.gui.screens.worldselection.SelectWorldScreen
 import net.minecraft.client.gui.screens.worldselection.WorldSelectionList
-import net.minecraft.client.input.KeyEvent
-import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.client.gui.components.tabs.Tab as GuiTab
-import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.locale.Language
 import net.minecraft.network.chat.ClickEvent
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.FormattedText
 import net.minecraft.network.chat.Style
-import net.minecraft.resources.Identifier
-import net.minecraft.util.Util
+import net.minecraft.resources.ResourceLocation
+import net.minecraft.Util
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.Optional
-import java.util.function.Consumer
 import kotlin.math.abs
 
 /** The in-game map browser: Installed / Browse tabs, list on the left, detail panel on the right. */
@@ -65,13 +62,18 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
     private var tab = Tab.INSTALLED
 
+    private val minecraft: Minecraft get() = Minecraft.getInstance()
+
     private val tabPages = Tab.entries.map { GridLayoutTab(Component.translatable(it.key)) }
-    private val tabManager = TabManager(
-        { addRenderableWidget(it) },
-        { removeWidget(it) },
-        tabConsumer { page -> if (page != null) onTabSelected(page) },
-        tabConsumer { },
-    )
+    /**
+     * 1.21's `TabManager` takes only the two widget consumers
+     */
+    private val tabManager = object : TabManager({ addRenderableWidget(it) }, { removeWidget(it) }) {
+        override fun setCurrentTab(tab: GuiTab, playSound: Boolean) {
+            super.setCurrentTab(tab, playSound)
+            onTabSelected(tab)
+        }
+    }
     private lateinit var tabBar: TabNavigationBar
     private var allEntries: List<MapEntry> = emptyList()
     // Render-thread only: bumped per filter pass so a superseded result is discarded on arrival.
@@ -154,6 +156,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     private var readmeTop = 0
 
     private var splitDragging = false
+    private var lastHandleClickMs = 0L
     private var splitGrabOffset = 0
 
     override fun init() {
@@ -208,7 +211,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         updateSourceTooltip()
 
         list = MapListWidget(minecraft, leftWidth, listBottom - listTop, listTop, ::onSelect, ::onActivate)
-        list.updateSizeAndPosition(leftWidth, listBottom - listTop, leftLeft, listTop)
+        list.place(leftWidth, listBottom - listTop, leftLeft, listTop)
         addRenderableWidget(list)
 
         // The detail row is laid out every frame by layoutButtons
@@ -260,7 +263,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         )
         addRenderableWidget(
             Button.builder(Component.literal("+")) {
-                CreateWorldScreen.openFresh(minecraft) { minecraft.setScreen(this) }
+                CreateWorldScreen.openFresh(minecraft, this)
             }.tooltip(Tooltip.create(Component.translatable("worlds.tooltip.create_world")))
                 .bounds(leftLeft + 44, height - 26, 20, 20).build()
         )
@@ -299,7 +302,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         updateButton.x = searchX() + searchWidth() + 2
         // Vanilla only repositions list entries here (never per frame), so without this call every
         // MapRow keeps drawing at its old x/width.
-        list.updateSizeAndPosition(leftWidth, listBottom - listTop, leftLeft, listTop)
+        list.place(leftWidth, listBottom - listTop, leftLeft, listTop)
     }
 
     private fun searchX(): Int = leftLeft + 22
@@ -336,13 +339,6 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
     private fun overHandle(mx: Double, my: Double): Boolean =
         my >= listTop && my <= listBottom && abs(mx - handleX()) <= HANDLE_GRAB / 2.0
-
-    /**
-     * A [TabManager] callback that tolerates a null page
-     */
-    @Suppress("UNCHECKED_CAST")
-    private fun tabConsumer(action: (GuiTab?) -> Unit): Consumer<GuiTab> =
-        Consumer<GuiTab?> { action(it) } as Consumer<GuiTab>
 
     private fun onTabSelected(page: GuiTab) {
         if (!::list.isInitialized) return
@@ -806,7 +802,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
         if (updateButton.visible) {
             val orbY = updateButton.y + (ROW_H - ORB_SIZE) / 2
-            graphics.blitSprite(RenderPipelines.GUI_TEXTURED, UPDATE_ORB, updateButton.x + 5, orbY, ORB_SIZE, ORB_SIZE)
+            RenderSystem.enableBlend()
+            graphics.blitSprite(UPDATE_ORB, updateButton.x + 5, orbY, ORB_SIZE, ORB_SIZE)
+            RenderSystem.disableBlend()
             graphics.drawString(font, UPDATE_LABEL, updateButton.x + ORB_SIZE + 9, updateButton.y + 6, -1)
         }
 
@@ -951,10 +949,13 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         val iconSize = 36
         val icon = MapTextures.get(entry.iconUrl)
         if (icon != null) {
+            // 1.21's blit does not enable blending itself
+            RenderSystem.enableBlend()
             graphics.blit(
-                RenderPipelines.GUI_TEXTURED, icon.id, rightLeft, listTop, 0f, 0f,
-                iconSize, iconSize, icon.width, icon.height, icon.width, icon.height,
+                icon.id, rightLeft, listTop, iconSize, iconSize,
+                0f, 0f, icon.width, icon.height, icon.width, icon.height,
             )
+            RenderSystem.disableBlend()
         } else {
             graphics.fill(rightLeft, listTop, rightLeft + iconSize, listTop + iconSize, 0xFF2A2A2A.toInt())
         }
@@ -972,7 +973,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
     /** Word-wrap [text] to [width] and keep at most [maxLines], ending the last one with an ellipsis. */
     private fun clampLines(text: String, width: Int, maxLines: Int): List<String> {
-        val lines = font.splitIgnoringLanguage(Component.literal(text), width).map { it.string }
+        val lines = font.splitter.splitLines(Component.literal(text), width, Style.EMPTY).map { it.string }
         if (lines.size <= maxLines) return lines
         val kept = lines.take(maxLines).toMutableList()
         var last = kept.last().trimEnd()
@@ -1044,11 +1045,11 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
                 val scale = when (block.level) { 1 -> 1.6f; 2 -> 1.35f; else -> 1.15f }
                 val wrapped = font.split(block.text, (width / scale).toInt())
                 val pose = graphics.pose()
-                pose.pushMatrix()
-                pose.translate(x.toFloat(), y.toFloat())
-                pose.scale(scale, scale)
+                pose.pushPose()
+                pose.translate(x.toFloat(), y.toFloat(), 0f)
+                pose.scale(scale, scale, 1f)
                 wrapped.forEachIndexed { i, seq -> graphics.drawString(font, seq, 0, (i * lh), -1) }
-                pose.popMatrix()
+                pose.popPose()
                 (wrapped.size * lh * scale).toInt() + 3
             }
             is MdBlock.Paragraph -> drawWrappedWithLinks(graphics, block.text, x, y, width, 0xFFDDDDDD.toInt()) + 2
@@ -1067,10 +1068,12 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
                 val img = MapTextures.get(block.url) ?: return 12
                 val drawW = width.coerceAtMost(img.width)
                 val drawH = (img.height.toFloat() * drawW / img.width).toInt()
+                RenderSystem.enableBlend()
                 graphics.blit(
-                    RenderPipelines.GUI_TEXTURED, img.id, x, y, 0f, 0f,
-                    drawW, drawH, img.width, img.height, img.width, img.height,
+                    img.id, x, y, drawW, drawH,
+                    0f, 0f, img.width, img.height, img.width, img.height,
                 )
+                RenderSystem.disableBlend()
                 drawH + 4
             }
         }
@@ -1084,15 +1087,15 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         graphics: GuiGraphics, text: Component, x: Int, y: Int, width: Int, color: Int,
     ): Int {
         val lh = font.lineHeight + 1
-        val lines: List<FormattedText> = font.splitIgnoringLanguage(text, width)
+        val lines: List<FormattedText> = font.splitter.splitLines(text, width, Style.EMPTY)
         lines.forEachIndexed { i, line ->
             val ly = y + i * lh
             var cx = x
             line.visit({ style: Style, segment: String ->
                 val w = font.width(segment)
                 val click = style.clickEvent
-                if (click is ClickEvent.OpenUrl) {
-                    linkRects.add(LinkRect(cx, ly - 1, cx + w, ly + font.lineHeight, click.uri().toString()))
+                if (click != null && click.action == ClickEvent.Action.OPEN_URL) {
+                    linkRects.add(LinkRect(cx, ly - 1, cx + w, ly + font.lineHeight, click.value))
                 }
                 cx += w
                 Optional.empty<Unit>()
@@ -1102,12 +1105,16 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         return lines.size * lh
     }
 
-    override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
-        val mx = event.x()
-        val my = event.y()
+    override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        val mx = mouseX
+        val my = mouseY
         // Before everything else: the handle sits outside the list, but grabbing it must never fall
         // through to a row or the readme.
-        if (event.button() == 0 && overHandle(mx, my)) {
+        if (button == 0 && overHandle(mx, my)) {
+            // 1.21 reports no double click, so the handle times its own
+            val now = Util.getMillis()
+            val doubleClick = now - lastHandleClickMs < HANDLE_DOUBLE_CLICK_MS
+            lastHandleClickMs = now
             if (doubleClick) {
                 splitRatio = DEFAULT_SPLIT
                 applyLayout()
@@ -1119,7 +1126,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
             }
             return true
         }
-        if (event.button() == 0 && selected != null) {
+        if (button == 0 && selected != null) {
             // Scrollbar: grab the thumb to drag, or click the track to jump.
             val maxScroll = (readmeContentHeight - readmeViewportH()).coerceAtLeast(0)
             if (maxScroll > 0 && mx >= rightRight - SCROLLBAR_W && mx <= rightRight &&
@@ -1144,13 +1151,15 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
                 }
             }
         }
-        return super.mouseClicked(event, doubleClick)
+        return super.mouseClicked(mouseX, mouseY, button)
     }
 
-    override fun mouseDragged(event: MouseButtonEvent, dragX: Double, dragY: Double): Boolean {
+    override fun mouseDragged(
+        mouseX: Double, mouseY: Double, button: Int, dragX: Double, dragY: Double,
+    ): Boolean {
         if (splitDragging) {
             val usable = width - 16 - GUTTER
-            val newLeft = event.x() - splitGrabOffset - GUTTER / 2.0 - leftLeft
+            val newLeft = mouseX - splitGrabOffset - GUTTER / 2.0 - leftLeft
             // Clamping here to persist users choice when window big enough again
             splitRatio = clampLeftWidth((newLeft / usable).toFloat(), usable).toFloat() / usable
             applyLayout()
@@ -1158,21 +1167,21 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
             return true
         }
         if (scrollbarDragging) {
-            setScrollFromThumbTop(event.y() - dragGrabOffset)
+            setScrollFromThumbTop(mouseY - dragGrabOffset)
             return true
         }
-        return super.mouseDragged(event, dragX, dragY)
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY)
     }
 
-    override fun mouseReleased(event: MouseButtonEvent): Boolean {
-        if (event.button() == 0) {
+    override fun mouseReleased(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        if (button == 0) {
             scrollbarDragging = false
             if (splitDragging) {
                 splitDragging = false
                 WorldsConfig.save()
             }
         }
-        return super.mouseReleased(event)
+        return super.mouseReleased(mouseX, mouseY, button)
     }
 
     override fun mouseScrolled(mouseX: Double, mouseY: Double, scrollX: Double, scrollY: Double): Boolean {
@@ -1185,8 +1194,8 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     }
 
     /** Ctrl+Tab / Ctrl+<digit> cycle the header tabs, as on the world-creation screen. */
-    override fun keyPressed(event: KeyEvent): Boolean =
-        tabBar.keyPressed(event) || super.keyPressed(event)
+    override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean =
+        tabBar.keyPressed(keyCode) || super.keyPressed(keyCode, scanCode, modifiers)
 
     override fun onClose() {
         minecraft.setScreen(parent)
@@ -1205,6 +1214,9 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         /** Up to this many entries, filtering runs inline */
         const val SYNC_FILTER_MAX = 2_000
         const val REFRESH_COOLDOWN_MS = 10_000L
+
+        /** What vanilla's own lists treat as a double click */
+        const val HANDLE_DOUBLE_CLICK_MS = 250L
         /** Idle time after the last keystroke before the query is handed to a remote source. */
         const val QUERY_DEBOUNCE_MS = 400L
         const val SCROLLBAR_W = 4
@@ -1231,15 +1243,15 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         const val ICON_RECREATE = "♻"
         val UPDATE_LABEL: String get() = I18n.get("worlds.update.label")
         const val ORB_SIZE = 8
-        val UPDATE_ORB: Identifier = Identifier.withDefaultNamespace("icon/trial_available")
+        val UPDATE_ORB: ResourceLocation = ResourceLocation.withDefaultNamespace("icon/trial_available")
         val SETTINGS_LABEL: Component = Component.translatable("worlds.tooltip.settings")
         val FILTER_LABEL: Component = Component.literal("Filters")
 
-        val MENU: Identifier = Identifier.fromNamespaceAndPath("worlds", "menu")
-        val FILTER_INACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/inactive")
-        val FILTER_ACTIVE: Identifier = Identifier.fromNamespaceAndPath("worlds", "filter/active")
-        val SOURCE_SPRITES: Map<MapSource, Identifier> = MapSource.BROWSABLE.associateWith {
-            Identifier.fromNamespaceAndPath("worlds", "source/${it.key}")
+        val MENU: ResourceLocation = ResourceLocation.fromNamespaceAndPath("worlds", "menu")
+        val FILTER_INACTIVE: ResourceLocation = ResourceLocation.fromNamespaceAndPath("worlds", "filter/inactive")
+        val FILTER_ACTIVE: ResourceLocation = ResourceLocation.fromNamespaceAndPath("worlds", "filter/active")
+        val SOURCE_SPRITES: Map<MapSource, ResourceLocation> = MapSource.BROWSABLE.associateWith {
+            ResourceLocation.fromNamespaceAndPath("worlds", "source/${it.key}")
         }
     }
 }

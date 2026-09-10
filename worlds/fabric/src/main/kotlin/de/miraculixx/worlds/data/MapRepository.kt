@@ -20,6 +20,7 @@ import net.minecraft.client.Minecraft
 import net.minecraft.nbt.NbtAccounter
 import net.minecraft.world.Difficulty
 import net.minecraft.nbt.NbtIo
+import net.minecraft.nbt.Tag
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 
@@ -362,21 +363,20 @@ object MapRepository {
      */
     private fun readLevelData(dir: java.nio.file.Path): LevelData? = try {
         val data = NbtIo.readCompressed(dir.resolve("level.dat"), NbtAccounter.unlimitedHeap())
-            .getCompoundOrEmpty("Data")
-        val enabledPacks = data.getCompoundOrEmpty("DataPacks").getListOrEmpty("Enabled")
+            .getCompound("Data")
+        val enabledPacks = data.getCompound("DataPacks").getList("Enabled", Tag.TAG_STRING.toInt())
         LevelData(
-            name = data.getString("LevelName").orElse(null)?.takeIf { it.isNotBlank() },
+            name = data.getString("LevelName").takeIf { it.isNotBlank() },
             info = WorldInfo(
-                mcVersion = data.getCompoundOrEmpty("Version").getString("Name").orElse(null)
-                    ?.takeIf { it.isNotBlank() },
-                lastPlayed = data.getLongOr("LastPlayed", 0L),
-                playTicks = data.getLongOr("Time", 0L),
-                difficulty = data.getByte("Difficulty").orElse(null)
-                    ?.let { Difficulty.byId(it.toInt()).serializedName },
-                hardcore = data.getBooleanOr("hardcore", false),
-                allowCommands = data.getBooleanOr("allowCommands", false),
+                mcVersion = data.getCompound("Version").getString("Name").takeIf { it.isNotBlank() },
+                lastPlayed = data.getLong("LastPlayed"),
+                playTicks = data.getLong("Time"),
+                difficulty = data.takeIf { it.contains("Difficulty") }
+                    ?.let { Difficulty.byId(it.getByte("Difficulty").toInt()).serializedName },
+                hardcore = data.getBoolean("hardcore"),
+                allowCommands = data.getBoolean("allowCommands"),
                 dataPacks = enabledPacks.indices
-                    .map { enabledPacks.getStringOr(it, "") }
+                    .map { enabledPacks.getString(it) }
                     .filter { it.isNotBlank() && it != "vanilla" }
                     .map { it.removePrefix("file/") },
             ),

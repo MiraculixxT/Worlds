@@ -35,8 +35,8 @@ dependencies {
     println("FabricLoader: ${outlet.loaderVersion()}\nFabricAPI: ${outlet.fapiVersion()}")
     "modImplementation"("net.fabricmc:fabric-loader:${outlet.loaderVersion()}")
     // Required for `assets/<modid>/` to be seen at all: fabric-loader ships no resource-pack
-    // integration, `ModResourcePackCreator` lives in fabric-api's `fabric-resource-loader-v1`.
-    "modImplementation"(project.extensions.getByType<FabricApiExtension>().module("fabric-resource-loader-v1", outlet.fapiVersion()))
+    // integration, `ModResourcePackCreator` lives in fabric-api's `fabric-resource-loader-v0`.
+    "modImplementation"(project.extensions.getByType<FabricApiExtension>().module("fabric-resource-loader-v0", outlet.fapiVersion()))
 
     //
     // Kotlin libraries

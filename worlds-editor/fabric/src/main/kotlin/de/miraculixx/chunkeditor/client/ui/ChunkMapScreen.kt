@@ -1,6 +1,7 @@
 package de.miraculixx.chunkeditor.client.ui
 
 import com.mojang.blaze3d.platform.NativeImage
+import com.mojang.blaze3d.systems.RenderSystem
 import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.BiomeTints
 import de.miraculixx.chunkeditor.data.ChunkFacts
@@ -16,6 +17,7 @@ import de.miraculixx.common.client.ui.drawBox
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.Checkbox
@@ -23,15 +25,12 @@ import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.screens.BackupConfirmScreen
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
-import net.minecraft.client.input.KeyEvent
-import net.minecraft.client.input.MouseButtonEvent
-import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.client.renderer.texture.DynamicTexture
 import net.minecraft.core.BlockPos
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
-import net.minecraft.resources.Identifier
+import net.minecraft.resources.ResourceLocation
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.storage.LevelStorageSource
 import org.lwjgl.glfw.GLFW
@@ -89,6 +88,8 @@ internal class ChunkMapScreen(
     private val parent: Screen,
     private val access: LevelStorageSource.LevelStorageAccess,
 ) : Screen(Component.translatable("chunkeditor.map.title")) {
+
+    private val minecraft: Minecraft get() = Minecraft.getInstance()
 
     private val facts = LevelFacts.read(access)
     private val worldTime = facts.gameTime
@@ -328,7 +329,6 @@ internal class ChunkMapScreen(
                 },
                 Component.translatable("chunkeditor.map.delete_title", count),
                 Component.translatable("chunkeditor.map.delete_warning", dim.label),
-                Component.translatable("selectWorld.delete"),
                 false,
             )
         )
@@ -477,8 +477,15 @@ internal class ChunkMapScreen(
         return (alpha shl 24) or (PRESENT_COLOR and 0xFFFFFF)
     }
 
-    private fun blit(graphics: GuiGraphics, id: Identifier, x: Int, y: Int, w: Int, h: Int, size: Int) =
-        graphics.blit(RenderPipelines.GUI_TEXTURED, id, x, y, 0f, 0f, w, h, size, size, size, size)
+    /**
+     * 1.21's plain `blit` only sets the shader and the texture, it does not enable blending
+     */
+    private fun blit(graphics: GuiGraphics, id: ResourceLocation, x: Int, y: Int, w: Int, h: Int, size: Int) {
+        RenderSystem.enableBlend()
+        RenderSystem.defaultBlendFunc()
+        graphics.blit(id, x, y, w, h, 0f, 0f, size, size, size, size)
+        RenderSystem.disableBlend()
+    }
 
     private fun drawGrid(graphics: GuiGraphics, visible: List<RegionIndex>) {
         val left = mapLeft() + 1
@@ -586,7 +593,7 @@ internal class ChunkMapScreen(
     //
 
     /** The 32x32 chunk bitmap of a region, a pixel per chunk */
-    private fun presenceTexture(region: RegionIndex): Identifier {
+    private fun presenceTexture(region: RegionIndex): ResourceLocation {
         val regionKey = key(region.rx, region.rz)
         presence[regionKey]?.let { return it }
         val image = NativeImage(NativeImage.Format.RGBA, REGION_SIZE, REGION_SIZE, false)
@@ -599,14 +606,14 @@ internal class ChunkMapScreen(
                     present -> PRESENT_COLOR
                     else -> 0
                 }
-                image.setPixelABGR(x, z, abgr(color))
+                image.setPixelRGBA(x, z, abgr(color))
             }
         }
         return register("chunkmap/presence/${region.rx}_${region.rz}", image).also { presence[regionKey] = it }
     }
 
     /** Null when nothing in the region is selected, so the common case costs no blit at all. */
-    private fun selectionTexture(region: RegionIndex): Identifier? {
+    private fun selectionTexture(region: RegionIndex): ResourceLocation? {
         if (selected.isEmpty()) return null
         val regionKey = key(region.rx, region.rz)
         selection[regionKey]?.let { return it }
@@ -617,7 +624,7 @@ internal class ChunkMapScreen(
                 val pos = ChunkPos(region.rx * REGION_SIZE + x, region.rz * REGION_SIZE + z)
                 val on = selected.contains(pos.toLong())
                 if (on) any = true
-                image.setPixelABGR(x, z, if (on) abgr(SELECTED_COLOR) else 0)
+                image.setPixelRGBA(x, z, if (on) abgr(SELECTED_COLOR) else 0)
             }
         }
         if (!any) {
@@ -679,9 +686,9 @@ internal class ChunkMapScreen(
         }
     }
 
-    private fun register(path: String, image: NativeImage): Identifier {
-        val id = Identifier.fromNamespaceAndPath(Constants.MOD_ID, path)
-        minecraft.textureManager.register(id, DynamicTexture({ path }, image))
+    private fun register(path: String, image: NativeImage): ResourceLocation {
+        val id = ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, path)
+        minecraft.textureManager.register(id, DynamicTexture(image))
         return id
     }
 
@@ -693,11 +700,11 @@ internal class ChunkMapScreen(
     }
 
     /**
-     * Access-ordered LRU. Registering the same [Identifier] twice would leak the previous texture, so
+     * Access-ordered LRU. Registering the same [ResourceLocation] twice would leak the previous texture, so
      * eviction has to hand it back to the texture manager.
      */
-    private inner class TextureCache(private val cap: Int) : LinkedHashMap<Long, Identifier>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Identifier>): Boolean {
+    private inner class TextureCache(private val cap: Int) : LinkedHashMap<Long, ResourceLocation>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ResourceLocation>): Boolean {
             if (size <= cap) return false
             minecraft.textureManager.release(eldest.value)
             return true
@@ -713,50 +720,52 @@ internal class ChunkMapScreen(
     // Input
     //
 
-    override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
-        val x = event.x()
-        val y = event.y()
+    override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        val x = mouseX
+        val y = mouseY
         if (dimensionPicker.mouseClicked(x, y)) return true
         if (inMap(x, y)) {
             pressX = x
             pressY = y
             moved = false
-            when (event.button()) {
+            when (button) {
                 0 -> {
                     panning = true
                     return true
                 }
 
                 1 -> {
-                    dragRemoves = event.modifiers() and GLFW.GLFW_MOD_SHIFT != 0
+                    dragRemoves = hasShiftDown()
                     dragFrom = chunkAt(x, y)
                     dragTo = dragFrom
                     return true
                 }
             }
         }
-        return super.mouseClicked(event, doubleClick)
+        return super.mouseClicked(mouseX, mouseY, button)
     }
 
-    override fun mouseDragged(event: MouseButtonEvent, dragX: Double, dragY: Double): Boolean {
-        if (abs(event.x() - pressX) > CLICK_SLOP || abs(event.y() - pressY) > CLICK_SLOP) moved = true
+    override fun mouseDragged(
+        mouseX: Double, mouseY: Double, button: Int, dragX: Double, dragY: Double,
+    ): Boolean {
+        if (abs(mouseX - pressX) > CLICK_SLOP || abs(mouseY - pressY) > CLICK_SLOP) moved = true
         if (panning) {
             centerX -= dragX / scale
             centerZ -= dragY / scale
             return true
         }
         if (dragFrom != null) {
-            dragTo = chunkAt(event.x(), event.y())
+            dragTo = chunkAt(mouseX, mouseY)
             return true
         }
-        return super.mouseDragged(event, dragX, dragY)
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY)
     }
 
-    override fun mouseReleased(event: MouseButtonEvent): Boolean {
+    override fun mouseReleased(mouseX: Double, mouseY: Double, button: Int): Boolean {
         if (panning) {
             panning = false
             // A press that never moved is a click on one chunk, not a pan.
-            if (!moved && inMap(event.x(), event.y())) toggle(chunkAt(event.x(), event.y()))
+            if (!moved && inMap(mouseX, mouseY)) toggle(chunkAt(mouseX, mouseY))
             return true
         }
         val from = dragFrom
@@ -767,11 +776,11 @@ internal class ChunkMapScreen(
             if (moved) applyRect(from, to) else toggle(to)
             return true
         }
-        return super.mouseReleased(event)
+        return super.mouseReleased(mouseX, mouseY, button)
     }
 
-    override fun keyPressed(event: KeyEvent): Boolean =
-        dimensionPicker.keyPressed(event) || super.keyPressed(event)
+    override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean =
+        dimensionPicker.keyPressed(keyCode) || super.keyPressed(keyCode, scanCode, modifiers)
 
     override fun mouseScrolled(mouseX: Double, mouseY: Double, scrollX: Double, scrollY: Double): Boolean {
         if (!inMap(mouseX, mouseY)) return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY)
@@ -853,6 +862,8 @@ internal class ChunkTrimScreen(
     private val parent: ChunkMapScreen,
     private val onApply: (TrimCriteria) -> Unit,
 ) : Screen(Component.translatable("chunkeditor.trim.title")) {
+
+    private val minecraft: Minecraft get() = Minecraft.getInstance()
 
     private val panelW = 300
     private var panelTop = 0

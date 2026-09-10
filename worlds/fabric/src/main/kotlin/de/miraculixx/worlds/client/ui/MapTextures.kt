@@ -14,10 +14,11 @@ import javax.imageio.ImageIO
 import kotlinx.coroutines.launch
 import net.minecraft.client.Minecraft
 import net.minecraft.client.renderer.texture.DynamicTexture
-import net.minecraft.resources.Identifier
+import net.minecraft.resources.ResourceLocation
+import org.lwjgl.system.MemoryUtil
 
 /** A registered, GPU-ready image plus its pixel dimensions. */
-data class LoadedImage(val id: Identifier, val width: Int, val height: Int)
+data class LoadedImage(val id: ResourceLocation, val width: Int, val height: Int)
 
 /**
  * Downloads remote PNG/JPEG/WebP images (map icons, readme images), uploads them as dynamic textures,
@@ -51,8 +52,8 @@ object MapTextures {
             Minecraft.getInstance().execute {
                 cache[url] = try {
                     val image = decode(bytes)
-                    val id = Identifier.fromNamespaceAndPath(Constants.MOD_ID, "dyn/${hash(url)}")
-                    Minecraft.getInstance().textureManager.register(id, DynamicTexture({ url }, image))
+                    val id = ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "dyn/${hash(url)}")
+                    Minecraft.getInstance().textureManager.register(id, DynamicTexture(image))
                     Ready(LoadedImage(id, image.width, image.height))
                 } catch (e: Exception) {
                     Constants.LOG.warn("Image decode failed {}: {}", url, e.message)
@@ -93,10 +94,24 @@ object MapTextures {
         // STB is strict and rejects some otherwise-valid PNG/JPEG ("bad png sig", odd chunks);
         // fall back to the more lenient ImageIO decoder before giving up.
         return try {
-            NativeImage.read(bytes)
+            readNative(bytes)
         } catch (e: Exception) {
             //Constants.LOG.warn("STB decode failed ({}); retrying via ImageIO", e.message)
             readViaImageIO(bytes)
+        }
+    }
+
+    /**
+     * STB decode off an **off-heap** copy of [bytes].
+     * `NativeImage.read(byte[])` is unusable on 1.21 as it pushes on local stack buffer (which is just 64kb)
+     */
+    private fun readNative(bytes: ByteArray): NativeImage {
+        val buffer = MemoryUtil.memAlloc(bytes.size)
+        return try {
+            buffer.put(bytes).flip()
+            NativeImage.read(buffer)
+        } finally {
+            MemoryUtil.memFree(buffer)
         }
     }
 
@@ -134,7 +149,7 @@ object MapTextures {
                 val r = (argb ushr 16) and 0xFF
                 val g = (argb ushr 8) and 0xFF
                 val bl = argb and 0xFF
-                image.setPixelABGR(x, y, (a shl 24) or (bl shl 16) or (g shl 8) or r) // 0xAABBGGRR
+                image.setPixelRGBA(x, y, (a shl 24) or (bl shl 16) or (g shl 8) or r) // 0xAABBGGRR
             }
         }
         return image

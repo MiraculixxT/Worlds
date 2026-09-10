@@ -12,13 +12,12 @@ import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.components.events.GuiEventListener
 import net.minecraft.client.gui.narration.NarratableEntry
 import net.minecraft.client.gui.narration.NarrationElementOutput
+import net.minecraft.client.gui.navigation.CommonInputs
 import net.minecraft.client.gui.navigation.FocusNavigationEvent
-import net.minecraft.client.input.KeyEvent
-import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.network.chat.Component
 
+/** 1.21 lists carry one item height for every entry, so categories are as tall as rows */
 private const val ROW_H = 24
-private const val CATEGORY_H = 20
 private const val INDENT = 10
 private const val WIDGET_H = 20
 private const val FIELD_GAP = 3
@@ -51,14 +50,14 @@ class SettingsList(
 
     fun rebuild() {
         pendingRebuild = false
-        val scroll = scrollAmount()
+        val scroll = scrollAmount
         // Expanding is a rebuild, so the row that was just activated is thrown away
         val refocus = (focused as? CategoryRow)?.category
         commitEdits()
         clearEntries()
         categories.forEach { category ->
-            addEntry(CategoryRow(category), CATEGORY_H)
-            if (category.action == null && category.expanded) rowsFor(category).forEach { addEntry(it, ROW_H) }
+            addEntry(CategoryRow(category))
+            if (category.action == null && category.expanded) rowsFor(category).forEach { addEntry(it) }
         }
         if (refocus != null) {
             children().filterIsInstance<CategoryRow>().firstOrNull { it.category === refocus }
@@ -80,12 +79,18 @@ class SettingsList(
     override fun nextFocusPath(event: FocusNavigationEvent): ComponentPath? =
         if (isActive) super.nextFocusPath(event) else null
 
-    override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean =
-        isActive && super.mouseClicked(event, doubleClick)
+    override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean =
+        isActive && super.mouseClicked(mouseX, mouseY, button)
+
+    /** 1.21's own setter takes no x, and the list is placed by the screen, not centered */
+    fun place(width: Int, height: Int, x: Int, y: Int) {
+        updateSizeAndPosition(width, height, y)
+        setX(x)
+    }
 
     override fun getRowWidth(): Int = width - 12
 
-    override fun scrollBarX(): Int = x + width - 8
+    override fun getScrollbarPosition(): Int = x + width - 8
 
     override fun renderListBackground(graphics: GuiGraphics) =
         drawBox(graphics, x, y, x + width, y + height)
@@ -93,6 +98,29 @@ class SettingsList(
     override fun renderListSeparators(graphics: GuiGraphics) = Unit
 
     abstract inner class Row(private val label: String, private val indent: Int = 0) : Entry<Row>() {
+        protected var contentX = 0
+        protected var contentY = 0
+        protected var contentWidth = 0
+        protected var contentHeight = 0
+        protected val contentRight get() = contentX + contentWidth
+        protected val contentBottom get() = contentY + contentHeight
+
+        /** 1.21 hands the row its geometry per frame, every row below is written against that rectangle */
+        final override fun render(
+            graphics: GuiGraphics, index: Int, top: Int, left: Int, width: Int, height: Int,
+            mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
+        ) {
+            contentX = left
+            contentY = top
+            contentWidth = width
+            contentHeight = height
+            renderContent(graphics, mouseX, mouseY, hovered, partialTick)
+        }
+
+        protected abstract fun renderContent(
+            graphics: GuiGraphics, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
+        )
+
         protected open fun widgets(): List<AbstractWidget> = emptyList()
 
         override fun children(): List<GuiEventListener> = widgets()
@@ -120,8 +148,8 @@ class SettingsList(
 
             override fun updateWidgetNarration(output: NarrationElementOutput) = defaultButtonNarrationText(output)
 
-            override fun keyPressed(event: KeyEvent): Boolean {
-                if (!event.isConfirmation) return false
+            override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
+                if (!CommonInputs.selected(keyCode)) return false
                 activate()
                 return true
             }
@@ -140,7 +168,7 @@ class SettingsList(
             }
         }
 
-        override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
+        override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
             setFocused(hit)
             activate()
             return true
@@ -217,7 +245,7 @@ class SettingsList(
         name: (T) -> Component,
         onSet: (T) -> Unit,
     ) : Row(label, INDENT) {
-        private val button = CycleButton.builder(name, initial).withValues(values).displayOnlyValue()
+        private val button = CycleButton.builder(name).withValues(values).withInitialValue(initial).displayOnlyValue()
             .create(0, 0, WIDGET_W, WIDGET_H, Component.literal(label)) { _, value -> onSet(value) }
 
         override fun widgets(): List<AbstractWidget> = listOf(button)
@@ -243,12 +271,12 @@ class SettingsList(
             super.setFocused(listener)
         }
 
-        override fun keyPressed(event: KeyEvent): Boolean {
-            if (event.isConfirmation && focused != null) {
+        override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
+            if (CommonInputs.selected(keyCode) && focused != null) {
                 commit()
                 return true
             }
-            return super.keyPressed(event)
+            return super.keyPressed(keyCode, scanCode, modifiers)
         }
 
         override fun renderContent(

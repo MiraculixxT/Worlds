@@ -142,7 +142,7 @@ object Markdown {
         var style: Style = Style.EMPTY
             .withColor(ChatFormatting.BLUE)
             .withUnderlined(true)
-        Links.parse(url)?.let { style = style.withClickEvent(ClickEvent.OpenUrl(it)) }
+        Links.parse(url)?.let { style = style.withClickEvent(ClickEvent(ClickEvent.Action.OPEN_URL, it.toString())) }
         return Component.literal(label).setStyle(style)
     }
 }

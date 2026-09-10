@@ -1,5 +1,7 @@
 package de.miraculixx.worlds.client.ui
 
+import com.mojang.blaze3d.platform.InputConstants
+import com.mojang.blaze3d.systems.RenderSystem
 import de.miraculixx.chunkeditor.ChunkEditor
 import de.miraculixx.common.client.ui.FIELD_W
 import de.miraculixx.common.client.ui.HOVER_COLOR
@@ -40,15 +42,14 @@ import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.client.gui.screens.worldselection.OptimizeWorldScreen
 import net.minecraft.client.gui.screens.worldselection.EditGameRulesScreen
 import net.minecraft.client.gui.narration.NarrationElementOutput
-import net.minecraft.client.input.KeyEvent
-import net.minecraft.client.input.MouseButtonEvent
+import net.minecraft.client.gui.navigation.CommonInputs
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.client.gui.components.tabs.Tab as GuiTab
-import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
-import net.minecraft.util.FileUtil
-import net.minecraft.util.Util
+import net.minecraft.network.chat.Style
+import net.minecraft.FileUtil
+import net.minecraft.Util
 import net.minecraft.world.Difficulty
 import net.minecraft.world.level.GameType
 import net.minecraft.world.level.storage.LevelResource
@@ -57,7 +58,6 @@ import org.lwjgl.system.MemoryStack
 import org.lwjgl.util.tinyfd.TinyFileDialogs
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.function.Consumer
 
 /**
  * Replacement for vanilla's [EditWorldScreen].
@@ -79,13 +79,16 @@ class WorldEditScreen(
 
     private var tab = Tab.GENERAL
 
+    private val minecraft: Minecraft get() = Minecraft.getInstance()
+
     private val tabPages = Tab.entries.map { GridLayoutTab(Component.translatable(it.key)) }
-    private val tabManager = TabManager(
-        { addRenderableWidget(it) },
-        { removeWidget(it) },
-        tabConsumer { page -> if (page != null) onTabSelected(page) },
-        tabConsumer { },
-    )
+    /** 1.21's `TabManager` takes only the two widget consumers (see `WorldsScreen`) */
+    private val tabManager = object : TabManager({ addRenderableWidget(it) }, { removeWidget(it) }) {
+        override fun setCurrentTab(tab: GuiTab, playSound: Boolean) {
+            super.setCurrentTab(tab, playSound)
+            onTabSelected(tab)
+        }
+    }
     private lateinit var tabBar: TabNavigationBar
 
     private val saveDir: Path = access.getLevelPath(LevelResource.ROOT)
@@ -156,7 +159,7 @@ class WorldEditScreen(
         hardcore = facts.hardcore
         allowCommands = facts.allowCommands
         gameType = facts.gameType
-        spawn = facts.spawn.pos()
+        spawn = facts.spawn
         gameTime = facts.gameTime
         val meta = WorldEditor.readMeta(saveDir)
         description = meta?.description.orEmpty()
@@ -213,8 +216,8 @@ class WorldEditScreen(
         var y = cardY + cardH + 14
         val wideW = rowW - ICON_BTN - BTN_GAP
         general(
-            CycleButton.builder({ d: Difficulty -> d.displayName }, difficulty)
-                .withValues(Difficulty.entries)
+            CycleButton.builder<Difficulty>({ d -> d.displayName })
+                .withValues(Difficulty.entries).withInitialValue(difficulty)
                 .create(rowX, y, wideW, 20, Component.translatable("options.difficulty")) { _, v ->
                     difficulty = v
                     WorldEditor.setDifficulty(access, v)
@@ -273,7 +276,7 @@ class WorldEditScreen(
         }
 
         extraList = SettingsList(minecraft, categories, ::extraRowsFor)
-        extraList.updateSizeAndPosition(cardW, listBottom() - cardY, cardX, cardY)
+        extraList.place(cardW, listBottom() - cardY, cardX, cardY)
         extraList.rebuild()
         extraWidgets.add(addRenderableWidget(extraList))
 
@@ -290,10 +293,6 @@ class WorldEditScreen(
         generalWidgets.add(widget)
         return addRenderableWidget(widget)
     }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun tabConsumer(action: (GuiTab?) -> Unit): Consumer<GuiTab> =
-        Consumer<GuiTab?> { action(it) } as Consumer<GuiTab>
 
     private fun onTabSelected(page: GuiTab) {
         if (generalWidgets.isEmpty()) return
@@ -565,7 +564,6 @@ class WorldEditScreen(
                 },
                 Component.translatable("optimizeWorld.confirm.title"),
                 Component.translatable("optimizeWorld.confirm.description"),
-                Component.translatable("optimizeWorld.confirm.proceed"),
                 true,
             )
         )
@@ -654,14 +652,13 @@ class WorldEditScreen(
     }
 
     /**
-     * Vanilla's world creation rules screen over the save's own `game_rules.dat`.
+     * Vanilla's world creation rules screen over the save's own `level.dat` rules.
      */
     private fun openGameRules() {
-        val features = WorldEditor.readFeatures(access)
-        val rules = WorldRules.readGameRules(access, features)
+        val rules = WorldRules.readGameRules(access)
         minecraft.setScreen(
             EditGameRulesScreen(rules) { result ->
-                result.ifPresent { WorldRules.writeGameRules(access, features, it) }
+                result.ifPresent { WorldRules.writeGameRules(access, it) }
                 minecraft.setScreen(this)
             }
         )
@@ -825,8 +822,8 @@ class WorldEditScreen(
 
         override fun updateWidgetNarration(output: NarrationElementOutput) = defaultButtonNarrationText(output)
 
-        override fun keyPressed(event: KeyEvent): Boolean {
-            if (!event.isConfirmation) return false
+        override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
+            if (!CommonInputs.selected(keyCode)) return false
             val row = rows().getOrNull(index) ?: return false
             clickSound()
             if (delete) confirmDeletePack(row) else togglePack(index)
@@ -933,8 +930,8 @@ class WorldEditScreen(
 
         override fun updateWidgetNarration(output: NarrationElementOutput) = defaultButtonNarrationText(output)
 
-        override fun keyPressed(event: KeyEvent): Boolean {
-            if (!event.isConfirmation) return false
+        override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
+            if (!CommonInputs.selected(keyCode)) return false
             onPress()
             return true
         }
@@ -1005,10 +1002,13 @@ class WorldEditScreen(
         val y = iconY()
         val icon = MapTextures.get(iconKey())
         if (icon != null) {
+            // 1.21's blit does not enable blending itself
+            RenderSystem.enableBlend()
             graphics.blit(
-                RenderPipelines.GUI_TEXTURED, icon.id, x, y, 0f, 0f,
-                iconSize, iconSize, icon.width, icon.height, icon.width, icon.height,
+                icon.id, x, y, iconSize, iconSize,
+                0f, 0f, icon.width, icon.height, icon.width, icon.height,
             )
+            RenderSystem.disableBlend()
         } else {
             graphics.fill(x, y, x + iconSize, y + iconSize, 0xFF2A2A2A.toInt())
         }
@@ -1029,7 +1029,7 @@ class WorldEditScreen(
 
     /** Word-wrap [text] to [width] and keep at most [maxLines], ending the last one with an ellipsis. */
     private fun clampLines(text: String, width: Int, maxLines: Int): List<String> {
-        val lines = font.splitIgnoringLanguage(Component.literal(text), width).map { it.string }
+        val lines = font.splitter.splitLines(Component.literal(text), width, Style.EMPTY).map { it.string }
         if (lines.size <= maxLines) return lines
         val kept = lines.take(maxLines).toMutableList()
         var last = kept.last().trimEnd()
@@ -1049,9 +1049,9 @@ class WorldEditScreen(
     // GUI inputs
     //
 
-    override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
-        if ((tab == Tab.DATA_PACKS || tab == Tab.RESOURCE_PACKS) && event.button() == 0) {
-            if ((event.x() to event.y()) in packHeaderRect()) {
+    override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        if ((tab == Tab.DATA_PACKS || tab == Tab.RESOURCE_PACKS) && button == 0) {
+            if ((mouseX to mouseY) in packHeaderRect()) {
                 clickSound()
                 openFolder(
                     if (tab == Tab.DATA_PACKS) WorldDataPacks.worldDir(access)
@@ -1059,10 +1059,10 @@ class WorldEditScreen(
                 )
                 return true
             }
-            val index = packRowAt(event.x(), event.y())
+            val index = packRowAt(mouseX, mouseY)
             val row = rows().getOrNull(index)
             if (row != null) {
-                val point = event.x() to event.y()
+                val point = mouseX to mouseY
                 if (point in packToggleRect(index)) {
                     clickSound()
                     togglePack(index)
@@ -1075,12 +1075,12 @@ class WorldEditScreen(
                 }
             }
         }
-        if (tab == Tab.GENERAL && event.button() == 0) {
-            val point = event.x() to event.y()
-            if (overIcon(event.x(), event.y())) {
+        if (tab == Tab.GENERAL && button == 0) {
+            val point = mouseX to mouseY
+            if (overIcon(mouseX, mouseY)) {
                 commitEdit()
                 clickSound()
-                if (overResetIcon(event.x(), event.y())) resetIcon() else pickIcon()
+                if (overResetIcon(mouseX, mouseY)) resetIcon() else pickIcon()
                 return true
             }
             if (!titleBox.visible && point in titleRect()) {
@@ -1099,25 +1099,25 @@ class WorldEditScreen(
             }
             // A click anywhere outside the open editor closes it, writing what was typed.
             val box = editing?.let { boxOf(it) }
-            if (box != null && !box.isMouseOver(event.x(), event.y())) commitEdit()
+            if (box != null && !box.isMouseOver(mouseX, mouseY)) commitEdit()
         }
-        return super.mouseClicked(event, doubleClick)
+        return super.mouseClicked(mouseX, mouseY, button)
     }
 
-    override fun keyPressed(event: KeyEvent): Boolean {
+    override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
         if (editing != null) {
             // Enter writes the field, Escape drops it; neither may reach the screen's close handling.
-            if (event.isConfirmation) {
+            if (CommonInputs.selected(keyCode)) {
                 commitEdit()
                 return true
             }
-            if (event.isEscape) {
+            if (keyCode == InputConstants.KEY_ESCAPE) {
                 cancelEdit()
                 return true
             }
         }
-        if (super.keyPressed(event)) return true
-        return tabBar.keyPressed(event)
+        if (super.keyPressed(keyCode, scanCode, modifiers)) return true
+        return tabBar.keyPressed(keyCode)
     }
 
     override fun onClose() {

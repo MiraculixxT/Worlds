@@ -5,6 +5,7 @@ import de.miraculixx.common.client.ui.SettingsList
 import de.miraculixx.showmyworld.ShowMyWorld
 import de.miraculixx.worlds.client.DisplaySettings
 import de.miraculixx.worlds.client.WorldsConfig
+import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
@@ -14,6 +15,8 @@ import net.minecraft.network.chat.Component
 
 
 class WorldsSettingsScreen(private val parent: Screen) : Screen(Component.translatable("worlds.settings.title")) {
+
+    private val minecraft: Minecraft get() = Minecraft.getInstance()
 
     private val display = WorldsConfig.settings.display
 
@@ -29,7 +32,7 @@ class WorldsSettingsScreen(private val parent: Screen) : Screen(Component.transl
         val listW = (width - 40).coerceAtMost(PANEL_W)
         val listX = (width - listW) / 2
         list = SettingsList(minecraft, categories, ::rowsFor)
-        list.updateSizeAndPosition(listW, height - 34 - LIST_TOP, listX, LIST_TOP)
+        list.place(listW, height - 34 - LIST_TOP, listX, LIST_TOP)
         list.rebuild()
         addRenderableWidget(list)
 

@@ -92,8 +92,9 @@ object WorldActions {
                     access.getLevelPath(LevelResource.DATAPACK_DIR), mc,
                 )
                 context.validate()
+                // 1.21 takes the parent screen itself, not a callback
                 val create = {
-                    CreateWorldScreen.createFromExisting(mc, { onDone() }, levelSettings, context, dataPackDir)
+                    CreateWorldScreen.createFromExisting(mc, parent, levelSettings, context, dataPackDir)
                 }
                 if (context.options().isOldCustomizedWorld) {
                     mc.setScreen(
@@ -129,6 +130,6 @@ object WorldActions {
     }
 
     private fun queueLoadScreen() {
-        mc.setScreenAndShow(GenericMessageScreen(Component.translatable("selectWorld.data_read")))
+        mc.forceSetScreen(GenericMessageScreen(Component.translatable("selectWorld.data_read")))
     }
 }

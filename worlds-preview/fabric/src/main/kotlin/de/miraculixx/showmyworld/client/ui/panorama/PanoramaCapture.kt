@@ -16,6 +16,9 @@ import net.minecraft.world.level.storage.LevelResource
  * server, see [PanoramaRoots]
  */
 object PanoramaCapture {
+    /** What vanilla's own F3+F12 renders each face at */
+    private const val CAPTURE_SIZE = 1024
+
     /**
      * Called by `MinecraftMixin`
      */
@@ -38,7 +41,7 @@ object PanoramaCapture {
             Constants.LOG.warn("Could not create {}: {}", dir, e.message)
             return
         }
-        val result = minecraft.grabPanoramixScreenshot(dir.toFile())
+        val result = minecraft.grabPanoramixScreenshot(dir.toFile(), CAPTURE_SIZE, CAPTURE_SIZE)
         WorldPanorama.invalidate(root)
         Constants.LOG.info("Panorama for {}: {}", root.fileName, result.string)
     }

@@ -1,23 +1,18 @@
 package de.miraculixx.worlds.data
 
+import de.miraculixx.common.LevelDat
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
-import de.miraculixx.common.LevelDat
 import de.miraculixx.worlds.client.ui.MapTextures
-import net.minecraft.nbt.CompoundTag
-import net.minecraft.nbt.ListTag
-import net.minecraft.nbt.NbtOps
-import net.minecraft.nbt.StringTag
 import net.minecraft.core.BlockPos
+import net.minecraft.nbt.*
 import net.minecraft.world.Difficulty
 import net.minecraft.world.flag.FeatureFlagSet
 import net.minecraft.world.flag.FeatureFlags
 import net.minecraft.world.level.GameType
 import net.minecraft.world.level.WorldDataConfiguration
-import net.minecraft.world.level.storage.LevelData
 import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
-import com.mojang.serialization.Dynamic
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.nio.file.Files
@@ -37,20 +32,22 @@ object WorldEditor {
         val hardcore: Boolean,
         val allowCommands: Boolean,
         val gameType: GameType,
-        val spawn: LevelData.RespawnData,
+        val spawn: BlockPos,
         val gameTime: Long,
     )
 
     fun readFacts(access: LevelStorageSource.LevelStorageAccess): LevelFacts {
         val data = readData(access)
         return LevelFacts(
-            name = data.getString("LevelName").orElse("").ifBlank { access.levelId },
-            difficulty = Difficulty.byId(data.getByteOr("Difficulty", DEFAULT_DIFFICULTY).toInt()),
-            hardcore = data.getBooleanOr("hardcore", false),
-            allowCommands = data.getBooleanOr("allowCommands", false),
-            gameType = GameType.byId(data.getIntOr("GameType", 0)),
-            spawn = data.read("spawn", LevelData.RespawnData.CODEC).orElse(LevelData.RespawnData.DEFAULT),
-            gameTime = data.getLongOr("Time", 0L),
+            name = data.getString("LevelName").ifBlank { access.levelId },
+            difficulty = Difficulty.byId(
+                if (data.contains("Difficulty")) data.getByte("Difficulty").toInt() else DEFAULT_DIFFICULTY.toInt()
+            ),
+            hardcore = data.getBoolean("hardcore"),
+            allowCommands = data.getBoolean("allowCommands"),
+            gameType = GameType.byId(data.getInt("GameType")),
+            spawn = readSpawn(data),
+            gameTime = data.getLong("Time"),
         )
     }
 
@@ -69,12 +66,15 @@ object WorldEditor {
     fun setGameTime(access: LevelStorageSource.LevelStorageAccess, ticks: Long) =
         modifyData(access) { it.putLong("Time", ticks) }
 
-    /** Moves the spawn point, keeping the dimension and the spawn angle it already had. */
+    /** Moves the spawn point. 1.21 stores it as three ints, and the spawn angle beside them. */
     fun setSpawn(access: LevelStorageSource.LevelStorageAccess, pos: BlockPos) = modifyData(access) { data ->
-        val current = data.read("spawn", LevelData.RespawnData.CODEC).orElse(LevelData.RespawnData.DEFAULT)
-        val spawn = LevelData.RespawnData.of(current.dimension(), pos, current.yaw(), current.pitch())
-        data.store("spawn", LevelData.RespawnData.CODEC, spawn)
+        data.putInt("SpawnX", pos.x)
+        data.putInt("SpawnY", pos.y)
+        data.putInt("SpawnZ", pos.z)
     }
+
+    private fun readSpawn(data: CompoundTag): BlockPos =
+        BlockPos(data.getInt("SpawnX"), data.getInt("SpawnY"), data.getInt("SpawnZ"))
 
     /** The save's own `enabled_features`, for anything that has to agree with them. */
     fun readFeatures(access: LevelStorageSource.LevelStorageAccess): FeatureFlagSet = try {
@@ -98,8 +98,8 @@ object WorldEditor {
     fun readDisabledPacks(access: LevelStorageSource.LevelStorageAccess) = readPackList(access, "Disabled")
 
     private fun readPackList(access: LevelStorageSource.LevelStorageAccess, key: String): List<String> = try {
-        val list = readData(access).getCompoundOrEmpty("DataPacks").getListOrEmpty(key)
-        list.indices.map { list.getStringOr(it, "") }.filter { it.isNotBlank() }
+        val list = readData(access).getCompound("DataPacks").getList(key, Tag.TAG_STRING.toInt())
+        list.indices.map { list.getString(it) }.filter { it.isNotBlank() }
     } catch (e: Exception) {
         Constants.LOG.warn("Failed to read data packs of {}: {}", access.levelId, e.message)
         emptyList()

@@ -1,18 +1,18 @@
 package de.miraculixx.worlds.client.ui
 
+import com.mojang.blaze3d.systems.RenderSystem
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
 import de.miraculixx.worlds.data.MapEntry
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.ObjectSelectionList
-import net.minecraft.client.input.KeyEvent
-import net.minecraft.client.input.MouseButtonEvent
-import net.minecraft.client.renderer.RenderPipelines
+import net.minecraft.client.gui.navigation.CommonInputs
 import net.minecraft.client.gui.screens.worldselection.WorldSelectionList
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.client.resources.sounds.SimpleSoundInstance
 import net.minecraft.network.chat.Component
-import net.minecraft.resources.Identifier
+import net.minecraft.resources.ResourceLocation
+import net.minecraft.Util
 import net.minecraft.sounds.SoundEvents
 import java.time.Instant
 import java.time.ZoneId
@@ -21,10 +21,13 @@ import java.time.ZonedDateTime
 private const val ROW_HEIGHT = 36
 private const val ICON_SIZE = ROW_HEIGHT - 4
 
-private val JOIN_SPRITE = Identifier.withDefaultNamespace("world_list/join")
-private val JOIN_HIGHLIGHTED_SPRITE = Identifier.withDefaultNamespace("world_list/join_highlighted")
+private val JOIN_SPRITE = ResourceLocation.withDefaultNamespace("world_list/join")
+private val JOIN_HIGHLIGHTED_SPRITE = ResourceLocation.withDefaultNamespace("world_list/join_highlighted")
 
 private const val ICON_HOVER_OVERLAY = -1601138544
+
+/** What vanilla's own world list treats as a double click */
+private const val DOUBLE_CLICK_MS = 250L
 
 /** Left-hand scrollable list of maps (ModMenu-style rows: icon + title + short description). */
 class MapListWidget(
@@ -45,7 +48,7 @@ class MapListWidget(
     fun selectEntry(predicate: (MapEntry) -> Boolean): Boolean {
         val row = children().firstOrNull { predicate(it.entry) } ?: return false
         setSelected(row)
-        scrollToEntry(row)
+        centerScrollOn(row)
         return true
     }
 
@@ -60,35 +63,50 @@ class MapListWidget(
 
     override fun getRowWidth(): Int = width - 12
 
-    override fun scrollBarX(): Int = x + width - 8
+    /** 1.21's own setter takes no x, and the list is placed by the screen, not centered */
+    fun place(width: Int, height: Int, x: Int, y: Int) {
+        updateSizeAndPosition(width, height, y)
+        setX(x)
+    }
+
+    override fun getScrollbarPosition(): Int = x + width - 8
 
     /**
-     * Manually flat calc the height to avoid nextEntry rescanning each entry every time
-     */
-    override fun getNextY(): Int = y + 2 - scrollAmount().toInt() + children().size * ROW_HEIGHT
-
-    override fun contentHeight(): Int = children().size * ROW_HEIGHT + 4
-
-    /**
-     * Detects end of list and requests more entries (infinity scroll)
+     * Detects end of list and requests more entries (infinity scroll).
+     *
+     * 1.21 positions rows arithmetically off the index, so the `getNextY` / `contentHeight`
+     * overrides the later versions need against their O(n²) `addEntry` (nothing i can do?)
      */
     fun nearBottom(px: Int = ROW_HEIGHT * 3): Boolean =
-        maxScrollAmount() <= 0 || scrollAmount() >= maxScrollAmount() - px
+        maxScroll <= 0 || scrollAmount >= maxScroll - px
 
     inner class MapRow(val entry: MapEntry) : Entry<MapRow>() {
+        private var contentX = 0
+        private var contentY = 0
+        private var contentWidth = 0
+        private var contentHeight = 0
+        private val contentRight get() = contentX + contentWidth
+        private val contentBottom get() = contentY + contentHeight
+
+        /** 1.21 detects no double click for a list entry, so the row times its own */
+        private var lastClickMs = 0L
+
         override fun getNarration(): Component = Component.literal(entry.title)
 
-        override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
+        override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
             this@MapListWidget.setSelected(this)
-            if (canPlay() && (doubleClick || overIcon(event.x().toInt(), event.y().toInt()))) activate()
+            val now = Util.getMillis()
+            val doubleClick = now - lastClickMs < DOUBLE_CLICK_MS
+            lastClickMs = now
+            if (canPlay() && (doubleClick || overIcon(mouseX.toInt(), mouseY.toInt()))) activate()
             return true
         }
 
         /**
          * Enter on the focused row joins it. Navigating to a row already selects it
          */
-        override fun keyPressed(event: KeyEvent): Boolean {
-            if (!event.isConfirmation || !canPlay()) return false
+        override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
+            if (!CommonInputs.selected(keyCode) || !canPlay()) return false
             activate()
             return true
         }
@@ -105,7 +123,19 @@ class MapListWidget(
             mouseX >= contentX && mouseX < contentX + ICON_SIZE &&
                 mouseY >= contentY && mouseY < contentY + ICON_SIZE
 
-        override fun renderContent(
+        /** 1.21 hands the row its geometry per frame instead of exposing a content rectangle */
+        override fun render(
+            graphics: GuiGraphics, index: Int, top: Int, left: Int, width: Int, height: Int,
+            mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
+        ) {
+            contentX = left
+            contentY = top
+            contentWidth = width
+            contentHeight = height
+            renderContent(graphics, mouseX, mouseY, hovered, partialTick)
+        }
+
+        private fun renderContent(
             graphics: GuiGraphics,
             mouseX: Int,
             mouseY: Int,
@@ -127,10 +157,13 @@ class MapListWidget(
             val iconSize = ICON_SIZE
             val icon = MapTextures.get(entry.iconUrl)
             if (icon != null) {
+                // 1.21's blit does not enable blending itself, as vanilla's own world list shows
+                RenderSystem.enableBlend()
                 graphics.blit(
-                    RenderPipelines.GUI_TEXTURED, icon.id, x, y, 0f, 0f,
-                    iconSize, iconSize, icon.width, icon.height, icon.width, icon.height,
+                    icon.id, x, y, iconSize, iconSize,
+                    0f, 0f, icon.width, icon.height, icon.width, icon.height,
                 )
+                RenderSystem.disableBlend()
             } else {
                 graphics.fill(x, y, x + iconSize, y + iconSize, 0xFF2A2A2A.toInt())
             }
@@ -138,7 +171,9 @@ class MapListWidget(
             if (hovered && canPlay()) {
                 graphics.fill(x, y, x + iconSize, y + iconSize, ICON_HOVER_OVERLAY)
                 val sprite = if (overIcon(mouseX, mouseY)) JOIN_HIGHLIGHTED_SPRITE else JOIN_SPRITE
-                graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, x, y, iconSize, iconSize)
+                RenderSystem.enableBlend()
+                graphics.blitSprite(sprite, x, y, iconSize, iconSize)
+                RenderSystem.disableBlend()
             }
 
             val font = minecraft.font

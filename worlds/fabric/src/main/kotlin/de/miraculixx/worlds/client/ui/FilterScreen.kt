@@ -1,5 +1,6 @@
 package de.miraculixx.worlds.client.ui
 
+import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.CycleButton
@@ -55,6 +56,8 @@ class FilterScreen(
     private val defaultSort: SortMode,
 ) : Screen(Component.translatable("worlds.filter.title")) {
 
+    private val minecraft: Minecraft get() = Minecraft.getInstance()
+
     private val panelW = 280
     private val ctrlW = 150
     private val labels = ArrayList<Pair<Component, Int>>()
@@ -74,16 +77,16 @@ class FilterScreen(
         val catValues = listOf(ALL_CATEGORIES) + categories
         if (category !in catValues) category = ALL_CATEGORIES
         addRenderableWidget(
-            CycleButton.builder({ Component.literal(categoryLabel(it)) }, category)
-                .withValues(catValues)
+            CycleButton.builder<String>({ Component.literal(categoryLabel(it)) })
+                .withValues(catValues).withInitialValue(category)
                 .create(
                     ctrlX, row("worlds.filter.category"), ctrlW, 20,
                     Component.translatable("worlds.filter.category"),
                 ) { _, v -> category = v }
         )
         addRenderableWidget(
-            CycleButton.builder({ Component.literal(it.label) }, version)
-                .withValues(VersionMode.entries)
+            CycleButton.builder<VersionMode>({ Component.literal(it.label) })
+                .withValues(VersionMode.entries).withInitialValue(version)
                 .create(
                     ctrlX, row("worlds.filter.mc_version"), ctrlW, 20,
                     Component.translatable("worlds.filter.mc_version"),
@@ -98,8 +101,8 @@ class FilterScreen(
         val sortW = ctrlW - 24
         val sortY = row("worlds.filter.sort_by")
         addRenderableWidget(
-            CycleButton.builder({ Component.literal(it.label) }, sort)
-                .withValues(SortMode.entries)
+            CycleButton.builder<SortMode>({ Component.literal(it.label) })
+                .withValues(SortMode.entries).withInitialValue(sort)
                 .create(ctrlX, sortY, sortW, 20, Component.translatable("worlds.filter.sort_by")) { _, v -> sort = v }
         )
         reverseButton = addRenderableWidget(

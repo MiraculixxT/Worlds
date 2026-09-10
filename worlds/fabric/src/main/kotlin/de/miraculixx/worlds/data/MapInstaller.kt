@@ -8,15 +8,14 @@ import net.minecraft.commands.Commands
 import net.minecraft.core.registries.Registries
 import net.minecraft.server.WorldLoader
 import net.minecraft.server.packs.repository.ServerPacksSource
-import net.minecraft.server.permissions.LevelBasedPermissionSet
-import net.minecraft.util.Util
+import net.minecraft.Util
 import net.minecraft.world.Difficulty
 import net.minecraft.world.flag.FeatureFlags
 import net.minecraft.world.level.DataPackConfig
 import net.minecraft.world.level.GameType
 import net.minecraft.world.level.LevelSettings
 import net.minecraft.world.level.WorldDataConfiguration
-import net.minecraft.world.level.gamerules.GameRules
+import net.minecraft.world.level.GameRules
 import net.minecraft.world.level.levelgen.WorldOptions
 import net.minecraft.world.level.levelgen.presets.WorldPresets
 import net.minecraft.world.level.storage.LevelStorageSource
@@ -34,6 +33,9 @@ sealed interface InstallResult {
 }
 /** How often a progress line may be pushed */
 private const val PROGRESS_INTERVAL_MS = 100L
+
+/** `WorldLoader.InitConfig` takes a plain permission level on 1.21, 2 is a datapack's default */
+private const val FUNCTION_PERMISSION_LEVEL = 2
 /**
  * Rate-limited progress sink
  */
@@ -158,7 +160,7 @@ object MapInstaller {
                 false,
                 Difficulty.NORMAL,
                 false,
-                GameRules(dataConfig.enabledFeatures()),
+                GameRules(),
                 dataConfig,
             )
             Minecraft.getInstance().levelSource.createAccess(target.fileName.toString()).use { access ->
@@ -187,11 +189,11 @@ object MapInstaller {
         val packConfig = WorldLoader.PackConfig(ServerPacksSource.createPackRepository(access), dataConfig, false, false)
         val options = WorldOptions.defaultWithRandomSeed()
         WorldLoader.load(
-            WorldLoader.InitConfig(packConfig, Commands.CommandSelection.INTEGRATED, LevelBasedPermissionSet.GAMEMASTER),
+            WorldLoader.InitConfig(packConfig, Commands.CommandSelection.INTEGRATED, FUNCTION_PERMISSION_LEVEL),
             { context ->
                 // Datapack dimensions win over the preset; the preset is only the fallback.
                 val complete = WorldPresets.createNormalWorldDimensions(context.datapackWorldgen())
-                    .bake(context.datapackDimensions().lookupOrThrow(Registries.LEVEL_STEM))
+                    .bake(context.datapackDimensions().registryOrThrow(Registries.LEVEL_STEM))
                 WorldLoader.DataLoadOutput(
                     PrimaryLevelData(settings, options, complete.specialWorldProperty(), complete.lifecycle()),
                     complete.dimensionsRegistryAccess(),

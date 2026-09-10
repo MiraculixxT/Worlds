@@ -1,6 +1,7 @@
 package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.worlds.data.MapRequirement
+import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
@@ -18,6 +19,8 @@ class MissingModsScreen(
     private val missing: List<MapRequirement>,
     private val onJoin: () -> Unit,
 ) : Screen(Component.translatable("worlds.missing_mods.title")) {
+
+    private val minecraft: Minecraft get() = Minecraft.getInstance()
 
     override fun init() {
         val rowW = 300

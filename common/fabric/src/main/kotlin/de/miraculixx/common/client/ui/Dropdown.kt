@@ -3,7 +3,7 @@ package de.miraculixx.common.client.ui
 import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
-import net.minecraft.client.input.KeyEvent
+import com.mojang.blaze3d.platform.InputConstants
 import net.minecraft.network.chat.Component
 
 private const val BUTTON_H = 20
@@ -18,8 +18,8 @@ private const val ARROW = "  ▾"
  * ```
  * override fun init() { addRenderableWidget(dropdown.button) }
  * override fun render(…) { …; dropdown.renderOverlay(graphics, font, mouseX, mouseY) }
- * override fun mouseClicked(event, doubleClick) { if (dropdown.mouseClicked(x, y)) return true; … }
- * override fun keyPressed(event) = dropdown.keyPressed(event) || super.keyPressed(event)
+ * override fun mouseClicked(x, y, button) { if (dropdown.mouseClicked(x, y)) return true; … }
+ * override fun keyPressed(key, scan, mods) = dropdown.keyPressed(key) || super.keyPressed(key, scan, mods)
  * ```
  */
 class Dropdown<T>(
@@ -96,8 +96,8 @@ class Dropdown<T>(
     }
 
     /** Escape belongs to the open list before it belongs to the screen. */
-    fun keyPressed(event: KeyEvent): Boolean {
-        if (!open || !event.isEscape) return false
+    fun keyPressed(keyCode: Int): Boolean {
+        if (!open || keyCode != InputConstants.KEY_ESCAPE) return false
         open = false
         return true
     }

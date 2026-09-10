@@ -21,7 +21,7 @@ public class PanoramaRendererMixin {
             method = "render",
             at = @At(
                     value = "INVOKE",
-                    target = "Lnet/minecraft/client/renderer/CubeMap;render(Lnet/minecraft/client/Minecraft;FF)V",
+                    target = "Lnet/minecraft/client/renderer/CubeMap;render(Lnet/minecraft/client/Minecraft;FFF)V",
                     shift = At.Shift.AFTER
             )
     )

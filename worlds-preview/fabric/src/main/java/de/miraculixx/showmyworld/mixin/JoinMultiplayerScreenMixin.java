@@ -25,15 +25,11 @@ public abstract class JoinMultiplayerScreenMixin {
     }
 
     /**
-     * A sub screen (Edit, Delete, Direct Connect) ran {@code removed()} on the way out
+     * A sub screen (Edit, Delete, Direct Connect) ran {@code removed()} on the way out.
+     * (Resize falls through Screens method, so avoided here)
      */
     @Inject(method = "init", at = @At("TAIL"))
     private void showmyworld$initSelect(CallbackInfo ci) {
-        showmyworld$push();
-    }
-
-    @Inject(method = "repositionElements", at = @At("TAIL"))
-    private void showmyworld$repositionSelect(CallbackInfo ci) {
         showmyworld$push();
     }
 

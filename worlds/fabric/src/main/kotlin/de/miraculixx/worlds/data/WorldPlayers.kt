@@ -1,6 +1,7 @@
 package de.miraculixx.worlds.data
 
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.mojang.serialization.Dynamic
 import com.mojang.serialization.JsonOps
 import de.miraculixx.worlds.Constants
@@ -9,18 +10,17 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import net.minecraft.client.Minecraft
 import net.minecraft.core.registries.BuiltInRegistries
+import net.minecraft.nbt.NbtAccounter
+import net.minecraft.nbt.NbtIo
 import net.minecraft.nbt.NbtUtils
-import net.minecraft.resources.Identifier
-import net.minecraft.server.players.NameAndId
+import net.minecraft.resources.ResourceLocation
 import net.minecraft.stats.Stat
 import net.minecraft.stats.StatType
 import net.minecraft.stats.StatsCounter
-import net.minecraft.util.StrictJsonParser
 import net.minecraft.util.datafix.DataFixTypes
 import net.minecraft.world.level.GameType
 import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
-import net.minecraft.world.level.storage.PlayerDataStorage
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
@@ -58,6 +58,11 @@ object WorldPlayers {
 
     private const val LEGACY_STATS_VERSION = 1343
 
+    /** What vanilla's own `PlayerDataStorage` assumes for a file with no `DataVersion` */
+    private const val LEGACY_PLAYER_VERSION = -1
+
+    private const val DEFAULT_HEALTH = 20f
+
     @Serializable
     private data class MojangProfile(val name: String? = null)
 
@@ -65,20 +70,22 @@ object WorldPlayers {
         val dir = access.getLevelPath(LevelResource.PLAYER_DATA_DIR)
         if (!Files.isDirectory(dir)) return emptyList()
         readUserCache()
-        val storage = PlayerDataStorage(access, Minecraft.getInstance().fixerUpper)
         val files = try {
             Files.newDirectoryStream(dir, "*.dat").use { it.toList() }
         } catch (e: Exception) {
             Constants.LOG.warn("Could not list player data of {}: {}", access.levelId, e.message)
             return emptyList()
         }
-        return files.mapNotNull { read(access, storage, it) }.sortedBy { displayName(it.id).lowercase() }
+        return files.mapNotNull { read(access, it) }.sortedBy { displayName(it.id).lowercase() }
     }
 
-    /** Read through vanilla's own loader, so the tag is datafixed the way a join would fix it. */
+    /**
+     * Reads and datafixes one player file the way a join would.
+     *
+     * 1.21's `PlayerDataStorage.load` wants a live `Player`, so its body is reproduced instead.
+     */
     private fun read(
         access: LevelStorageSource.LevelStorageAccess,
-        storage: PlayerDataStorage,
         file: Path,
     ): PlayerData? {
         val name = file.fileName.toString().removeSuffix(".dat")
@@ -87,12 +94,20 @@ object WorldPlayers {
         } catch (_: IllegalArgumentException) {
             return null
         }
-        val tag = storage.load(NameAndId(id, displayName(id))).orElse(null) ?: return null
+        val raw = try {
+            NbtIo.readCompressed(file, NbtAccounter.unlimitedHeap())
+        } catch (e: Exception) {
+            Constants.LOG.warn("Could not read player data {}: {}", file.fileName, e.message)
+            return null
+        }
+        val tag = DataFixTypes.PLAYER.updateToCurrentVersion(
+            Minecraft.getInstance().fixerUpper, raw, NbtUtils.getDataVersion(raw, LEGACY_PLAYER_VERSION),
+        )
         return PlayerData(
             id = id,
-            gameType = GameType.byId(tag.getIntOr("playerGameType", 0)),
-            xpLevel = tag.getIntOr("XpLevel", 0),
-            health = tag.getFloatOr("Health", 20f),
+            gameType = GameType.byId(tag.getInt("playerGameType")),
+            xpLevel = tag.getInt("XpLevel"),
+            health = if (tag.contains("Health")) tag.getFloat("Health") else DEFAULT_HEALTH,
             hasStats = Files.isRegularFile(statsFile(access, id)),
         )
     }
@@ -146,14 +161,15 @@ object WorldPlayers {
         val file = statsFile(access, id)
         if (!Files.isRegularFile(file)) return counter
         try {
-            val root = Files.newBufferedReader(file).use { StrictJsonParser.parse(it) }
-            var dynamic = Dynamic(JsonOps.INSTANCE, root)
-            dynamic = DataFixTypes.STATS.updateToCurrentVersion(
-                Minecraft.getInstance().fixerUpper, dynamic, NbtUtils.getDataVersion(dynamic, LEGACY_STATS_VERSION),
+            val root = Files.newBufferedReader(file).use { JsonParser.parseReader(it) }
+            // 1.21's NbtUtils reads a data version off a CompoundTag only, so it comes out of the json
+            val version = (root as? JsonObject)?.get("DataVersion")?.asInt ?: LEGACY_STATS_VERSION
+            val dynamic: Dynamic<*> = DataFixTypes.STATS.updateToCurrentVersion(
+                Minecraft.getInstance().fixerUpper, Dynamic(JsonOps.INSTANCE, root), version,
             )
             val stats = (dynamic.value as? JsonObject)?.getAsJsonObject("stats") ?: return counter
             stats.entrySet().forEach { (typeId, values) ->
-                val type = Identifier.tryParse(typeId)?.let { BuiltInRegistries.STAT_TYPE.getValue(it) }
+                val type = ResourceLocation.tryParse(typeId)?.let { BuiltInRegistries.STAT_TYPE.get(it) }
                 if (type == null || !values.isJsonObject) return@forEach
                 values.asJsonObject.entrySet().forEach { (key, value) -> put(counter, type, key, value.asInt) }
             }
@@ -166,7 +182,7 @@ object WorldPlayers {
     /** A stat is its type plus an entry of that type's registry */
     @Suppress("UNCHECKED_CAST")
     private fun put(counter: LocalStatsCounter, type: StatType<*>, key: String, value: Int) {
-        val entry = Identifier.tryParse(key)?.let { type.registry.getValue(it) } ?: return
+        val entry = ResourceLocation.tryParse(key)?.let { type.registry.get(it) } ?: return
         counter.put((type as StatType<Any>).get(entry), value)
     }
 

@@ -9,9 +9,9 @@ import net.minecraft.client.Minecraft
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Holder
 import net.minecraft.nbt.CompoundTag
+import net.minecraft.nbt.Tag
 import net.minecraft.nbt.NbtOps
 import net.minecraft.nbt.NbtUtils
-import net.minecraft.util.ARGB
 import net.minecraft.util.datafix.DataFixTypes
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.EmptyBlockGetter
@@ -21,7 +21,6 @@ import net.minecraft.world.level.block.Blocks
 import net.minecraft.world.level.block.state.BlockState
 import net.minecraft.world.level.chunk.PalettedContainer
 import net.minecraft.world.level.chunk.PalettedContainerRO
-import net.minecraft.world.level.chunk.Strategy
 import net.minecraft.world.level.material.MapColor
 
 /** One region rendered as map colors, plus which of its chunks could not be read. */
@@ -44,13 +43,14 @@ object ChunkMapRenderer {
      */
     private val statesCodec by lazy {
         PalettedContainer.codecRW(
+            Block.BLOCK_STATE_REGISTRY,
             BlockState.CODEC,
-            Strategy.createForBlockStates(Block.BLOCK_STATE_REGISTRY),
+            PalettedContainer.Strategy.SECTION_STATES,
             Blocks.AIR.defaultBlockState(),
         )
     }
 
-    private val currentDataVersion by lazy { SharedConstants.getCurrentVersion().dataVersion().version() }
+    private val currentDataVersion by lazy { SharedConstants.getCurrentVersion().dataVersion.version }
 
     /**
      * One region as a square image, or null when the region file is gone.
@@ -102,10 +102,11 @@ object ChunkMapRenderer {
         colors: IntArray, bases: IntArray, heights: IntArray, depths: IntArray, session: BiomeTints.Session?,
     ): Boolean {
         val sections = try {
-            upgrade(raw).getListOrEmpty("sections").mapNotNull { entry ->
+            upgrade(raw).getList("sections", Tag.TAG_COMPOUND.toInt()).mapNotNull { entry ->
                 val section = entry as? CompoundTag ?: return@mapNotNull null
-                val y = section.getByte("Y").orElse(null)?.toInt() ?: return@mapNotNull null
-                val states = section.getCompound("block_states").orElse(null) ?: return@mapNotNull null
+                if (!section.contains("Y") || !section.contains("block_states")) return@mapNotNull null
+                val y = section.getByte("Y").toInt()
+                val states = section.getCompound("block_states")
                 if (isAirOnly(states)) null else Section(y, states, section)
             }.sortedByDescending { it.y }
         } catch (e: Exception) {
@@ -185,7 +186,7 @@ object ChunkMapRenderer {
                 val i = z * pixels + x
                 val id = colors[i]
                 if (id == NO_COLOR) {
-                    image.setPixelABGR(x, z, 0)
+                    image.setPixelRGBA(x, z, 0)
                     continue
                 }
                 val brightness = if (MapColor.byId(id) === MapColor.WATER) {
@@ -206,8 +207,8 @@ object ChunkMapRenderer {
                         else -> MapColor.Brightness.NORMAL
                     }
                 }
-                // What MapColor.calculateARGBColor does, over the possibly tinted base instead of col.
-                image.setPixelABGR(x, z, abgr(ARGB.scaleRGB(ARGB.opaque(bases[i]), brightness.modifier)))
+                // What MapColor.calculateRGBColor does, over the possibly tinted base instead of col.
+                image.setPixelRGBA(x, z, abgr(scaleRgb(bases[i], brightness.modifier)))
             }
         }
         return image
@@ -215,9 +216,9 @@ object ChunkMapRenderer {
 
     /** A section whose whole palette is one of the air blocks contributes nothing to the surface. */
     private fun isAirOnly(states: CompoundTag): Boolean {
-        val palette = states.getListOrEmpty("palette")
+        val palette = states.getList("palette", Tag.TAG_COMPOUND.toInt())
         if (palette.size != 1) return false
-        val name = (palette[0] as? CompoundTag)?.getStringOr("Name", "") ?: return false
+        val name = (palette[0] as? CompoundTag)?.getString("Name") ?: return false
         return name == "minecraft:air" || name == "minecraft:cave_air" || name == "minecraft:void_air"
     }
 
@@ -228,7 +229,15 @@ object ChunkMapRenderer {
         return DataFixTypes.CHUNK.updateToCurrentVersion(Minecraft.getInstance().fixerUpper, tag, version)
     }
 
-    /** 0xAARRGGBB → the 0xAABBGGRR [NativeImage.setPixelABGR] wants. */
+    /** Vanilla's own per-channel brightness scaling, kept off [MapColor.calculateRGBColor] so a tint survives. */
+    private fun scaleRgb(rgb: Int, modifier: Int): Int {
+        val r = (rgb shr 16 and 0xFF) * modifier / 255
+        val g = (rgb shr 8 and 0xFF) * modifier / 255
+        val b = (rgb and 0xFF) * modifier / 255
+        return -0x1000000 or (r shl 16) or (g shl 8) or b
+    }
+
+    /** 0xAARRGGBB → the 0xAABBGGRR [NativeImage.setPixelRGBA] wants. */
     private fun abgr(argb: Int): Int =
         (argb and -0x1000000) or (argb and 0xFF shl 16) or (argb and 0xFF00) or (argb ushr 16 and 0xFF)
 }

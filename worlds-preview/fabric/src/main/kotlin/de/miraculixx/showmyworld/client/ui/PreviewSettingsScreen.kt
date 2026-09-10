@@ -29,13 +29,15 @@ class PreviewSettingsScreen(private val onDone: Runnable) : Screen(Component.tra
         SettingsCategory(I18n.get("showmyworld.settings.panorama")).apply { expanded = true },
     )
 
+    private val minecraft: Minecraft get() = Minecraft.getInstance()
+
     private lateinit var list: SettingsList
 
     override fun init() {
         val listW = (width - 40).coerceAtMost(PANEL_W)
         val listX = (width - listW) / 2
         list = SettingsList(minecraft, categories, ::rowsFor)
-        list.updateSizeAndPosition(listW, height - 34 - LIST_TOP, listX, LIST_TOP)
+        list.place(listW, height - 34 - LIST_TOP, listX, LIST_TOP)
         list.rebuild()
         addRenderableWidget(list)
 
