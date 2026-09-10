@@ -1,21 +1,11 @@
 package de.miraculixx.worlds.data
 
-import com.mojang.serialization.Lifecycle
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.api.Http
-import java.nio.file.Files
-import java.nio.file.Path
-import java.util.Collections
-import java.util.zip.ZipEntry
-import java.util.zip.ZipFile
 import net.minecraft.client.Minecraft
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.commands.Commands
 import net.minecraft.core.registries.Registries
-import net.minecraft.nbt.CompoundTag
-import net.minecraft.nbt.NbtIo
-import net.minecraft.nbt.NbtOps
-import net.minecraft.nbt.NbtUtils
 import net.minecraft.server.WorldLoader
 import net.minecraft.server.packs.repository.ServerPacksSource
 import net.minecraft.server.permissions.LevelBasedPermissionSet
@@ -27,11 +17,16 @@ import net.minecraft.world.level.GameType
 import net.minecraft.world.level.LevelSettings
 import net.minecraft.world.level.WorldDataConfiguration
 import net.minecraft.world.level.gamerules.GameRules
-import net.minecraft.world.level.levelgen.WorldGenSettings
 import net.minecraft.world.level.levelgen.WorldOptions
 import net.minecraft.world.level.levelgen.presets.WorldPresets
 import net.minecraft.world.level.storage.LevelStorageSource
 import net.minecraft.world.level.storage.PrimaryLevelData
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.*
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+
 /** Result of an install attempt. */
 sealed interface InstallResult {
     data class Success(val saveFolder: String) : InstallResult
@@ -68,6 +63,7 @@ object MapInstaller {
         MapRepository.loadDetail(entry)
         val url = entry.downloadUrl
             ?: return InstallResult.Failure(I18n.get("worlds.install.no_file", entry.title))
+
         val gameDir = Minecraft.getInstance().gameDirectory.toPath().toAbsolutePath().normalize()
         val savesDir = gameDir.resolve("saves")
         Files.createDirectories(savesDir)
