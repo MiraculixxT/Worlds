@@ -77,7 +77,7 @@ loom {
 tasks.processResources {
     val expansions = mapOf(
         "version" to project.version.toString(),
-        "minecraft_version" to gameVersion,
+        "minecraft_version" to outlet.mcVersionRange,
     )
     inputs.properties(expansions)
     filteringCharset = "UTF-8"
