@@ -42,9 +42,11 @@ class RegionIndex(val rx: Int, val rz: Int, val present: BitSet, val bytes: Long
 data class ChunkFacts(val inhabitedTime: Long, val lastUpdate: Long)
 
 const val REGION_SIZE = 32
-private const val SUB_REGION = "region"
-private const val SUB_ENTITIES = "entities"
-private const val SUB_POI = "poi"
+const val SUB_REGION = "region"
+const val SUB_ENTITIES = "entities"
+const val SUB_POI = "poi"
+
+val CHUNK_SUBS = listOf(SUB_REGION, SUB_ENTITIES, SUB_POI)
 private const val HEADER_BYTES = 4096
 
 private val REGION_NAME = Regex("""r\.(-?\d+)\.(-?\d+)\.mca""")
@@ -88,8 +90,9 @@ object ChunkRegions {
     }
 
     /** Every `r.<x>.<z>.mca` in the dimension, as region coordinates. */
-    fun listRegions(dimension: WorldDimension): List<Pair<Int, Int>> {
-        val dir = dimension.regionDir
+    fun listRegions(dimension: WorldDimension): List<Pair<Int, Int>> = listRegions(dimension.regionDir)
+
+    fun listRegions(dir: Path): List<Pair<Int, Int>> {
         if (!Files.isDirectory(dir)) return emptyList()
         return Files.newDirectoryStream(dir).use { stream ->
             stream.mapNotNull { file ->
@@ -101,8 +104,11 @@ object ChunkRegions {
     /**
      * The region's chunk bitmap. Only the first 4 KiB are read
      */
-    fun readIndex(dimension: WorldDimension, rx: Int, rz: Int): RegionIndex? {
-        val file = regionFile(dimension.regionDir, rx, rz)
+    fun readIndex(dimension: WorldDimension, rx: Int, rz: Int): RegionIndex? =
+        readIndex(dimension.regionDir, rx, rz)
+
+    fun readIndex(dir: Path, rx: Int, rz: Int): RegionIndex? {
+        val file = regionFile(dir, rx, rz)
         if (!Files.isRegularFile(file)) return null
         return try {
             val header = ByteBuffer.allocate(HEADER_BYTES)
@@ -168,7 +174,7 @@ object ChunkRegions {
     fun deleteChunks(dimension: WorldDimension, chunks: Collection<ChunkPos>): Int {
         if (chunks.isEmpty()) return 0
         var deleted = 0
-        listOf(SUB_REGION, SUB_ENTITIES, SUB_POI).forEach { sub ->
+        CHUNK_SUBS.forEach { sub ->
             storage(dimension, sub)?.use { store ->
                 chunks.forEach { pos ->
                     try {
@@ -182,7 +188,7 @@ object ChunkRegions {
         }
         // RegionFile.clear leaves the (now header-only) file behind; drop the empty ones.
         chunks.map { it.regionX to it.regionZ }.distinct().forEach { (rx, rz) ->
-            listOf(SUB_REGION, SUB_ENTITIES, SUB_POI).forEach { sub ->
+            CHUNK_SUBS.forEach { sub ->
                 val file = regionFile(dimension.dir.resolve(sub), rx, rz)
                 val index = readIndexAt(file) ?: return@forEach
                 if (index.isEmpty) runCatching { Files.deleteIfExists(file) }
@@ -204,11 +210,18 @@ object ChunkRegions {
     /**
      * A storage over one of the dimension's three chunk folders, or null when it does not exist
      */
-    internal fun storage(dimension: WorldDimension, sub: String): RegionFileStorage? {
-        val dir = dimension.dir.resolve(sub)
-        if (!Files.isDirectory(dir)) return null
+    internal fun storage(dimension: WorldDimension, sub: String): RegionFileStorage? =
+        storage(dimension.dir.resolve(sub), dimension.dir.name, dimension.key, sub, false)
+
+    /**
+     * A store over one of the three chunk folders (save or clip)
+     */
+    internal fun storage(
+        dir: Path, level: String, key: ResourceKey<Level>, sub: String, create: Boolean,
+    ): RegionFileStorage? {
+        if (create) Files.createDirectories(dir) else if (!Files.isDirectory(dir)) return null
         val type = if (sub == SUB_REGION) "chunk" else sub
-        return RegionFileStorage(RegionStorageInfo(dimension.dir.name, dimension.key, type), dir, false)
+        return RegionFileStorage(RegionStorageInfo(level, key, type), dir, false)
     }
 
     private fun readIndexAt(file: Path): BitSet? {

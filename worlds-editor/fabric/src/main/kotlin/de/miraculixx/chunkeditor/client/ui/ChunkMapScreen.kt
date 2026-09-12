@@ -5,11 +5,17 @@ import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.BiomeTints
 import de.miraculixx.chunkeditor.data.ChunkFacts
 import de.miraculixx.chunkeditor.data.ChunkMapRenderer
+import de.miraculixx.chunkeditor.data.ChunkClipExport
+import de.miraculixx.chunkeditor.data.ChunkClipImport
 import de.miraculixx.chunkeditor.data.ChunkRegions
+import de.miraculixx.chunkeditor.data.ClipInfo
+import de.miraculixx.chunkeditor.data.ExportResult
+import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.REGION_SIZE
 import de.miraculixx.chunkeditor.data.RegionIndex
 import de.miraculixx.chunkeditor.data.LevelFacts
 import de.miraculixx.chunkeditor.data.WorldDimension
+import de.miraculixx.common.client.ui.BackupActionScreen
 import de.miraculixx.common.client.ui.Dropdown
 import de.miraculixx.common.client.ui.IconButton
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
@@ -23,7 +29,6 @@ import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.Checkbox
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.components.Tooltip
-import net.minecraft.client.gui.screens.BackupConfirmScreen
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.client.input.KeyEvent
@@ -35,10 +40,12 @@ import net.minecraft.ChatFormatting
 import net.minecraft.core.BlockPos
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
+import net.minecraft.network.chat.TextColor
 import net.minecraft.resources.Identifier
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.storage.LevelStorageSource
 import org.lwjgl.glfw.GLFW
+import kotlin.io.path.name
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.ln
@@ -109,6 +116,23 @@ private val SELECTION_ACTIONS = listOf(
     SelectionAction("chunkeditor.map.clear", SELECT_NONE_SPRITE, GLFW.GLFW_KEY_C, "Ctrl+C"),
 )
 
+private val DELETE_ACTION: Component get() = Component.translatable("selectWorld.delete")
+private val PASTE_ACTION: Component get() = Component.translatable("chunkeditor.clip.import")
+
+/** `Backup & <action>` — the button that takes a backup first. */
+private fun backupLabel(action: Component): Component =
+    Component.translatable("chunkeditor.confirm.backup", action)
+
+/** `<action> - NO UNDO`, the warning half in red. */
+private fun noUndoLabel(action: Component): Component = Component.translatable(
+    "chunkeditor.confirm.no_undo", action,
+    Component.translatable("chunkeditor.confirm.no_undo_tag").withColor(TextColor.RED),
+)
+
+/** Past this many chunks a paste ghost draws only its hull — a quad each would swamp the frame. */
+private const val PASTE_FILL_MAX = 4096
+private const val PASTE_COLOR = 0x6033B5E5
+
 private const val CLICK_SLOP = 3.0
 private const val TICKS_PER_MINUTE = 1200L
 
@@ -172,7 +196,19 @@ internal class ChunkMapScreen(
     private var tintsDone = false
 
     private lateinit var deleteButton: Button
+    private lateinit var exportButton: Button
     private lateinit var dimensionPicker: Dropdown<WorldDimension>
+
+    /** Non-null while a clip is following the cursor, waiting to be placed. */
+    private var pasteClip: ClipInfo? = null
+    private var pasteOffsets: List<ChunkPos> = emptyList()
+
+    /** minX, minZ, maxX, maxZ of [pasteOffsets] */
+    private var pasteBounds = intArrayOf(0, 0, 0, 0)
+
+    @Volatile
+    private var clipMessage: String? = null
+    private var clipBusy = false
 
     override fun init() {
         val dim = dimension
@@ -210,6 +246,16 @@ internal class ChunkMapScreen(
         addRenderableWidget(
             Button.builder(Component.translatable("chunkeditor.map.trim")) { openTrim() }.bounds(x, y, 78, 20).build()
         )
+        x += 82
+        exportButton = addRenderableWidget(
+            Button.builder(Component.translatable("chunkeditor.clip.export")) { openExport() }
+                .bounds(x, y, 70, 20).build()
+        )
+        x += 74
+        addRenderableWidget(
+            Button.builder(Component.translatable("chunkeditor.clip.import")) { openLibrary() }
+                .bounds(x, y, 70, 20).build()
+        )
         deleteButton = addRenderableWidget(
             Button.builder(Component.translatable("chunkeditor.map.delete_selected")) { confirmDelete() }
                 .bounds(width - MARGIN - 190, y, 110, 20).build()
@@ -219,6 +265,139 @@ internal class ChunkMapScreen(
                 .bounds(width - MARGIN - 76, y, 76, 20).build()
         )
         syncDeleteButton()
+    }
+
+    //
+    // Clips
+    //
+
+    private fun openExport() {
+        val dim = dimension ?: return
+        if (selected.isEmpty() || clipBusy) return
+        minecraft.gui.setScreen(ClipNameScreen(this, "${dim.label.lowercase()}-${selected.size}") { name ->
+            minecraft.gui.setScreen(this)
+            runExport(dim, name)
+        })
+    }
+
+    private fun runExport(dim: WorldDimension, name: String) {
+        val chunks = selected.toLongArray().map { ChunkPos.unpack(it) }
+        clipBusy = true
+        clipMessage = I18n.get("chunkeditor.clip.exporting", 0, chunks.size)
+        Constants.SCOPE.launch {
+            val result = ChunkClipExport.export(dim, chunks, name) { done, total ->
+                clipMessage = I18n.get("chunkeditor.clip.exporting", done, total)
+            }
+            minecraft.execute {
+                clipBusy = false
+                clipMessage = when (result) {
+                    is ExportResult.Success -> I18n.get("chunkeditor.clip.exported", result.chunks, result.dir.name)
+                    is ExportResult.Failure -> I18n.get(result.message)
+                }
+            }
+        }
+    }
+
+    private fun openLibrary() {
+        if (clipBusy) return
+        minecraft.gui.setScreen(ClipLibraryScreen(this) { clip ->
+            startPaste(clip)
+            minecraft.gui.setScreen(this)
+        })
+    }
+
+    /** Arms paste mode: the clip's footprint now follows the cursor until a click or Escape. */
+    private fun startPaste(clip: ClipInfo) {
+        pasteClip = clip
+        val origin = clip.origin
+        pasteOffsets = clip.chunks.map { ChunkPos(it.x - origin.x, it.z - origin.z) }
+        pasteBounds = intArrayOf(
+            pasteOffsets.minOfOrNull { it.x } ?: 0, pasteOffsets.minOfOrNull { it.z } ?: 0,
+            pasteOffsets.maxOfOrNull { it.x } ?: 0, pasteOffsets.maxOfOrNull { it.z } ?: 0,
+        )
+        clipMessage = I18n.get("chunkeditor.clip.paste_hint", clip.name)
+    }
+
+    private fun cancelPaste() {
+        pasteClip = null
+        pasteOffsets = emptyList()
+        clipMessage = null
+    }
+
+    /** Where the clip's own origin would land, given the cursor. */
+    private fun pasteOrigin(mouseX: Double, mouseY: Double): ChunkPos = chunkAt(mouseX, mouseY)
+
+    private fun confirmPaste(origin: ChunkPos) {
+        val clip = pasteClip ?: return
+        val dim = dimension ?: return
+        cancelPaste()
+        clipBusy = true
+        clipMessage = I18n.get("chunkeditor.clip.checking")
+        Constants.SCOPE.launch {
+            val conflicts = ChunkClipImport.conflicts(clip, dim, origin)
+            minecraft.execute {
+                clipBusy = false
+                clipMessage = null
+                if (conflicts == 0) {
+                    runPaste(clip, dim, origin, true)
+                    return@execute
+                }
+                minecraft.gui.setScreen(
+                    BackupActionScreen(
+                        { minecraft.gui.setScreen(this@ChunkMapScreen) },
+                        { backup, _ ->
+                            EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access)
+                                .thenAcceptAsync({ runPaste(clip, dim, origin, true) }, minecraft)
+                        },
+                        Component.translatable("chunkeditor.clip.paste_title", clip.name),
+                        Component.translatable("chunkeditor.clip.paste_warning", conflicts),
+                        backupLabel(PASTE_ACTION),
+                        noUndoLabel(PASTE_ACTION),
+                    )
+                )
+            }
+        }
+    }
+
+    private fun runPaste(clip: ClipInfo, dim: WorldDimension, origin: ChunkPos, overwrite: Boolean) {
+        val generation = loadGen
+        minecraft.gui.setScreen(this)
+        clipBusy = true
+        clipMessage = I18n.get("chunkeditor.clip.importing", 0, clip.chunks.size)
+        Constants.SCOPE.launch {
+            val result = ChunkClipImport.import(clip, dim, origin, overwrite) { done, total ->
+                clipMessage = I18n.get("chunkeditor.clip.importing", done, total)
+            }
+            val touched = clip.chunks
+                .map { ChunkPos(it.x + origin.x - clip.origin.x, it.z + origin.z - clip.origin.z) }
+                .map { it.regionX to it.regionZ }.distinct()
+            val refreshed = touched.map { (rx, rz) -> key(rx, rz) to ChunkRegions.readIndex(dim, rx, rz) }
+            minecraft.execute {
+                clipBusy = false
+                clipMessage = when (result) {
+                    is ImportResult.Success ->
+                        I18n.get("chunkeditor.clip.imported", result.written, result.skipped + result.clipped)
+
+                    is ImportResult.Failure -> I18n.get(result.message)
+                }
+                if (generation != loadGen) return@execute
+                refreshed.forEach { (regionKey, index) ->
+                    if (index == null) indices.remove(regionKey) else indices[regionKey] = index
+                }
+                totalChunks = indices.values.sumOf { it.count }
+                totalBytes = indices.values.sumOf { it.bytes }
+                selected.clear()
+                if (result is ImportResult.Success) {
+                    clip.chunks.forEach {
+                        selected.add(ChunkPos(it.x + origin.x - clip.origin.x, it.z + origin.z - clip.origin.z).pack())
+                    }
+                }
+                dropTextures()
+                // A render started before the write would land with the old terrain on it.
+                loadGen++
+                onSelectionChanged()
+            }
+        }
     }
 
     //
@@ -345,6 +524,7 @@ internal class ChunkMapScreen(
 
     private fun syncDeleteButton() {
         deleteButton.active = selected.isNotEmpty()
+        if (::exportButton.isInitialized) exportButton.active = selected.isNotEmpty() && !clipBusy
         deleteButton.message =
             if (selected.isEmpty()) Component.translatable("chunkeditor.map.delete_selected")
             else Component.literal("${I18n.get("selectWorld.delete")} ${selected.size}")
@@ -358,7 +538,7 @@ internal class ChunkMapScreen(
         val dim = dimension ?: return
         val count = selected.size
         minecraft.gui.setScreen(
-            BackupConfirmScreen(
+            BackupActionScreen(
                 { minecraft.gui.setScreen(this) },
                 { backup, _ ->
                     EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access)
@@ -366,8 +546,8 @@ internal class ChunkMapScreen(
                 },
                 Component.translatable("chunkeditor.map.delete_title", count),
                 Component.translatable("chunkeditor.map.delete_warning", dim.label),
-                Component.translatable("selectWorld.delete"),
-                false,
+                backupLabel(DELETE_ACTION),
+                noUndoLabel(DELETE_ACTION),
             )
         )
     }
@@ -445,6 +625,7 @@ internal class ChunkMapScreen(
         pumpCoarse(visible)
         drawGrid(graphics, visible)
         drawDragRect(graphics)
+        drawPasteGhost(graphics, mouseX, mouseY)
         graphics.disableScissor()
 
         drawInfo(graphics, mouseX, mouseY)
@@ -571,6 +752,33 @@ internal class ChunkMapScreen(
         graphics.fill(x2 - 1, y, x2, y2, REGION_LINE_COLOR)
     }
 
+    /** The armed clip's footprint under the cursor, chunk-snapped. */
+    private fun drawPasteGhost(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+        if (pasteClip == null) return
+        if (!inMap(mouseX.toDouble(), mouseY.toDouble())) return
+        val origin = pasteOrigin(mouseX.toDouble(), mouseY.toDouble())
+        if (pasteOffsets.size <= PASTE_FILL_MAX) {
+            pasteOffsets.forEach { offset ->
+                val cx = origin.x + offset.x
+                val cz = origin.z + offset.z
+                val x = screenX(cx * 16.0).roundToInt()
+                val y = screenY(cz * 16.0).roundToInt()
+                val x2 = screenX((cx + 1) * 16.0).roundToInt()
+                val y2 = screenY((cz + 1) * 16.0).roundToInt()
+                if (x2 > x && y2 > y) graphics.fill(x, y, x2, y2, PASTE_COLOR)
+            }
+        }
+        // The hull is drawn whatever the count, so a clip too big to fill still shows where it lands.
+        val x = screenX((origin.x + pasteBounds[0]) * 16.0).roundToInt()
+        val y = screenY((origin.z + pasteBounds[1]) * 16.0).roundToInt()
+        val x2 = screenX((origin.x + pasteBounds[2] + 1) * 16.0).roundToInt()
+        val y2 = screenY((origin.z + pasteBounds[3] + 1) * 16.0).roundToInt()
+        graphics.fill(x, y, x2, y + 1, REGION_LINE_COLOR)
+        graphics.fill(x, y2 - 1, x2, y2, REGION_LINE_COLOR)
+        graphics.fill(x, y, x + 1, y2, REGION_LINE_COLOR)
+        graphics.fill(x2 - 1, y, x2, y2, REGION_LINE_COLOR)
+    }
+
     private fun drawInfo(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
         val infoX = MARGIN + 312
         val summary = when {
@@ -607,6 +815,7 @@ internal class ChunkMapScreen(
 
         val progress = scanProgress
         val hint = when {
+            clipMessage != null -> clipMessage!!
             progress != null -> I18n.get("chunkeditor.map.scanning", progress.first, progress.second)
             tintsLoading -> I18n.get("chunkeditor.map.biomes")
             else -> I18n.get("chunkeditor.map.hint")
@@ -794,6 +1003,11 @@ internal class ChunkMapScreen(
         val x = event.x()
         val y = event.y()
         if (dimensionPicker.mouseClicked(x, y)) return true
+        if (pasteClip != null) {
+            clickSound()
+            if (event.button() == 0 && inMap(x, y)) confirmPaste(pasteOrigin(x, y)) else cancelPaste()
+            return true
+        }
         if (event.button() == 0 && inSlider(x, y)) {
             sliderDragging = true
             clickSound()
@@ -863,6 +1077,10 @@ internal class ChunkMapScreen(
 
     override fun keyPressed(event: KeyEvent): Boolean {
         if (dimensionPicker.keyPressed(event)) return true
+        if (pasteClip != null && event.isEscape) {
+            cancelPaste()
+            return true
+        }
         if (event.hasControlDownWithQuirk()) {
             val action = SELECTION_ACTIONS.firstOrNull { it.glfwKey == event.key() }
             if (action != null) {
