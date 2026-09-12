@@ -11,7 +11,9 @@ import de.miraculixx.chunkeditor.data.RegionIndex
 import de.miraculixx.chunkeditor.data.LevelFacts
 import de.miraculixx.chunkeditor.data.WorldDimension
 import de.miraculixx.common.client.ui.Dropdown
+import de.miraculixx.common.client.ui.IconButton
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
+import de.miraculixx.common.client.ui.clickSound
 import de.miraculixx.common.client.ui.drawBox
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet
 import kotlinx.coroutines.Job
@@ -20,6 +22,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.Checkbox
 import net.minecraft.client.gui.components.EditBox
+import net.minecraft.client.gui.components.Tooltip
 import net.minecraft.client.gui.screens.BackupConfirmScreen
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
@@ -28,6 +31,7 @@ import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.client.renderer.texture.DynamicTexture
+import net.minecraft.ChatFormatting
 import net.minecraft.core.BlockPos
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
@@ -37,6 +41,7 @@ import net.minecraft.world.level.storage.LevelStorageSource
 import org.lwjgl.glfw.GLFW
 import kotlin.math.abs
 import kotlin.math.floor
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -50,15 +55,27 @@ private const val DROPDOWN_W = 140
 /** The coordinate bar between the map and the footer buttons. */
 private const val INFO_H = 18
 
-/** Widest value each coordinate field can ever hold */
+/** Widest value each coordinate field can ever hold, the last step of [COORD_TIERS] */
 private const val BLOCK_EXTREME = "-30000000"
 private const val CHUNK_EXTREME = "-1875000"
 private const val REGION_EXTREME = "-58594"
 
+private val COORD_TIERS = listOf(-99 to 999, -9999 to 999999)
+
+/** The zoom slider filling whatever the coordinate row leaves of the info bar */
+private const val SLIDER_MIN_W = 48
+private const val SLIDER_MAX_W = 160
+private const val SLIDER_TRACK_H = 4
+private const val SLIDER_KNOB_W = 5
+private const val SLIDER_KNOB_H = 10
+private const val TRACK_COLOR = 0x60FFFFFF
+private const val KNOB_COLOR = -1
+private const val KNOB_HOVER_COLOR = 0xFF33B5E5.toInt()
+
 private const val REGION_BLOCKS = REGION_SIZE * 16
 
-/** Pixels per block. The clamps put a chunk between 1 and 64 pixels wide. */
-private const val MIN_SCALE = 1.0 / 16.0
+/** Pixels per block. The clamps put a chunk between a quarter pixel and 64 pixels wide. */
+private const val MIN_SCALE = 1.0 / 64.0
 private const val MAX_SCALE = 4.0
 private const val TERRAIN_SCALE = 0.25
 private const val MAX_LIVE_REGIONS = 32
@@ -77,6 +94,20 @@ private const val UNREADABLE_COLOR = 0xB0C05050.toInt()
 private const val SELECTED_COLOR = 0x9033B5E5.toInt()
 private const val GRID_COLOR = 0x30FFFFFF
 private const val REGION_LINE_COLOR = 0x80FFFFFF.toInt()
+
+/** Selection sprites: `assets/chunkeditor/textures/gui/sprites/` */
+private val SELECT_ALL_SPRITE = Identifier.fromNamespaceAndPath(Constants.MOD_ID, "select-all")
+private val SELECT_INVERT_SPRITE = Identifier.fromNamespaceAndPath(Constants.MOD_ID, "select-invert")
+private val SELECT_NONE_SPRITE = Identifier.fromNamespaceAndPath(Constants.MOD_ID, "select-none")
+
+/** The three bulk selection buttons, each also bound to its hardcoded Ctrl shortcut. */
+private class SelectionAction(val key: String, val sprite: Identifier, val glfwKey: Int, val shortcut: String)
+
+private val SELECTION_ACTIONS = listOf(
+    SelectionAction("chunkeditor.map.select_all", SELECT_ALL_SPRITE, GLFW.GLFW_KEY_A, "Ctrl+A"),
+    SelectionAction("chunkeditor.map.invert", SELECT_INVERT_SPRITE, GLFW.GLFW_KEY_I, "Ctrl+I"),
+    SelectionAction("chunkeditor.map.clear", SELECT_NONE_SPRITE, GLFW.GLFW_KEY_C, "Ctrl+C"),
+)
 
 private const val CLICK_SLOP = 3.0
 private const val TICKS_PER_MINUTE = 1200L
@@ -127,6 +158,12 @@ internal class ChunkMapScreen(
     private var dragTo: ChunkPos? = null
     private var dragRemoves = false
 
+    // Info-bar slider geometry
+    private var sliderX1 = 0
+    private var sliderX2 = 0
+    private var sliderY = 0
+    private var sliderDragging = false
+
     private var scanJob: Job? = null
     private var scanProgress: Pair<Int, Int>? = null
 
@@ -157,21 +194,22 @@ internal class ChunkMapScreen(
                 .bounds(MARGIN + 236, 6, 70, 20).build()
         )
 
-        val bulk = listOf<Pair<String, () -> Unit>>(
-            "chunkeditor.map.select_all" to ::selectAll,
-            "chunkeditor.map.invert" to ::invertSelection,
-            "chunkeditor.map.clear" to ::clearSelection,
-            "chunkeditor.map.trim" to ::openTrim,
-        )
-        val buttonW = 78
         var x = MARGIN
         val y = height - FOOTER_H + 6
-        bulk.forEach { (key, action) ->
-            addRenderableWidget(
-                Button.builder(Component.translatable(key)) { action() }.bounds(x, y, buttonW, 20).build()
+        SELECTION_ACTIONS.forEach { action ->
+            val label = Component.translatable(action.key)
+            val button = addRenderableWidget(IconButton(x, y, 20, label, action.sprite) { run(action) })
+            button.setTooltip(
+                Tooltip.create(
+                    Component.empty().append(label)
+                        .append(Component.literal(" (${action.shortcut})").withStyle(ChatFormatting.GRAY))
+                )
             )
-            x += buttonW + 4
+            x += 24
         }
+        addRenderableWidget(
+            Button.builder(Component.translatable("chunkeditor.map.trim")) { openTrim() }.bounds(x, y, 78, 20).build()
+        )
         deleteButton = addRenderableWidget(
             Button.builder(Component.translatable("chunkeditor.map.delete_selected")) { confirmDelete() }
                 .bounds(width - MARGIN - 190, y, 110, 20).build()
@@ -558,14 +596,43 @@ internal class ChunkMapScreen(
         x = coordGroup(graphics, "chunkeditor.map.chunk", blockPosX?.shr(4), blockPosZ?.shr(4), CHUNK_EXTREME, x, textY)
         x = coordGroup(graphics, "chunkeditor.map.block", blockPosX, blockPosZ, BLOCK_EXTREME, x, textY)
 
+        val barRight = width - MARGIN - 6
+        sliderY = (top + bottom) / 2
+        sliderX2 = barRight
+        sliderX1 = max(x + 8, barRight - SLIDER_MAX_W)
+        if (sliderX2 - sliderX1 < SLIDER_MIN_W) {
+            sliderX1 = 0
+            sliderX2 = 0
+        } else drawZoomSlider(graphics, mouseX, mouseY)
+
         val progress = scanProgress
         val hint = when {
             progress != null -> I18n.get("chunkeditor.map.scanning", progress.first, progress.second)
             tintsLoading -> I18n.get("chunkeditor.map.biomes")
             else -> I18n.get("chunkeditor.map.hint")
         }
-        val hintX = width - MARGIN - 6 - font.width(hint)
+        val hintRight = if (sliderX2 > sliderX1) sliderX1 - 8 else barRight
+        val hintX = hintRight - font.width(hint)
         if (hintX > x) graphics.text(font, hint, hintX, textY, SUBTEXT_COLOR)
+    }
+
+    private fun drawZoomSlider(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+        val trackY = sliderY - SLIDER_TRACK_H / 2
+        graphics.fill(sliderX1, trackY, sliderX2, trackY + SLIDER_TRACK_H, TRACK_COLOR)
+        val knobX = sliderX1 + (zoomFraction(scale) * (sliderX2 - sliderX1 - SLIDER_KNOB_W)).roundToInt()
+        val knobY = sliderY - SLIDER_KNOB_H / 2
+        val hovered = sliderDragging || inSlider(mouseX.toDouble(), mouseY.toDouble())
+        graphics.fill(knobX, knobY, knobX + SLIDER_KNOB_W, knobY + SLIDER_KNOB_H, if (hovered) KNOB_HOVER_COLOR else KNOB_COLOR)
+    }
+
+    private fun inSlider(x: Double, y: Double) = sliderX2 > sliderX1 &&
+            x >= sliderX1 - 2 && x <= sliderX2 + 2 && abs(y - sliderY) <= SLIDER_KNOB_H / 2.0 + 2
+
+    /** Zoom around the map's centre, which [screenX] keeps put on its own. */
+    private fun zoomFromSlider(x: Double) {
+        val span = (sliderX2 - sliderX1 - SLIDER_KNOB_W).coerceAtLeast(1)
+        val t = ((x - sliderX1 - SLIDER_KNOB_W / 2.0) / span).coerceIn(0.0, 1.0)
+        scale = snapScale(MIN_SCALE * (MAX_SCALE / MIN_SCALE).pow(t))
     }
 
     /**
@@ -578,8 +645,18 @@ internal class ChunkMapScreen(
         graphics.text(font, label, x, y, SUBTEXT_COLOR)
         val valueX = x + font.width(label) + 4
         graphics.text(font, "${vx ?: "–"},${vz ?: "–"}", valueX, y, -1)
-        return valueX + font.width("$extreme,$extreme") + 14
+        return valueX + font.width(reserved(vx, vz, extreme)) + 14
     }
+
+    /** The widest value of the first [COORD_TIERS] step both coordinates fit in */
+    private fun reserved(vx: Int?, vz: Int?, extreme: String): String {
+        val tier = COORD_TIERS.firstOrNull { (lo, hi) -> fits(vx, lo, hi) && fits(vz, lo, hi) }
+            ?: return "$extreme,$extreme"
+        val widest = listOf(tier.first.toString(), tier.second.toString()).maxByOrNull { font.width(it) }!!
+        return "$widest,$widest"
+    }
+
+    private fun fits(v: Int?, lo: Int, hi: Int) = v == null || v in lo..hi
 
     //
     // Textures
@@ -717,6 +794,12 @@ internal class ChunkMapScreen(
         val x = event.x()
         val y = event.y()
         if (dimensionPicker.mouseClicked(x, y)) return true
+        if (event.button() == 0 && inSlider(x, y)) {
+            sliderDragging = true
+            clickSound()
+            zoomFromSlider(x)
+            return true
+        }
         if (inMap(x, y)) {
             pressX = x
             pressY = y
@@ -739,6 +822,10 @@ internal class ChunkMapScreen(
     }
 
     override fun mouseDragged(event: MouseButtonEvent, dragX: Double, dragY: Double): Boolean {
+        if (sliderDragging) {
+            zoomFromSlider(event.x())
+            return true
+        }
         if (abs(event.x() - pressX) > CLICK_SLOP || abs(event.y() - pressY) > CLICK_SLOP) moved = true
         if (panning) {
             centerX -= dragX / scale
@@ -753,6 +840,10 @@ internal class ChunkMapScreen(
     }
 
     override fun mouseReleased(event: MouseButtonEvent): Boolean {
+        if (sliderDragging) {
+            sliderDragging = false
+            return true
+        }
         if (panning) {
             panning = false
             // A press that never moved is a click on one chunk, not a pan.
@@ -770,8 +861,24 @@ internal class ChunkMapScreen(
         return super.mouseReleased(event)
     }
 
-    override fun keyPressed(event: KeyEvent): Boolean =
-        dimensionPicker.keyPressed(event) || super.keyPressed(event)
+    override fun keyPressed(event: KeyEvent): Boolean {
+        if (dimensionPicker.keyPressed(event)) return true
+        if (event.hasControlDownWithQuirk()) {
+            val action = SELECTION_ACTIONS.firstOrNull { it.glfwKey == event.key() }
+            if (action != null) {
+                run(action)
+                clickSound()
+                return true
+            }
+        }
+        return super.keyPressed(event)
+    }
+
+    private fun run(action: SelectionAction) = when (action.glfwKey) {
+        GLFW.GLFW_KEY_A -> selectAll()
+        GLFW.GLFW_KEY_I -> invertSelection()
+        else -> clearSelection()
+    }
 
     override fun mouseScrolled(mouseX: Double, mouseY: Double, scrollX: Double, scrollY: Double): Boolean {
         if (!inMap(mouseX, mouseY)) return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY)
@@ -819,12 +926,34 @@ internal class ChunkMapScreen(
          * A zoom step, snapped so a chunk is always a **whole** number of pixels wide.
          */
         fun zoom(scale: Double, scrollY: Double): Double {
-            val current = (scale * 16).roundToInt()
+            val pxPerChunk = scale * 16
+            // Below a pixel a chunk the integer ladder has no room left
+            if (pxPerChunk < 1.0 || (pxPerChunk <= 1.0 && scrollY < 0)) {
+                val next = if (scrollY > 0) pxPerChunk * 2 else pxPerChunk / 2
+                return (next / 16.0).coerceIn(MIN_SCALE, 1.0 / 16.0)
+            }
+            val current = pxPerChunk.roundToInt()
             var next = (current * 2.0.pow(scrollY * 0.5)).roundToInt()
             if (scrollY > 0 && next <= current) next = current + 1
             if (scrollY < 0 && next >= current) next = current - 1
-            return next.coerceIn((MIN_SCALE * 16).roundToInt(), (MAX_SCALE * 16).roundToInt()) / 16.0
+            if (next < 1) return 1.0 / 32.0
+            return (next / 16.0).coerceAtMost(MAX_SCALE)
         }
+
+        /** Onto the zoom ladder: whole pixels per chunk, halves below one. */
+        fun snapScale(raw: Double): Double {
+            val px = raw * 16
+            val snapped = when {
+                px < 0.3536 -> 0.25
+                px < 0.7071 -> 0.5
+                px < 1.0 -> 1.0
+                else -> px.roundToInt().toDouble()
+            }
+            return (snapped / 16.0).coerceIn(MIN_SCALE, MAX_SCALE)
+        }
+
+        fun zoomFraction(scale: Double): Double =
+            ln(scale / MIN_SCALE) / ln(MAX_SCALE / MIN_SCALE)
 
         fun abgr(argb: Int): Int =
             (argb and -0x1000000) or (argb and 0xFF shl 16) or (argb and 0xFF00) or (argb ushr 16 and 0xFF)

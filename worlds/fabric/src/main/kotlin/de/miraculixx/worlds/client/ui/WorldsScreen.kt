@@ -313,7 +313,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     private val updateButtonWidth: Int get() = ORB_SIZE + 8 + font.width(UPDATE_LABEL) + 6
 
     private fun syncUpdateTooltip() {
-        val latest = ModUpdate.latestVersion ?: return
+        val latest = ModUpdate.latestDisplay ?: return
         updateButton.setTooltip(
             Tooltip.create(
                 Component.translatable(
