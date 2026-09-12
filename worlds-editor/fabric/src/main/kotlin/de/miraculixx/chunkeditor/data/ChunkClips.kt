@@ -32,7 +32,13 @@ data class ClipManifest(
 )
 
 /** One folder in the clip library, with whatever could be learned about it. */
-class ClipInfo(val dir: Path, val manifest: ClipManifest?, val chunks: List<ChunkPos>, val bytes: Long) {
+class ClipInfo(
+    val dir: Path,
+    val manifest: ClipManifest?,
+    val chunks: List<ChunkPos>,
+    val bytes: Long,
+    val modified: Long,
+) {
     val name: String get() = dir.name
     val dimension: String get() = manifest?.dimension?.ifBlank { null } ?: "?"
     val mcVersion: String get() = manifest?.mcVersion?.ifBlank { null } ?: "?"
@@ -59,8 +65,9 @@ object ChunkClips {
         val dir = libraryDir()
         if (!Files.isDirectory(dir)) return emptyList()
         return Files.newDirectoryStream(dir).use { stream ->
-            stream.filter { Files.isDirectory(it) }.mapNotNull { read(it) }
-        }.sortedByDescending { it.manifest?.created ?: 0L }
+            // _selections is the CSV folder
+            stream.filter { Files.isDirectory(it) && it.name != SelectionCsv.FOLDER }.mapNotNull { read(it) }
+        }.sortedByDescending { it.modified }
     }
 
     /** Null when the folder holds no `region/` at all, e.g. it is not a clip. */
@@ -74,7 +81,8 @@ object ChunkClips {
         val chunks = manifest?.chunks?.mapNotNull { if (it.size == 2) ChunkPos(it[0], it[1]) else null }
             ?.takeIf { it.isNotEmpty() }
             ?: buildList { indices.forEach { ChunkRegions.forEachChunk(it) { pos -> add(pos) } } }
-        return ClipInfo(dir, manifest, chunks, indices.sumOf { it.bytes })
+        val modified = runCatching { Files.getLastModifiedTime(dir).toMillis() }.getOrDefault(0L)
+        return ClipInfo(dir, manifest, chunks, indices.sumOf { it.bytes }, modified)
     }
 
     fun write(dir: Path, manifest: ClipManifest) {
@@ -98,7 +106,7 @@ object ChunkClips {
 
     fun sanitize(name: String): String = name.trim()
         .map { if (it.isLetterOrDigit() || it in "-_. ") it else '_' }
-        .joinToString("").replace(' ', '_').ifBlank { "clip" }
+        .joinToString("").replace(' ', '_').trimStart('_').ifBlank { "clip" }
 
     fun storage(dir: Path, sub: String, dimension: ResourceKey<Level>, create: Boolean): RegionFileStorage? =
         ChunkRegions.storage(dir.resolve(sub), dir.name, dimension, sub, create)

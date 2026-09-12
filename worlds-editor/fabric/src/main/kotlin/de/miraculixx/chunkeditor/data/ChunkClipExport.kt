@@ -50,7 +50,7 @@ object ChunkClipExport {
                 }
             }
             if (written.isEmpty()) {
-                ChunkClips.delete(ClipInfo(dir, null, emptyList(), 0))
+                ChunkClips.delete(ClipInfo(dir, null, emptyList(), 0, 0))
                 return ExportResult.Failure("chunkeditor.clip.error.empty")
             }
             ChunkClips.write(

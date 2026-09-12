@@ -12,6 +12,8 @@ import de.miraculixx.chunkeditor.data.ClipImportOptions
 import de.miraculixx.chunkeditor.data.ExistingChunks
 import de.miraculixx.chunkeditor.data.ClipInfo
 import de.miraculixx.chunkeditor.data.ExportResult
+import de.miraculixx.chunkeditor.data.SelectionCsv
+import de.miraculixx.chunkeditor.data.SelectionFile
 import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.REGION_SIZE
 import de.miraculixx.chunkeditor.data.RegionIndex
@@ -48,6 +50,7 @@ import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.storage.LevelStorageSource
 import org.lwjgl.glfw.GLFW
 import kotlin.io.path.name
+import kotlin.io.path.nameWithoutExtension
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.ln
@@ -276,36 +279,84 @@ internal class ChunkMapScreen(
     private fun openExport() {
         val dim = dimension ?: return
         if (selected.isEmpty() || clipBusy) return
-        minecraft.gui.setScreen(ClipNameScreen(this, "${dim.label.lowercase()}-${selected.size}") { name ->
+        minecraft.gui.setScreen(ClipNameScreen(this, "${dim.label.lowercase()}-${selected.size}") { name, kinds ->
             minecraft.gui.setScreen(this)
-            runExport(dim, name)
+            runExports(dim, name, kinds)
         })
     }
 
-    private fun runExport(dim: WorldDimension, name: String) {
+    /** Both kinds can be on, so this is one pass that reports whatever it wrote */
+    private fun runExports(dim: WorldDimension, name: String, kinds: Set<ExportKind>) {
+        if (kinds.isEmpty()) return
         val chunks = selected.toLongArray().map { ChunkPos.unpack(it) }
         clipBusy = true
         clipMessage = I18n.get("chunkeditor.clip.exporting", 0, chunks.size)
         Constants.SCOPE.launch {
-            val result = ChunkClipExport.export(dim, chunks, name) { done, total ->
-                clipMessage = I18n.get("chunkeditor.clip.exporting", done, total)
-            }
-            minecraft.execute {
-                clipBusy = false
-                clipMessage = when (result) {
+            val messages = ArrayList<String>(2)
+            if (ExportKind.CLIP in kinds) {
+                val result = ChunkClipExport.export(dim, chunks, name) { done, total ->
+                    clipMessage = I18n.get("chunkeditor.clip.exporting", done, total)
+                }
+                messages += when (result) {
                     is ExportResult.Success -> I18n.get("chunkeditor.clip.exported", result.chunks, result.dir.name)
                     is ExportResult.Failure -> I18n.get(result.message)
                 }
+            }
+            if (ExportKind.SELECTION in kinds) {
+                val file = runCatching { SelectionCsv.write(name, chunks) }
+                    .onFailure { Constants.LOG.error("Selection export failed", it) }
+                    .getOrNull()
+                messages += if (file == null) I18n.get("chunkeditor.clip.error.write")
+                else I18n.get("chunkeditor.clip.selection_exported", chunks.size, file.nameWithoutExtension)
+            }
+            minecraft.execute {
+                clipBusy = false
+                clipMessage = messages.joinToString(" · ")
             }
         }
     }
 
     private fun openLibrary() {
         if (clipBusy) return
-        minecraft.gui.setScreen(ClipLibraryScreen(this) { clip ->
-            startPaste(clip)
-            minecraft.gui.setScreen(this)
-        })
+        minecraft.gui.setScreen(
+            ClipLibraryScreen(
+                this,
+                { clip ->
+                    startPaste(clip)
+                    minecraft.gui.setScreen(this)
+                },
+                { selection ->
+                    minecraft.gui.setScreen(this)
+                    applySelection(selection)
+                },
+            )
+        )
+    }
+
+    /**
+     * A CSV contains chunk names (unvailables are dropped)
+     */
+    private fun applySelection(file: SelectionFile) {
+        clipBusy = true
+        Constants.SCOPE.launch {
+            val parsed = SelectionCsv.read(file.path)
+            minecraft.execute {
+                clipBusy = false
+                if (parsed == null) {
+                    clipMessage = I18n.get("chunkeditor.clip.error.read")
+                    return@execute
+                }
+                selected.clear()
+                indices.values.forEach { region ->
+                    ChunkRegions.forEachChunk(region) { pos ->
+                        val listed = parsed.chunks.contains(pos.pack())
+                        if (listed != parsed.inverted) selected.add(pos.pack())
+                    }
+                }
+                clipMessage = I18n.get("chunkeditor.clip.selection_applied", selected.size, file.name)
+                onSelectionChanged()
+            }
+        }
     }
 
     /** Arms paste mode: the clip's footprint now follows the cursor until a click or Escape. */

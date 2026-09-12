@@ -3,6 +3,8 @@ package de.miraculixx.chunkeditor.client.ui
 import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.ChunkClips
 import de.miraculixx.chunkeditor.data.ClipInfo
+import de.miraculixx.chunkeditor.data.SelectionCsv
+import de.miraculixx.chunkeditor.data.SelectionFile
 import de.miraculixx.common.client.ui.HOVER_COLOR
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
 import de.miraculixx.common.client.ui.drawBox
@@ -10,9 +12,15 @@ import kotlinx.coroutines.launch
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
+import net.minecraft.client.gui.components.Checkbox
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.components.ObjectSelectionList
+import net.minecraft.client.gui.components.tabs.GridLayoutTab
+import net.minecraft.client.gui.components.tabs.MenuTabBar
+import net.minecraft.client.gui.components.tabs.TabManager
+import net.minecraft.client.gui.components.tabs.Tab as GuiTab
 import net.minecraft.client.gui.screens.ConfirmScreen
+import net.minecraft.client.gui.screens.worldselection.WorldSelectionList
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
@@ -21,50 +29,84 @@ import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 import net.minecraft.util.Util
 import java.nio.file.Files
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.util.function.Consumer
 
 private const val MARGIN = 16
-private const val LIST_TOP = 40
+private const val LIST_TOP = 32
 private const val ROW_H = 26
 private const val SELECTED_COLOR = 0x5033B5E5
 
-/** Asks for the clip's folder name before an export runs. */
+/** What an export writes: the chunks themselves, the list of which ones are selected, or both */
+enum class ExportKind { CLIP, SELECTION }
+
+/** Asks for the name before anything is exported */
 internal class ClipNameScreen(
     private val parent: Screen,
     private val suggestion: String,
-    private val onAccept: (String) -> Unit,
+    private val onAccept: (String, Set<ExportKind>) -> Unit,
 ) : Screen(Component.translatable("chunkeditor.clip.export_title")) {
 
     private val panelW = 260
     private var panelTop = 0
     private var panelBottom = 0
     private lateinit var field: EditBox
+    private lateinit var clipToggle: Checkbox
+    private lateinit var selectionToggle: Checkbox
+    private lateinit var acceptButton: Button
 
     override fun init() {
         val left = width / 2 - panelW / 2 + 10
-        val top = height / 2 - 30
+        val fieldW = panelW - 20
+        val top = height / 2 - 54
         panelTop = top - 26
-        panelBottom = top + 60
+        panelBottom = top + 106
 
-        field = addRenderableWidget(EditBox(font, left, top, panelW - 20, 20, title))
+        field = addRenderableWidget(EditBox(font, left, top, fieldW, 20, title))
         field.value = suggestion
         field.setMaxLength(64)
         setInitialFocus(field)
 
-        addRenderableWidget(guideButton(width / 2 + panelW / 2 - 8 - GUIDE_SIZE, panelTop + 6, "export", "Tip: Exports land in '<instance>/worldclips/<name>'"))
+        clipToggle = addRenderableWidget(toggle(left, top + 26, "chunkeditor.clip.export_clip", true))
+        selectionToggle = addRenderableWidget(toggle(left, top + 50, "chunkeditor.clip.export_selection", false))
+
         addRenderableWidget(
+            guideButton(
+                width / 2 + panelW / 2 - 8 - GUIDE_SIZE, panelTop + 6, "export",
+                "Tip: Exports land in '<instance>/chunkclips/<name>'",
+            )
+        )
+        acceptButton = addRenderableWidget(
             Button.builder(Component.translatable("chunkeditor.clip.export")) { accept() }
-                .bounds(left, top + 30, panelW / 2 - 12, 20).build()
+                .bounds(left, top + 80, panelW / 2 - 12, 20).build()
         )
         addRenderableWidget(
             Button.builder(CommonComponents.GUI_CANCEL) { onClose() }
-                .bounds(width / 2 + 2, top + 30, panelW / 2 - 12, 20).build()
+                .bounds(width / 2 + 2, top + 80, panelW / 2 - 12, 20).build()
         )
+        syncAccept()
+    }
+
+    private fun toggle(x: Int, y: Int, key: String, initial: Boolean): Checkbox =
+        Checkbox.builder(Component.translatable(key), font)
+            .pos(x, y).selected(initial).onValueChange { _, _ -> syncAccept() }.build()
+
+    private fun kinds(): Set<ExportKind> = buildSet {
+        if (clipToggle.selected()) add(ExportKind.CLIP)
+        if (selectionToggle.selected()) add(ExportKind.SELECTION)
+    }
+
+    private fun syncAccept() {
+        acceptButton.active = kinds().isNotEmpty()
     }
 
     private fun accept() {
         val name = field.value.trim()
-        if (name.isEmpty()) return
-        onAccept(ChunkClips.sanitize(name))
+        val kinds = kinds()
+        if (name.isEmpty() || kinds.isEmpty()) return
+        onAccept(ChunkClips.sanitize(name), kinds)
     }
 
     override fun keyPressed(event: KeyEvent): Boolean {
@@ -89,26 +131,48 @@ internal class ClipNameScreen(
 }
 
 /**
- * The clips in `<gamedir>/chunkclips`
+ * Everything the library holds (clips in `<gamedir>/chunkclips`, selections in `.../_selections`)
  */
 internal class ClipLibraryScreen(
     private val parent: Screen,
-    private val onPick: (ClipInfo) -> Unit,
+    private val onPickClip: (ClipInfo) -> Unit,
+    private val onPickSelection: (SelectionFile) -> Unit,
 ) : Screen(Component.translatable("chunkeditor.clip.library_title")) {
 
+    private enum class Tab(val key: String) {
+        CLIPS("chunkeditor.clip.tab.clips"),
+        SELECTIONS("chunkeditor.clip.tab.selections"),
+    }
+
+    private var tab = Tab.CLIPS
+    private val tabPages = Tab.entries.map { GridLayoutTab(Component.translatable(it.key)) }
+    private val tabManager = TabManager(
+        { addRenderableWidget(it) },
+        { removeWidget(it) },
+        tabConsumer { page -> if (page != null) onTabSelected(page) },
+        tabConsumer { },
+    )
+    private lateinit var tabBar: MenuTabBar
+
     private var clips: List<ClipInfo> = emptyList()
+    private var selections: List<SelectionFile> = emptyList()
     private var loading = true
-    // init re-runs on every resize; the library is only read when something actually changed.
     private var needsLoad = true
 
-    private lateinit var list: ClipList
+    private lateinit var list: LibraryList
     private lateinit var importButton: Button
     private lateinit var deleteButton: Button
 
     override fun init() {
-        list = addRenderableWidget(ClipList(minecraft, width - 2 * MARGIN, listBottom() - LIST_TOP, LIST_TOP))
+        tabBar = addRenderableWidget(
+            MenuTabBar.builder(tabManager, width).addTabs(*tabPages.toTypedArray()).build()
+        )
+        tabBar.arrangeElements(width)
+        tabBar.selectTab(tab.ordinal, false)
+
+        list = addRenderableWidget(LibraryList(minecraft, width - 2 * MARGIN, listBottom() - LIST_TOP, LIST_TOP))
         list.updateSizeAndPosition(width - 2 * MARGIN, listBottom() - LIST_TOP, MARGIN, LIST_TOP)
-        list.setClips(clips)
+        list.fill()
 
         if (needsLoad) {
             needsLoad = false
@@ -134,15 +198,31 @@ internal class ClipLibraryScreen(
         syncButtons()
     }
 
+    /** `oldTab` is null on the first selection */
+    private fun tabConsumer(action: (GuiTab?) -> Unit): Consumer<GuiTab> =
+        @Suppress("UNCHECKED_CAST") (Consumer<GuiTab?> { action(it) } as Consumer<GuiTab>)
+
+    private fun onTabSelected(page: GuiTab) {
+        if (!::list.isInitialized) return
+        tab = Tab.entries[tabPages.indexOf(page).coerceAtLeast(0)]
+        list.fill()
+        syncButtons()
+    }
+
+    override fun keyPressed(event: KeyEvent): Boolean =
+        tabBar.keyPressed(event) || super.keyPressed(event)
+
     private fun listBottom() = height - 40
 
     private fun load() {
         Constants.SCOPE.launch {
-            val found = ChunkClips.list()
+            val foundClips = ChunkClips.list()
+            val foundSelections = SelectionCsv.list()
             minecraft.execute {
-                clips = found
+                clips = foundClips
+                selections = foundSelections
                 loading = false
-                list.setClips(found)
+                list.fill()
                 syncButtons()
             }
         }
@@ -152,58 +232,78 @@ internal class ClipLibraryScreen(
         val selected = list.selected != null
         importButton.active = selected
         deleteButton.active = selected
+        importButton.message = Component.translatable(
+            if (tab == Tab.CLIPS) "chunkeditor.clip.import" else "chunkeditor.clip.select"
+        )
     }
 
     private fun pick() {
-        onPick(list.selected?.clip ?: return)
+        when (val row = list.selected) {
+            is LibraryList.ClipRow -> onPickClip(row.clip)
+            is LibraryList.SelectionRow -> onPickSelection(row.selection)
+            else -> {}
+        }
     }
 
     private fun confirmDelete() {
-        val clip = list.selected?.clip ?: return
+        val row = list.selected ?: return
         minecraft.gui.setScreen(
             ConfirmScreen(
                 { confirmed ->
                     if (confirmed) {
-                        ChunkClips.delete(clip)
+                        when (row) {
+                            is LibraryList.ClipRow -> ChunkClips.delete(row.clip)
+                            is LibraryList.SelectionRow -> SelectionCsv.delete(row.selection)
+                        }
                         loading = true
                         needsLoad = true
                     }
                     minecraft.gui.setScreen(this)
                 },
-                Component.translatable("chunkeditor.clip.delete_title", clip.name),
-                Component.translatable("chunkeditor.clip.delete_warning"),
+                Component.translatable("chunkeditor.clip.delete_title", row.title),
+                Component.translatable(
+                    if (row is LibraryList.ClipRow) "chunkeditor.clip.delete_warning"
+                    else "chunkeditor.clip.delete_selection_warning"
+                ),
             )
         )
     }
 
     private fun openFolder() {
-        val dir = ChunkClips.libraryDir()
+        val dir = if (tab == Tab.CLIPS) ChunkClips.libraryDir() else SelectionCsv.dir()
         runCatching { Files.createDirectories(dir) }
         Util.getPlatform().openPath(dir)
     }
 
     override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick)
-        graphics.text(font, title, MARGIN, 16, -1)
-        if (loading || clips.isEmpty()) {
-            val key = if (loading) "chunkeditor.map.reading" else "chunkeditor.clip.empty"
+        val empty = if (tab == Tab.CLIPS) clips.isEmpty() else selections.isEmpty()
+        if (loading || empty) {
+            val key = when {
+                loading -> "chunkeditor.map.reading"
+                tab == Tab.CLIPS -> "chunkeditor.clip.empty"
+                else -> "chunkeditor.clip.empty_selections"
+            }
             graphics.text(font, I18n.get(key), MARGIN + 8, LIST_TOP + 10, SUBTEXT_COLOR)
         }
     }
 
     override fun onClose() = minecraft.gui.setScreen(parent)
 
-    /** Rows carry no widgets, so the plain selection list is enough. */
-    inner class ClipList(minecraft: Minecraft, width: Int, height: Int, y: Int) :
-        ObjectSelectionList<ClipList.ClipRow>(minecraft, width, height, y, ROW_H) {
+    /** Rows carry no widgets, so the plain selection list is enough */
+    inner class LibraryList(minecraft: Minecraft, width: Int, height: Int, y: Int) :
+        ObjectSelectionList<LibraryList.Row>(minecraft, width, height, y, ROW_H) {
 
-        fun setClips(clips: List<ClipInfo>) {
-            val previous = selected?.clip?.dir
-            replaceEntries(clips.map { ClipRow(it) })
-            setSelected(children().firstOrNull { it.clip.dir == previous })
+        /** Rebuilds from whichever tab is open, keeping the selection when the same row is still there */
+        fun fill() {
+            val previous = selected?.title
+            val rows: List<Row> =
+                if (tab == Tab.CLIPS) clips.map { ClipRow(it) } else selections.map { SelectionRow(it) }
+            replaceEntries(rows)
+            setSelected(children().firstOrNull { it.title == previous })
         }
 
-        override fun setSelected(entry: ClipRow?) {
+        override fun setSelected(entry: Row?) {
             super.setSelected(entry)
             if (::importButton.isInitialized) syncButtons()
         }
@@ -217,11 +317,14 @@ internal class ClipLibraryScreen(
 
         override fun extractListSeparators(graphics: GuiGraphicsExtractor) = Unit
 
-        inner class ClipRow(val clip: ClipInfo) : Entry<ClipRow>() {
-            override fun getNarration(): Component = Component.literal(clip.name)
+        abstract inner class Row : Entry<Row>() {
+            abstract val title: String
+            abstract val subtitle: String
+
+            override fun getNarration(): Component = Component.literal(title)
 
             override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
-                this@ClipList.setSelected(this)
+                this@LibraryList.setSelected(this)
                 if (doubleClick) pick()
                 return true
             }
@@ -239,20 +342,43 @@ internal class ClipLibraryScreen(
                 hovered: Boolean,
                 partialTick: Float,
             ) {
-                if (this@ClipList.selected === this) {
+                if (this@LibraryList.selected === this) {
                     graphics.fill(contentX - 2, contentY - 2, contentRight + 2, contentBottom + 2, SELECTED_COLOR)
                 } else if (hovered) {
                     graphics.fill(contentX - 2, contentY - 2, contentRight + 2, contentBottom + 2, HOVER_COLOR)
                 }
-                graphics.text(minecraft.font, clip.name, contentX + 2, contentY + 2, -1)
-                graphics.text(minecraft.font, subtitle(clip), contentX + 2, contentY + 13, SUBTEXT_COLOR)
+                graphics.text(minecraft.font, title, contentX + 2, contentY + 2, -1)
+                graphics.text(minecraft.font, subtitle, contentX + 2, contentY + 13, SUBTEXT_COLOR)
             }
+        }
+
+        inner class ClipRow(val clip: ClipInfo) : Row() {
+            override val title: String get() = clip.name
+            override val subtitle: String
+                get() = I18n.get(
+                    "chunkeditor.clip.info", clip.chunks.size, clip.dimension, clip.mcVersion,
+                    bytes(clip.bytes), date(clip.modified),
+                )
+        }
+
+        inner class SelectionRow(val selection: SelectionFile) : Row() {
+            override val title: String get() = selection.name
+            override val subtitle: String
+                get() = I18n.get(
+                    if (selection.inverted) "chunkeditor.clip.selection_info_inverted"
+                    else "chunkeditor.clip.selection_info",
+                    selection.chunks, bytes(selection.bytes), date(selection.modified),
+                )
         }
     }
 
-    private fun subtitle(clip: ClipInfo) = I18n.get(
-        "chunkeditor.clip.info", clip.chunks.size, clip.dimension, clip.mcVersion, bytes(clip.bytes),
-    )
+    /** Last write of the folder or file, the only date a clip from another tool carries */
+    private fun date(epochMillis: Long): String {
+        if (epochMillis <= 0L) return "?"
+        return WorldSelectionList.DATE_FORMAT.format(
+            ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault())
+        )
+    }
 
     private fun bytes(value: Long): String = when {
         value >= 1024L * 1024 * 1024 -> "%.1f GB".format(value / (1024.0 * 1024 * 1024))
