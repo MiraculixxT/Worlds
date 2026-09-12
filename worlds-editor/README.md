@@ -19,9 +19,11 @@ the game regenerates them on the next visit.
 ---
 
 ### Exporting
-A selection can be exported, containing all region, POI & entity data stored in vanilla format.
+A selection & world-clip can be exported, containing all region, POI & entity data stored in vanilla format.
+Selections are useful to export for later & repeated use.
 Cross-compatible with standalone MCA-Selector tool<br>
-**World Clips Storage**: `<instance>/chunkclips/<name>`
+**World Clips Storage**: `<instance>/chunkclips/`<br>
+**Selection Storage**: `<instance>/chunkclips/_selections/`
 
 ### Importing
 All exports can be important in any world & any dimension (import may get cropped at Y).
