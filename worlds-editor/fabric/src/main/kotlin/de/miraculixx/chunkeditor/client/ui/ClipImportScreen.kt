@@ -1,36 +1,22 @@
 package de.miraculixx.chunkeditor.client.ui
 
-import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.ClipImportOptions
 import de.miraculixx.chunkeditor.data.ExistingChunks
 import de.miraculixx.chunkeditor.data.ClipInfo
-import de.miraculixx.common.client.ui.IconButton
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
 import de.miraculixx.common.client.ui.drawBox
-import net.minecraft.ChatFormatting
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.CycleButton
 import net.minecraft.client.gui.components.EditBox
-import net.minecraft.client.gui.components.Tooltip
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
-import net.minecraft.resources.Identifier
-import net.minecraft.util.Util
 import net.minecraft.world.level.ChunkPos
-import java.net.URI
 
 private const val PANEL_W = 320
 private const val ROW_H = 24
 private const val FIELD_W = 90
-private const val HELP_SIZE = 16
-
-private val HELP_SPRITE = Identifier.fromNamespaceAndPath(Constants.MOD_ID, "questionmark")
-
-private const val GUIDE_URL = "https://modrinth.com/mod/mca-selector#import"
-private const val GUIDE_LABEL = "Open Guide"
-private const val GUIDE_TIP = "Tip: 1 section = 16 blocks"
 private const val INVALID_COLOR = 0xFFFF5555.toInt()
 
 /**
@@ -76,18 +62,10 @@ internal class ClipImportScreen(
         )
         y += ROW_H + 8
 
-        val help = addRenderableWidget(
-            IconButton(
-                width / 2 + PANEL_W / 2 - 8 - HELP_SIZE, panelTop + 6, HELP_SIZE,
-                Component.literal(GUIDE_LABEL), HELP_SPRITE,
-            ) { Util.getPlatform().openUri(URI(GUIDE_URL)) }
-        )
-        help.drawBackground = false
-        help.setTooltip(
-            Tooltip.create(
-                Component.literal(GUIDE_LABEL)
-                    .append("\n")
-                    .append(Component.literal(GUIDE_TIP).withStyle(ChatFormatting.GRAY))
+        addRenderableWidget(
+            guideButton(
+                width / 2 + PANEL_W / 2 - 10 - GUIDE_SIZE, panelTop + 6,
+                "import", "Tip: 1 section = 16 blocks",
             )
         )
 

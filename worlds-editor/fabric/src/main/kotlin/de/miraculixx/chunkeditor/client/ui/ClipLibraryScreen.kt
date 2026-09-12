@@ -50,6 +50,7 @@ internal class ClipNameScreen(
         field.setMaxLength(64)
         setInitialFocus(field)
 
+        addRenderableWidget(guideButton(width / 2 + panelW / 2 - 8 - GUIDE_SIZE, panelTop + 6, "export", "Tip: Exports land in '<instance>/worldclips/<name>'"))
         addRenderableWidget(
             Button.builder(Component.translatable("chunkeditor.clip.export")) { accept() }
                 .bounds(left, top + 30, panelW / 2 - 12, 20).build()
