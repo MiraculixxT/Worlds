@@ -39,7 +39,7 @@
   "chunkeditor.clip.imported": "%s Chunks importiert (%s übersprungen)",
   "chunkeditor.clip.paste_hint": "„%s“ platzieren – klicken zum Einfügen, Esc zum abbrechen",
   "chunkeditor.clip.paste_title": "„%s“ einfügen",
-  "chunkeditor.clip.paste_warning": "%s vorhandene Chunks werden überschrieben. Befehlsblöcke und Karten behalten ihre alten Koordinaten",
+  "chunkeditor.clip.paste_warning": "%s vorhandene Chunks werden überschrieben. Alles was zu spezifischen Koordinaten gebunden ist wird desyncen",
   "chunkeditor.clip.delete_title": "Clip „%s“ löschen",
   "chunkeditor.clip.delete_warning": "Der Clip-Ordner wird permanent gelöscht. Die Welt, aus der er stammt, bleibt unberührt",
   "chunkeditor.clip.error.empty": "Nichts zu exportieren",
@@ -48,5 +48,14 @@
   "chunkeditor.confirm.backup": "Backup & %s",
   "chunkeditor.confirm.no_undo": "%s – %s",
   "chunkeditor.confirm.no_undo_tag": "KEIN ZURÜCK",
+  "chunkeditor.clip.options_title": "Import-Optionen",
+  "chunkeditor.clip.options_subtitle": "„%s“ bei Chunk %s, %s",
+  "chunkeditor.clip.y_offset": "Y-Verschiebung (Sektionen)",
+  "chunkeditor.clip.sections": "Sektionen (leer = alle, z. B. 0:5,10)",
+  "chunkeditor.clip.merge_warning": "%s vorhandene Chunks werden kombiniert. Alles was zu spezifischen Koordinaten gebunden ist wird desyncen",
+  "chunkeditor.clip.existing": "Vorhandene Chunks",
+  "chunkeditor.clip.existing.skip": "Behalten",
+  "chunkeditor.clip.existing.replace": "Ersetzen",
+  "chunkeditor.clip.existing.merge": "Kombinieren",
   "chunkeditor.open": "Chunk-Editor"
 }

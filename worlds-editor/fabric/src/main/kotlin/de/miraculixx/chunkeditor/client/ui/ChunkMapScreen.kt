@@ -8,6 +8,8 @@ import de.miraculixx.chunkeditor.data.ChunkMapRenderer
 import de.miraculixx.chunkeditor.data.ChunkClipExport
 import de.miraculixx.chunkeditor.data.ChunkClipImport
 import de.miraculixx.chunkeditor.data.ChunkRegions
+import de.miraculixx.chunkeditor.data.ClipImportOptions
+import de.miraculixx.chunkeditor.data.ExistingChunks
 import de.miraculixx.chunkeditor.data.ClipInfo
 import de.miraculixx.chunkeditor.data.ExportResult
 import de.miraculixx.chunkeditor.data.ImportResult
@@ -327,10 +329,18 @@ internal class ChunkMapScreen(
     /** Where the clip's own origin would land, given the cursor. */
     private fun pasteOrigin(mouseX: Double, mouseY: Double): ChunkPos = chunkAt(mouseX, mouseY)
 
+    /** Placement done; the options screen decides *how* the clip lands before anything is written. */
     private fun confirmPaste(origin: ChunkPos) {
         val clip = pasteClip ?: return
-        val dim = dimension ?: return
         cancelPaste()
+        minecraft.gui.setScreen(ClipImportScreen(this, clip, origin) { options ->
+            minecraft.gui.setScreen(this)
+            checkConflicts(clip, origin, options)
+        })
+    }
+
+    private fun checkConflicts(clip: ClipInfo, origin: ChunkPos, options: ClipImportOptions) {
+        val dim = dimension ?: return
         clipBusy = true
         clipMessage = I18n.get("chunkeditor.clip.checking")
         Constants.SCOPE.launch {
@@ -338,19 +348,23 @@ internal class ChunkMapScreen(
             minecraft.execute {
                 clipBusy = false
                 clipMessage = null
-                if (conflicts == 0) {
-                    runPaste(clip, dim, origin, true)
+                // Only prompt when data is lost/overriden
+                if (conflicts == 0 || options.existing == ExistingChunks.SKIP) {
+                    runPaste(clip, dim, origin, options)
                     return@execute
                 }
+                val warning = if (options.existing == ExistingChunks.MERGE) {
+                    "chunkeditor.clip.merge_warning"
+                } else "chunkeditor.clip.paste_warning"
                 minecraft.gui.setScreen(
                     BackupActionScreen(
                         { minecraft.gui.setScreen(this@ChunkMapScreen) },
                         { backup, _ ->
                             EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access)
-                                .thenAcceptAsync({ runPaste(clip, dim, origin, true) }, minecraft)
+                                .thenAcceptAsync({ runPaste(clip, dim, origin, options) }, minecraft)
                         },
                         Component.translatable("chunkeditor.clip.paste_title", clip.name),
-                        Component.translatable("chunkeditor.clip.paste_warning", conflicts),
+                        Component.translatable(warning, conflicts),
                         backupLabel(PASTE_ACTION),
                         noUndoLabel(PASTE_ACTION),
                     )
@@ -359,13 +373,13 @@ internal class ChunkMapScreen(
         }
     }
 
-    private fun runPaste(clip: ClipInfo, dim: WorldDimension, origin: ChunkPos, overwrite: Boolean) {
+    private fun runPaste(clip: ClipInfo, dim: WorldDimension, origin: ChunkPos, options: ClipImportOptions) {
         val generation = loadGen
         minecraft.gui.setScreen(this)
         clipBusy = true
         clipMessage = I18n.get("chunkeditor.clip.importing", 0, clip.chunks.size)
         Constants.SCOPE.launch {
-            val result = ChunkClipImport.import(clip, dim, origin, overwrite) { done, total ->
+            val result = ChunkClipImport.import(clip, dim, origin, options) { done, total ->
                 clipMessage = I18n.get("chunkeditor.clip.importing", done, total)
             }
             val touched = clip.chunks

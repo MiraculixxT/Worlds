@@ -39,7 +39,7 @@
   "chunkeditor.clip.imported": "Imported %s chunks (%s skipped)",
   "chunkeditor.clip.paste_hint": "Placing '%s' - click to paste, Esc to cancel",
   "chunkeditor.clip.paste_title": "Paste '%s'",
-  "chunkeditor.clip.paste_warning": "%s existing chunks are overwritten. Everything targeting specific locations/UUIDs will break",
+  "chunkeditor.clip.paste_warning": "%s existing chunks are overwritten. Everything targeting specific locations/UUIDs will unlink",
   "chunkeditor.clip.delete_title": "Delete clip '%s'",
   "chunkeditor.clip.delete_warning": "The clip folder is permanently deleted. The world it was cut from is untouched",
   "chunkeditor.clip.error.empty": "Nothing to export",
@@ -48,5 +48,14 @@
   "chunkeditor.confirm.backup": "Backup & %s",
   "chunkeditor.confirm.no_undo": "%s - %s",
   "chunkeditor.confirm.no_undo_tag": "NO UNDO",
+  "chunkeditor.clip.options_title": "Import options",
+  "chunkeditor.clip.options_subtitle": "'%s' at chunk %s, %s",
+  "chunkeditor.clip.y_offset": "Y offset (sections)",
+  "chunkeditor.clip.sections": "Sections (blank = all, e.g. 0:5,10)",
+  "chunkeditor.clip.merge_warning": "%s existing chunks are merged into. Everything targeting specific locations/UUIDs will unlink",
+  "chunkeditor.clip.existing": "Existing chunks",
+  "chunkeditor.clip.existing.skip": "Keep",
+  "chunkeditor.clip.existing.replace": "Replace",
+  "chunkeditor.clip.existing.merge": "Merge",
   "chunkeditor.open": "Chunk Editor"
 }

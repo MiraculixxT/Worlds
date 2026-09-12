@@ -3,6 +3,7 @@ package de.miraculixx.chunkeditor.data
 import net.minecraft.SharedConstants
 import net.minecraft.client.Minecraft
 import net.minecraft.nbt.CompoundTag
+import net.minecraft.nbt.DoubleTag
 import net.minecraft.nbt.IntArrayTag
 import net.minecraft.nbt.ListTag
 import net.minecraft.util.datafix.DataFixTypes
@@ -27,6 +28,77 @@ object ChunkRelocate {
         }
         // neighbors change, so we cant know what light is correct
         tag.putBoolean("isLightOn", false)
+    }
+
+    /**
+     * Keeps only the sections [ranges] names (empty = all), shifts what survives by [yOffset] sections, and drags the block-level lists along
+     * @return false if empty
+     */
+    fun selectSections(tag: CompoundTag, ranges: List<IntRange>, yOffset: Int): Boolean {
+        if (ranges.isEmpty() && yOffset == 0) return true
+        val sections = tag.list("sections")
+        if (sections != null) {
+            val kept = ListTag()
+            sections.indices.forEach { i ->
+                val section = sections.getCompoundOrEmpty(i)
+                val y = sectionY(section)
+                if (ranges.isEmpty() || ranges.any { y in it }) {
+                    section.putInt("Y", y + yOffset)
+                    kept.add(section)
+                }
+            }
+            if (kept.isEmpty) return false
+            tag.put("sections", kept)
+            tag.putInt("yPos", kept.indices.minOf { sectionY(kept.getCompoundOrEmpty(it)) })
+        }
+        listOf("block_entities", "block_ticks", "fluid_ticks").forEach { key ->
+            tag.list(key)?.let { tag.put(key, filterAndShiftY(it, ranges, yOffset)) }
+        }
+        // Both describe a column that just changed under them
+        tag.remove("Heightmaps")
+        tag.remove("PostProcessing")
+        tag.remove("structures")
+        return true
+    }
+
+    /** The same vertical pass for an `entities/` chunk: entities outside [ranges] are left behind */
+    fun selectEntities(tag: CompoundTag, ranges: List<IntRange>, yOffset: Int) {
+        if (ranges.isEmpty() && yOffset == 0) return
+        val entities = tag.list("Entities") ?: return
+        val kept = ListTag()
+        entities.indices.forEach { i ->
+            val entity = entities.getCompoundOrEmpty(i)
+            val pos = entity.list("Pos")?.takeIf { it.size == 3 } ?: return@forEach
+            val y = pos.getDoubleOr(1, 0.0)
+            if (ranges.isNotEmpty() && ranges.none { Math.floorDiv(y.toInt(), 16) in it }) return@forEach
+            if (yOffset != 0) pos.setTag(1, DoubleTag.valueOf(y + yOffset * 16.0))
+            kept.add(entity)
+        }
+        tag.put("Entities", kept)
+    }
+
+    /** The same vertical pass for a `poi/` chunk, which is already keyed by section */
+    fun selectPoi(tag: CompoundTag, ranges: List<IntRange>, yOffset: Int) {
+        if (ranges.isEmpty() && yOffset == 0) return
+        val sections = tag.compound("Sections") ?: return
+        val moved = CompoundTag()
+        sections.keySet().toList().forEach { key ->
+            val y = key.toIntOrNull() ?: return@forEach
+            if (ranges.isNotEmpty() && ranges.none { y in it }) return@forEach
+            val section = sections.getCompoundOrEmpty(key)
+            section.list("Records")?.let { records ->
+                records.indices.forEach { i ->
+                    val record = records.getCompoundOrEmpty(i)
+                    record.getIntArray("pos").orElse(null)?.let { pos ->
+                        if (pos.size == 3) {
+                            record.put("pos", IntArrayTag(intArrayOf(pos[0], pos[1] + yOffset * 16, pos[2])))
+                        }
+                    }
+                }
+            }
+            moved.put((y + yOffset).toString(), section)
+        }
+        tag.put("Sections", moved)
     }
 
     /**
@@ -87,6 +159,79 @@ object ChunkRelocate {
         return type.updateToCurrentVersion(Minecraft.getInstance().fixerUpper, tag, version)
     }
 
+    fun mergeRegion(source: CompoundTag, destination: CompoundTag): CompoundTag {
+        val incoming = sectionYs(source)
+        mergeSections(source, destination)
+        listOf("block_entities", "block_ticks", "fluid_ticks").forEach { key ->
+            mergeByY(source, destination, key, incoming)
+        }
+        // The clip's own structures are gone by now (see selectSections)
+        destination.putBoolean("isLightOn", false)
+        destination.remove("Heightmaps")
+        destination.remove("PostProcessing")
+        return destination
+    }
+
+    fun mergeEntities(source: CompoundTag, destination: CompoundTag): CompoundTag {
+        val kept = destination.list("Entities") ?: ListTag()
+        source.list("Entities")?.let { incoming -> incoming.indices.forEach { kept.add(incoming[it]) } }
+        destination.put("Entities", kept)
+        return destination
+    }
+
+    fun mergePoi(source: CompoundTag, destination: CompoundTag): CompoundTag {
+        val incoming = source.compound("Sections") ?: return destination
+        val target = destination.compound("Sections") ?: CompoundTag().also { destination.put("Sections", it) }
+        // A section the clip carries replaces the target's outright
+        incoming.keySet().toList().forEach { key -> target.put(key, incoming.getCompoundOrEmpty(key)) }
+        return destination
+    }
+
+    private fun mergeSections(source: CompoundTag, destination: CompoundTag) {
+        val incoming = source.list("sections") ?: return
+        val existing = destination.list("sections") ?: ListTag()
+        val byY = LinkedHashMap<Int, CompoundTag>()
+        existing.indices.forEach { i -> byY[sectionY(existing.getCompoundOrEmpty(i))] = existing.getCompoundOrEmpty(i) }
+        incoming.indices.forEach { i -> byY[sectionY(incoming.getCompoundOrEmpty(i))] = incoming.getCompoundOrEmpty(i) }
+        val merged = ListTag()
+        byY.keys.sorted().forEach { merged.add(byY.getValue(it)) }
+        destination.put("sections", merged)
+        destination.putInt("yPos", byY.keys.minOrNull() ?: destination.getIntOr("yPos", 0))
+    }
+
+    /** Target entries inside an imported section are replaced by the clip's, the rest stays */
+    private fun mergeByY(source: CompoundTag, destination: CompoundTag, key: String, incoming: Set<Int>) {
+        val kept = ListTag()
+        destination.list(key)?.let { existing ->
+            existing.indices.forEach { i ->
+                val entry = existing.getCompoundOrEmpty(i)
+                if (Math.floorDiv(entry.getIntOr("y", 0), 16) !in incoming) kept.add(entry)
+            }
+        }
+        source.list(key)?.let { list -> list.indices.forEach { kept.add(list[it]) } }
+        if (kept.isEmpty) destination.remove(key) else destination.put(key, kept)
+    }
+
+    private fun sectionYs(tag: CompoundTag): Set<Int> {
+        val sections = tag.list("sections") ?: return emptySet()
+        return sections.indices.map { sectionY(sections.getCompoundOrEmpty(it)) }.toSet()
+    }
+
+    private fun sectionY(section: CompoundTag): Int =
+        section.getIntOr("Y", section.getByteOr("Y", 0).toInt())
+
+    private fun filterAndShiftY(list: ListTag, ranges: List<IntRange>, yOffset: Int): ListTag {
+        val kept = ListTag()
+        list.indices.forEach { i ->
+            val entry = list.getCompoundOrEmpty(i)
+            val y = entry.getIntOr("y", 0)
+            if (ranges.isNotEmpty() && ranges.none { Math.floorDiv(y, 16) in it }) return@forEach
+            if (yOffset != 0) entry.putInt("y", y + yOffset * 16)
+            kept.add(entry)
+        }
+        return kept
+    }
+
     //
     // Pieces
     //
@@ -94,8 +239,8 @@ object ChunkRelocate {
     private fun entity(entity: CompoundTag, dx: Int, dz: Int) {
         entity.list("Pos")?.let { pos ->
             if (pos.size == 3) {
-                pos.setTag(0, net.minecraft.nbt.DoubleTag.valueOf(pos.getDoubleOr(0, 0.0) + dx * 16.0))
-                pos.setTag(2, net.minecraft.nbt.DoubleTag.valueOf(pos.getDoubleOr(2, 0.0) + dz * 16.0))
+                pos.setTag(0, DoubleTag.valueOf(pos.getDoubleOr(0, 0.0) + dx * 16.0))
+                pos.setTag(2, DoubleTag.valueOf(pos.getDoubleOr(2, 0.0) + dz * 16.0))
             }
         }
         // A paste back into the source world would otherwise hold every uuid twice.

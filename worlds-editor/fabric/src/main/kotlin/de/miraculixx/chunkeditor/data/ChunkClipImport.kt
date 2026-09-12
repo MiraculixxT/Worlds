@@ -6,6 +6,37 @@ import net.minecraft.util.datafix.DataFixTypes
 import net.minecraft.world.level.ChunkPos
 import kotlin.io.path.name
 
+enum class ExistingChunks { SKIP, REPLACE, MERGE }
+
+/**
+ * How a clip is pasted
+ */
+data class ClipImportOptions(
+    val yOffset: Int = 0,
+    val ranges: List<IntRange> = emptyList(),
+    val existing: ExistingChunks = ExistingChunks.REPLACE,
+) {
+    companion object {
+        /** `0:5,10:15` or a bare `3`, MCA Selector's syntax. Null when the text is not that */
+        fun parseRanges(text: String): List<IntRange>? {
+            if (text.isBlank()) return emptyList()
+            return text.split(',').map { part ->
+                val split = part.trim().split(':')
+                when (split.size) {
+                    1 -> split[0].trim().toIntOrNull()?.let { it..it } ?: return null
+                    2 -> {
+                        val from = split[0].trim().toIntOrNull() ?: return null
+                        val to = split[1].trim().toIntOrNull() ?: return null
+                        if (from > to) to..from else from..to
+                    }
+
+                    else -> return null
+                }
+            }
+        }
+    }
+}
+
 sealed interface ImportResult {
     data class Success(val written: Int, val skipped: Int, val clipped: Int) : ImportResult
     data class Failure(val message: String) : ImportResult
@@ -30,7 +61,7 @@ object ChunkClipImport {
         clip: ClipInfo,
         target: WorldDimension,
         origin: ChunkPos,
-        overwrite: Boolean,
+        options: ClipImportOptions,
         onProgress: (Int, Int) -> Unit,
     ): ImportResult {
         val source = clip.chunks
@@ -41,7 +72,6 @@ object ChunkClipImport {
         val dx = origin.x - clip.origin.x
         val dz = origin.z - clip.origin.z
         val range = sectionRange(target)
-        val occupied = if (overwrite) emptySet() else existingChunks(target)
 
         var written = 0
         var skipped = 0
@@ -50,17 +80,17 @@ object ChunkClipImport {
         return try {
             // region/ decides which chunks land, poi & entity just follow
             val placed = HashSet<ChunkPos>(source.size)
-            copy(clip, target, SUB_REGION, source, dx, dz) { pos, tag ->
-                val to = ChunkPos(pos.x + dx, pos.z + dz)
+            copy(clip, target, SUB_REGION, source, dx, dz, options) { pos, tag, existing ->
                 when {
-                    to in occupied -> {
+                    existing != null && options.existing == ExistingChunks.SKIP -> {
                         skipped++
-                        false
+                        null
                     }
 
-                    !ChunkRelocate.clipSections(tag, range.first, range.second) -> {
+                    !ChunkRelocate.selectSections(tag, options.ranges, options.yOffset) ||
+                        !ChunkRelocate.clipSections(tag, range.first, range.second) -> {
                         clipped++
-                        false
+                        null
                     }
 
                     else -> {
@@ -68,17 +98,25 @@ object ChunkClipImport {
                         placed.add(pos)
                         written++
                         onProgress(written + skipped + clipped, source.size)
-                        true
+                        if (existing != null && options.existing == ExistingChunks.MERGE) {
+                            ChunkRelocate.mergeRegion(tag, existing)
+                        } else tag
                     }
                 }
             }
-            copy(clip, target, SUB_ENTITIES, placed, dx, dz) { _, tag ->
+            copy(clip, target, SUB_ENTITIES, placed, dx, dz, options) { _, tag, existing ->
+                ChunkRelocate.selectEntities(tag, options.ranges, options.yOffset)
                 ChunkRelocate.entities(tag, dx, dz)
-                true
+                if (existing != null && options.existing == ExistingChunks.MERGE) {
+                    ChunkRelocate.mergeEntities(tag, existing)
+                } else tag
             }
-            copy(clip, target, SUB_POI, placed, dx, dz) { _, tag ->
+            copy(clip, target, SUB_POI, placed, dx, dz, options) { _, tag, existing ->
+                ChunkRelocate.selectPoi(tag, options.ranges, options.yOffset)
                 ChunkRelocate.poi(tag, dx, dz)
-                true
+                if (existing != null && options.existing == ExistingChunks.MERGE) {
+                    ChunkRelocate.mergePoi(tag, existing)
+                } else tag
             }
             ImportResult.Success(written, skipped, clipped)
         } catch (e: Exception) {
@@ -102,7 +140,8 @@ object ChunkClipImport {
         chunks: Collection<ChunkPos>,
         dx: Int,
         dz: Int,
-        transform: (ChunkPos, CompoundTag) -> Boolean,
+        options: ClipImportOptions,
+        transform: (ChunkPos, CompoundTag, CompoundTag?) -> CompoundTag?,
     ) {
         if (chunks.isEmpty()) return
         val from = ChunkClips.storage(clip.dir, sub, target.key, false) ?: return
@@ -115,9 +154,15 @@ object ChunkClipImport {
                         Constants.LOG.warn("Failed to read chunk {} from clip {}: {}", pos, sub, e.message)
                         null
                     } ?: return@forEach
+                    val targetPos = ChunkPos(pos.x + dx, pos.z + dz)
+                    // A plain replace never looks at what is there, so it costs one read, not two
+                    val existing = if (options.existing != ExistingChunks.REPLACE) {
+                        runCatching { to.read(targetPos) }.getOrNull()
+                            ?.let { ChunkRelocate.datafix(FIXES.getValue(sub), it) }
+                    } else null
                     val tag = ChunkRelocate.datafix(FIXES.getValue(sub), raw)
-                    if (!transform(pos, tag)) return@forEach
-                    to.write(ChunkPos(pos.x + dx, pos.z + dz), tag)
+                    val out = transform(pos, tag, existing) ?: return@forEach
+                    to.write(targetPos, out)
                 }
             }
         }
