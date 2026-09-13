@@ -8,7 +8,6 @@
   "chunkeditor.map.invert": "Umkehren",
   "chunkeditor.map.clear": "Leeren",
   "chunkeditor.map.trim": "Kürzen…",
-  "chunkeditor.map.delete_selected": "Auswahl löschen",
   "chunkeditor.map.delete_title": "%s Chunks löschen",
   "chunkeditor.map.delete_warning": "„%s“ generiert diese Chunks beim nächsten Besuch neu. Alles Gebaute ist verloren, und Strukturen an Chunk-Grenzen bleiben bestehen",
   "chunkeditor.map.no_regions": "Keine Regionsdateien – altes Weltformat?",
@@ -17,6 +16,8 @@
   "chunkeditor.map.region": "Region",
   "chunkeditor.map.chunk": "Chunk",
   "chunkeditor.map.block": "Block",
+  "chunkeditor.map.height": "Y",
+  "chunkeditor.map.height_value": "Anzeigehöhe: %s",
   "chunkeditor.map.scanning": "Scanne %s/%s Regionen…",
   "chunkeditor.map.biomes": "Lade Biomfarben…",
   "chunkeditor.map.hint": "Ziehen zum Verschieben · Rechtsziehen zum Auswählen (Umschalt entfernt) · Scrollen zum Zoomen",
@@ -69,5 +70,9 @@
   "chunkeditor.clip.error.read": "Auswahl konnte nicht gelesen werden – siehe Logs",
   "chunkeditor.clip.export_clip": "Welt-Clip exportieren",
   "chunkeditor.clip.export_selection": "Auswahl exportieren",
+  "chunkeditor.menu.selection": "Auswahl",
+  "chunkeditor.menu.edit": "Bearbeiten",
+  "chunkeditor.menu.view": "Ansicht",
+  "chunkeditor.map.selected": "Ausgewählt",
   "chunkeditor.open": "Chunk-Editor"
 }

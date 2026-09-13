@@ -11,6 +11,7 @@ the game regenerates them on the next visit.
 * Terrain rendering straight off the region files
   * Respects data driven properties (biome tint, blocks, ...)
   * 3 LoD layers based on zoom
+  * Max-height slider to cut the view down (e.g. under Nether roof)
 * Every dimension the save has, including custom dimensions
 * Deletes `region/`, `entities/` and `poi/` together (after backup)
 
@@ -37,7 +38,7 @@ The importer allows **every** version to be important, as long as it's lower tha
 | Existing Chunks | `Keep`=Existing chunks stay, `Replace`=New chunks override, `Merge`=Blocks merge |
 
 <details>
-  <summary>-- Import Examples --</summary>
+  <summary> Import Examples </summary>
 
 **Reminder**: A chunk has many 16x16x16 *sections* from top to bottom, that we can control (not blocks)
 

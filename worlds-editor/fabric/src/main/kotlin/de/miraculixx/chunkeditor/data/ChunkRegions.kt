@@ -136,6 +136,25 @@ object ChunkRegions {
     }
 
     /**
+     * Read a chunks max & min world height
+     */
+    suspend fun heightBounds(dimension: WorldDimension, pos: ChunkPos): IntRange? = withContext(Dispatchers.IO) {
+        val store = storage(dimension, SUB_REGION) ?: return@withContext null
+        try {
+            val tag = store.read(pos) ?: return@withContext null
+            val sections = tag.getListOrEmpty("sections")
+                .mapNotNull { (it as? CompoundTag)?.getByte("Y")?.orElse(null)?.toInt() }
+            if (sections.isEmpty()) return@withContext null
+            sections.min() * 16..sections.max() * 16 + 15
+        } catch (e: Exception) {
+            Constants.LOG.warn("Failed to read height bounds of {}: {}", pos, e.message)
+            null
+        } finally {
+            runCatching { store.close() }
+        }
+    }
+
+    /**
      * Reads `InhabitedTime` / `LastUpdate` of every generated chunk in [regions]
      */
     suspend fun scanFields(

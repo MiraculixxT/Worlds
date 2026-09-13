@@ -23,6 +23,7 @@ import net.minecraft.world.level.chunk.PalettedContainer
 import net.minecraft.world.level.chunk.PalettedContainerRO
 import net.minecraft.world.level.chunk.Strategy
 import net.minecraft.world.level.material.MapColor
+import kotlin.math.min
 
 /** One region rendered as map colors, plus which of its chunks could not be read. */
 class RegionImage(val image: NativeImage, val unreadable: Set<Long>)
@@ -56,9 +57,10 @@ object ChunkMapRenderer {
      * One region as a square image, or null when the region file is gone.
      * @param step Quality state of the image
      * @param tints Biome tinting, when the save's biome registry has been loaded
+     * @param maxY Highest block the column walk may start at, or null for the whole chunk
      */
     suspend fun renderRegion(
-        dimension: WorldDimension, rx: Int, rz: Int, step: Int = 1, tints: BiomeTints? = null,
+        dimension: WorldDimension, rx: Int, rz: Int, step: Int = 1, tints: BiomeTints? = null, maxY: Int? = null,
     ): RegionImage? =
         withContext(Dispatchers.IO) {
             val store = ChunkRegions.storage(dimension, "region") ?: return@withContext null
@@ -82,7 +84,7 @@ object ChunkMapRenderer {
                         } ?: continue
                         val ok = surfaceOf(
                             tag, cx * perChunk, cz * perChunk, pos.minBlockX, pos.minBlockZ, step, pixels,
-                            colors, bases, heights, depths, session,
+                            colors, bases, heights, depths, session, maxY,
                         )
                         if (!ok) unreadable.add(pos.pack())
                     }
@@ -100,11 +102,13 @@ object ChunkMapRenderer {
     private fun surfaceOf(
         raw: CompoundTag, originX: Int, originZ: Int, worldX: Int, worldZ: Int, step: Int, pixels: Int,
         colors: IntArray, bases: IntArray, heights: IntArray, depths: IntArray, session: BiomeTints.Session?,
+        maxY: Int?,
     ): Boolean {
         val sections = try {
             upgrade(raw).getListOrEmpty("sections").mapNotNull { entry ->
                 val section = entry as? CompoundTag ?: return@mapNotNull null
                 val y = section.getByte("Y").orElse(null)?.toInt() ?: return@mapNotNull null
+                if (maxY != null && y * 16 > maxY) return@mapNotNull null
                 val states = section.getCompound("block_states").orElse(null) ?: return@mapNotNull null
                 if (isAirOnly(states)) null else Section(y, states, section)
             }.sortedByDescending { it.y }
@@ -144,7 +148,9 @@ object ChunkMapRenderer {
                 var depth = 0
                 columns@ for (index in sections.indices) {
                     val container = container(index) ?: return false
-                    for (ly in 15 downTo 0) {
+                    // The cut lands mid-section for the highest one it keeps
+                    val from = if (maxY == null) 15 else min(15, maxY - sections[index].y * 16)
+                    for (ly in from downTo 0) {
                         val state = container.get(lx, ly, lz)
                         val mapColor = state.getMapColor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO)
                         if (mapColor === MapColor.NONE) continue

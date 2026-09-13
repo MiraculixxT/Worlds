@@ -21,7 +21,8 @@ import de.miraculixx.chunkeditor.data.LevelFacts
 import de.miraculixx.chunkeditor.data.WorldDimension
 import de.miraculixx.common.client.ui.BackupActionScreen
 import de.miraculixx.common.client.ui.Dropdown
-import de.miraculixx.common.client.ui.IconButton
+import de.miraculixx.common.client.ui.MenuDropdown
+import de.miraculixx.common.client.ui.MenuEntry
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
 import de.miraculixx.common.client.ui.clickSound
 import de.miraculixx.common.client.ui.drawBox
@@ -32,7 +33,6 @@ import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.Checkbox
 import net.minecraft.client.gui.components.EditBox
-import net.minecraft.client.gui.components.Tooltip
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.client.input.KeyEvent
@@ -40,7 +40,6 @@ import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.client.renderer.texture.DynamicTexture
-import net.minecraft.ChatFormatting
 import net.minecraft.core.BlockPos
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
@@ -87,6 +86,18 @@ private const val SLIDER_KNOB_H = 10
 private const val TRACK_COLOR = 0x60FFFFFF
 private const val KNOB_COLOR = -1
 private const val KNOB_HOVER_COLOR = 0xFF33B5E5.toInt()
+
+private const val YBAR_W = 15
+private const val YBAR_PAD = 5
+private const val YBAR_TRACK_W = 4
+private const val YBAR_KNOB_W = 10
+private const val YBAR_KNOB_H = 5
+private const val YBAR_STEP = 8
+private const val TRACK_DIM_COLOR = 0x30FFFFFF
+
+/** Build height fallback for a dimension whose chunks could not be read */
+private const val DEFAULT_Y_MIN = -64
+private const val DEFAULT_Y_MAX = 319
 
 private const val REGION_BLOCKS = REGION_SIZE * 16
 
@@ -195,6 +206,15 @@ internal class ChunkMapScreen(
     private var sliderX2 = 0
     private var sliderY = 0
     private var sliderDragging = false
+
+    // Max-height slider geometry + state
+    private var yMin = DEFAULT_Y_MIN
+    private var yMax = DEFAULT_Y_MAX
+    private var yCut = DEFAULT_Y_MAX
+    private var yKnown = false
+    private var yDragging = false
+    private var yBarTop = 0
+    private var yBarBottom = 0
 
     private var scanJob: Job? = null
     private var scanProgress: Pair<Int, Int>? = null
@@ -493,6 +513,10 @@ internal class ChunkMapScreen(
     private fun loadDimension(dim: WorldDimension) {
         val generation = ++loadGen
         loading = true
+        yKnown = false
+        yMin = DEFAULT_Y_MIN
+        yMax = DEFAULT_Y_MAX
+        yCut = DEFAULT_Y_MAX
         indices.clear()
         unreadable.clear()
         rendering.clear()
@@ -500,15 +524,27 @@ internal class ChunkMapScreen(
         dropTextures()
         Constants.SCOPE.launch {
             val read = ChunkRegions.listRegions(dim).mapNotNull { (rx, rz) -> ChunkRegions.readIndex(dim, rx, rz) }
+            // One chunk carries the dimension's build height
+            val bounds = read.firstOrNull { it.count > 0 }?.let { ChunkRegions.heightBounds(dim, firstChunk(it)) }
             minecraft.execute {
                 if (generation != loadGen) return@execute
                 read.forEach { indices[key(it.rx, it.rz)] = it }
                 totalChunks = read.sumOf { it.count }
                 totalBytes = read.sumOf { it.bytes }
+                if (bounds != null) {
+                    yMin = bounds.first
+                    yMax = bounds.last
+                    yKnown = true
+                }
+                yCut = yMax
                 loading = false
-                syncDeleteButton()
             }
         }
+    }
+
+    private fun firstChunk(region: RegionIndex): ChunkPos {
+        val i = region.present.nextSetBit(0)
+        return ChunkPos(region.rx * REGION_SIZE + i % REGION_SIZE, region.rz * REGION_SIZE + i / REGION_SIZE)
     }
 
     private fun loadTints() {
@@ -650,7 +686,7 @@ internal class ChunkMapScreen(
 
     private fun mapLeft() = MARGIN
     private fun mapTop() = HEADER_H
-    private fun mapRight() = width - MARGIN
+    private fun mapRight() = width - MARGIN - YBAR_W
     private fun mapBottom() = height - MARGIN - INFO_H
 
     private fun screenX(blockX: Double) = (mapLeft() + mapRight()) / 2.0 + (blockX - centerX) * scale
@@ -668,6 +704,7 @@ internal class ChunkMapScreen(
         centerX = spawn.x.toDouble()
         centerZ = spawn.z.toDouble()
         scale = 1.0 / 4.0
+        setCut(yMax)
     }
 
     //
@@ -695,6 +732,7 @@ internal class ChunkMapScreen(
         drawPasteGhost(graphics, mouseX, mouseY)
         graphics.disableScissor()
 
+        drawHeightBar(graphics, mouseX, mouseY)
         drawInfo(graphics, mouseX, mouseY)
 
         dimensionPicker.renderOverlay(graphics, font, mouseX, mouseY)
@@ -847,15 +885,78 @@ internal class ChunkMapScreen(
         graphics.fill(x2 - 1, y, x2, y2, REGION_LINE_COLOR)
     }
 
-    private fun drawInfo(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
-        val infoX = MARGIN + 312
-        val summary = when {
-            dimension == null -> I18n.get("chunkeditor.map.no_regions")
-            loading -> I18n.get("chunkeditor.map.reading")
-            else -> I18n.get("chunkeditor.map.summary", indices.size, totalChunks, bytes(totalBytes))
-        }
-        graphics.text(font, summary, infoX, 12, -1)
+    private fun drawHeightBar(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
+        // Starts on the map's own right border
+        val left = mapRight() - 1
+        val right = width - MARGIN
+        drawBox(graphics, left, mapTop(), right, mapBottom())
+        val center = (left + right) / 2
+        val label = I18n.get("chunkeditor.map.height")
+        graphics.text(font, label, center - font.width(label) / 2, mapTop() + YBAR_PAD + 1, SUBTEXT_COLOR)
 
+        // Both ends of the track keep half a knob inside the box
+        yBarTop = mapTop() + YBAR_PAD + font.lineHeight + 4 + YBAR_KNOB_H / 2
+        yBarBottom = mapBottom() - YBAR_PAD - YBAR_KNOB_H / 2
+        if (!yKnown || yBarBottom - yBarTop < YBAR_KNOB_H * 2) return
+
+        val trackX = center - YBAR_TRACK_W / 2
+        val knobY = yScreen(yCut)
+        graphics.fill(trackX, yBarTop, trackX + YBAR_TRACK_W, yBarBottom, TRACK_DIM_COLOR)
+        graphics.fill(trackX, knobY, trackX + YBAR_TRACK_W, yBarBottom, TRACK_COLOR)
+
+        val hovered = yDragging || inHeightBar(mouseX.toDouble(), mouseY.toDouble())
+        val knobX = center - YBAR_KNOB_W / 2
+        val knobTop = knobY - YBAR_KNOB_H / 2
+        graphics.fill(
+            knobX, knobTop, knobX + YBAR_KNOB_W, knobTop + YBAR_KNOB_H,
+            if (hovered) KNOB_HOVER_COLOR else KNOB_COLOR,
+        )
+
+        if (hovered) {
+            graphics.setTooltipForNextFrame(
+                font, Component.translatable("chunkeditor.map.height_value", yCut), mouseX, mouseY,
+            )
+        }
+    }
+
+    /** Highest Y at the top of the track, lowest at the bottom */
+    private fun yScreen(value: Int): Int {
+        val span = (yMax - yMin).coerceAtLeast(1)
+        val t = (value - yMin).toDouble() / span
+        return (yBarBottom - t * (yBarBottom - yBarTop)).roundToInt()
+    }
+
+    private fun yFromScreen(screenY: Double): Int {
+        val span = (yBarBottom - yBarTop).coerceAtLeast(1)
+        val t = ((yBarBottom - screenY) / span).coerceIn(0.0, 1.0)
+        return (yMin + t * (yMax - yMin)).roundToInt()
+    }
+
+    private fun inHeightBar(x: Double, y: Double) = yKnown && yBarBottom > yBarTop &&
+            x >= mapRight() && x < width - MARGIN &&
+            y >= yBarTop - YBAR_KNOB_H / 2 && y <= yBarBottom + YBAR_KNOB_H / 2
+
+    private fun heightCut(): Int? = if (!yKnown || yCut >= yMax) null else yCut
+
+    private fun setCut(value: Int) {
+        val next = value.coerceIn(yMin, yMax)
+        if (next == yCut) return
+        yCut = next
+        applyHeightCut()
+    }
+
+    /**
+     * A new cut invalidates every rendered pixel
+     */
+    private fun applyHeightCut() {
+        terrain.releaseAll()
+        coarse.releaseAll()
+        rendering.clear()
+        coarseRendering.clear()
+        loadGen++
+    }
+
+    private fun drawInfo(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
         // Starts on the map's own bottom border rather than below it, or the two boxes would stack
         // their 1 px edges into a 2 px rule.
         val top = mapBottom() - 1
@@ -1007,7 +1108,7 @@ internal class ChunkMapScreen(
         if (!rendering.add(regionKey)) return
         val generation = loadGen
         Constants.SCOPE.launch {
-            val rendered = ChunkMapRenderer.renderRegion(dim, region.rx, region.rz, tints = tints)
+            val rendered = ChunkMapRenderer.renderRegion(dim, region.rx, region.rz, tints = tints, maxY = heightCut())
             minecraft.execute {
                 // A region that cannot be rendered at all keeps its in-flight marker
                 if (rendered != null) rendering.remove(regionKey)
@@ -1031,7 +1132,7 @@ internal class ChunkMapScreen(
         coarseJobs++
         val generation = loadGen
         Constants.SCOPE.launch {
-            val rendered = ChunkMapRenderer.renderRegion(dim, region.rx, region.rz, COARSE_STEP, tints)
+            val rendered = ChunkMapRenderer.renderRegion(dim, region.rx, region.rz, COARSE_STEP, tints, heightCut())
             minecraft.execute {
                 coarseJobs--
                 if (rendered != null) coarseRendering.remove(regionKey)
@@ -1096,6 +1197,12 @@ internal class ChunkMapScreen(
             if (event.button() == 0 && inMap(x, y)) confirmPaste(pasteOrigin(x, y)) else cancelPaste()
             return true
         }
+        if (event.button() == 0 && inHeightBar(x, y)) {
+            yDragging = true
+            clickSound()
+            yCut = yFromScreen(y)
+            return true
+        }
         if (event.button() == 0 && inSlider(x, y)) {
             sliderDragging = true
             clickSound()
@@ -1124,6 +1231,11 @@ internal class ChunkMapScreen(
     }
 
     override fun mouseDragged(event: MouseButtonEvent, dragX: Double, dragY: Double): Boolean {
+        // Only rerender on release
+        if (yDragging) {
+            yCut = yFromScreen(event.y())
+            return true
+        }
         if (sliderDragging) {
             zoomFromSlider(event.x())
             return true
@@ -1142,6 +1254,11 @@ internal class ChunkMapScreen(
     }
 
     override fun mouseReleased(event: MouseButtonEvent): Boolean {
+        if (yDragging) {
+            yDragging = false
+            applyHeightCut()
+            return true
+        }
         if (sliderDragging) {
             sliderDragging = false
             return true
@@ -1190,13 +1307,12 @@ internal class ChunkMapScreen(
         return super.keyPressed(event)
     }
 
-    private fun run(action: SelectionAction) = when (action.glfwKey) {
-        GLFW.GLFW_KEY_A -> selectAll()
-        GLFW.GLFW_KEY_I -> invertSelection()
-        else -> clearSelection()
-    }
-
     override fun mouseScrolled(mouseX: Double, mouseY: Double, scrollX: Double, scrollY: Double): Boolean {
+        // Half a section a notch
+        if (inHeightBar(mouseX, mouseY)) {
+            setCut(yCut + (scrollY.roundToInt() * YBAR_STEP))
+            return true
+        }
         if (!inMap(mouseX, mouseY)) return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY)
         val anchorX = blockX(mouseX)
         val anchorZ = blockZ(mouseY)
