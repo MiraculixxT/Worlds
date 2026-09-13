@@ -50,7 +50,8 @@ internal class OverlayScreen(
 
         val wantsPath = selected?.needsPath == true
         val wantsBlock = selected?.needsBlock == true
-        val rows = (if (wantsPath || wantsBlock) 1 else 0) + (if (selected != null) 1 else 0) + 1
+        val wantsRange = selected?.categorical == false
+        val rows = (if (wantsPath || wantsBlock) 1 else 0) + (if (wantsRange) 1 else 0) + 1
         val body = 26 + options.size * ROW_H + 8 + rows * (FIELD_H + FIELD_GAP) - FIELD_GAP + PAD
 
         panelTop = (height - body) / 2
@@ -71,7 +72,7 @@ internal class OverlayScreen(
                 block = it
             }
         }
-        if (selected != null) {
+        if (wantsRange) {
             field(left + PAD, y, half, "chunkeditor.overlay.min", "chunkeditor.overlay.min", min?.toString() ?: "") {
                 min = it.trim().toLongOrNull()
             }

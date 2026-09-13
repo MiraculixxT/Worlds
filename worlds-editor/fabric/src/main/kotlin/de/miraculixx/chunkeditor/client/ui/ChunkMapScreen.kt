@@ -5,6 +5,7 @@ import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.BiomeTints
 import de.miraculixx.chunkeditor.data.ChunkMapRenderer
 import de.miraculixx.chunkeditor.data.ChunkMetric
+import de.miraculixx.chunkeditor.data.ChunkOverlay
 import de.miraculixx.chunkeditor.data.ChunkScan
 import de.miraculixx.chunkeditor.data.ChunkScans
 import de.miraculixx.chunkeditor.data.ChunkClipExport
@@ -251,6 +252,7 @@ internal class ChunkMapScreen(
     private var overlayMax = 0L
     private var overlayReady = false
     private var overlayNow = 0L
+    private var overlayColors = IntArray(0)
 
     private var tints: BiomeTints? = null
     private var tintsLoading = false
@@ -725,6 +727,12 @@ internal class ChunkMapScreen(
         overlayReady = false
         val mode = overlaySettings.overlay ?: return
         overlayNow = System.currentTimeMillis() / 1000
+        if (mode.categorical) {
+            // Categories have no ends to span, only a color each
+            overlayColors = IntArray(scan.labels.size) { OverlayColors.categorical(scan.labels[it]) }
+            overlayReady = overlayColors.isNotEmpty()
+            return
+        }
         var low = Long.MAX_VALUE
         var high = Long.MIN_VALUE
         indices.values.forEach { region ->
@@ -1157,9 +1165,14 @@ internal class ChunkMapScreen(
             clipMessage != null -> clipMessage!!
             progress != null -> I18n.get("chunkeditor.map.scanning", progress.first, progress.second)
             tintsLoading -> I18n.get("chunkeditor.map.biomes")
-            else -> if (drawOverlayLegend(graphics, barRight, secondY, summaryX + font.width(summary) + 8)) {
-                return
-            } else I18n.get("chunkeditor.map.hint")
+            else -> {
+                val hovered = if (blockPosX != null && blockPosZ != null) {
+                    ChunkPos.pack(blockPosX shr 4, blockPosZ shr 4)
+                } else null
+                if (drawOverlayLegend(graphics, barRight, secondY, summaryX + font.width(summary) + 8, hovered)) {
+                    return
+                } else I18n.get("chunkeditor.map.hint")
+            }
         }
         val statusX = barRight - font.width(status)
         if (statusX > summaryX + font.width(summary) + 8) {
@@ -1168,9 +1181,12 @@ internal class ChunkMapScreen(
     }
 
     /** `<overlay>: <min> gradient <max>` right aligned */
-    private fun drawOverlayLegend(graphics: GuiGraphicsExtractor, right: Int, y: Int, minX: Int): Boolean {
+    private fun drawOverlayLegend(
+        graphics: GuiGraphicsExtractor, right: Int, y: Int, minX: Int, hovered: Long?,
+    ): Boolean {
         val mode = overlaySettings.overlay ?: return false
         if (!overlayVisible || !overlayReady) return false
+        if (mode.categorical) return drawCategoryLegend(graphics, mode, right, y, minX, hovered)
         val name = "${mode.label}:"
         val low = mode.format(overlayMin)
         val high = mode.format(overlayMax)
@@ -1186,6 +1202,22 @@ internal class ChunkMapScreen(
         }
         x += LEGEND_W + 4
         graphics.text(font, high, x, y, -1)
+        return true
+    }
+
+    /** `<overlay>: <the category under the cursor>` (or # on empty) */
+    private fun drawCategoryLegend(
+        graphics: GuiGraphicsExtractor, mode: ChunkOverlay, right: Int, y: Int, minX: Int, hovered: Long?,
+    ): Boolean {
+        val index = hovered?.let { scan.value(mode.metric, it) }?.toInt() ?: -1
+        val label = scan.labels.getOrNull(index)?.let { OverlayColors.categoryName(it) }
+            ?: scan.labels.size.toString()
+        val name = "${mode.label}:"
+        var x = right - (font.width(name) + font.width(label) + 4)
+        if (x < minX) return false
+        graphics.text(font, name, x, y, SUBTEXT_COLOR)
+        x += font.width(name) + 4
+        graphics.text(font, label, x, y, -1)
         return true
     }
 
@@ -1294,15 +1326,13 @@ internal class ChunkMapScreen(
             for (x in 0 until REGION_SIZE) {
                 val pos = ChunkPos(region.rx * REGION_SIZE + x, region.rz * REGION_SIZE + z)
                 val raw = scan.value(mode.metric, pos.pack())
-                val value = raw?.let { mode.value(it, worldTime, overlayNow) }
-                if (value == null) {
+                val color = raw?.let { colorFor(mode, mode.value(it, worldTime, overlayNow), span) }
+                if (color == null) {
                     image.setPixelABGR(x, z, 0)
                     continue
                 }
                 any = true
-                // A dimension where every chunk holds the same value has no gradient to show
-                val t = if (span <= 0.0) 0.5 else (value - overlayMin) / span
-                image.setPixelABGR(x, z, abgr(OverlayColors.color(t)))
+                image.setPixelABGR(x, z, abgr(color))
             }
         }
         if (!any) {
@@ -1311,6 +1341,12 @@ internal class ChunkMapScreen(
         }
         return register("chunkmap/overlay/${region.rx}_${region.rz}", image)
             .also { overlayTextures[regionKey] = it }
+    }
+
+    /** The overlay color of one chunk */
+    private fun colorFor(mode: ChunkOverlay, value: Long, span: Double): Int? {
+        if (mode.categorical) return overlayColors.getOrNull(value.toInt())
+        return OverlayColors.color(if (span <= 0.0) 0.5 else (value - overlayMin) / span)
     }
 
     private fun requestTerrain(region: RegionIndex) {

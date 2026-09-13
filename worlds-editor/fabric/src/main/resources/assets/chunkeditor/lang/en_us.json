@@ -13,6 +13,7 @@
   "chunkeditor.overlay.entities": "Entities",
   "chunkeditor.overlay.block_entities": "Block Entities",
   "chunkeditor.overlay.avg_height": "Average Height",
+  "chunkeditor.overlay.biome": "Biome",
   "chunkeditor.overlay.block_count": "Block Count",
   "chunkeditor.overlay.block": "Block",
   "chunkeditor.overlay.block_hint": "blank · minecraft:spawner · #minecraft:logs",

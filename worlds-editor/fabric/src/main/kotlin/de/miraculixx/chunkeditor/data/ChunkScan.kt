@@ -12,6 +12,7 @@ import net.minecraft.nbt.NumericTag
 import net.minecraft.nbt.Tag
 import net.minecraft.nbt.visitors.CollectFields
 import net.minecraft.nbt.visitors.FieldSelector
+import net.minecraft.util.Mth
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.chunk.storage.RegionFileStorage
 import net.minecraft.world.level.storage.LevelStorageSource
@@ -20,6 +21,10 @@ import java.util.EnumSet
 
 private const val COLUMNS = 16 * 16
 private const val BLOCKS_PER_SECTION = 16 * 16 * 16
+private const val CENTER_COLUMN = 8 * 16 + 8
+
+/** Past this a section's biomes are packed against the world registry, not against its own palette */
+private const val MAX_BIOME_PALETTE_BITS = 3
 
 /**
  * Every metric of a source is filled by that pass, so a second request on the same source is free
@@ -52,16 +57,21 @@ enum class ChunkMetric(val source: ScanSource, val needsArgument: Boolean = fals
     TIMESTAMP(ScanSource.HEADER),
     BLOCK_ENTITIES(ScanSource.CHUNK),
     AVG_HEIGHT(ScanSource.CHUNK),
+    BIOME(ScanSource.CHUNK),
     PATH(ScanSource.CHUNK, needsArgument = true),
     ENTITY_COUNT(ScanSource.ENTITIES),
     BLOCK_COUNT(ScanSource.BLOCKS, needsArgument = true),
 }
 
-/** What one pass produced */
+/**
+ * What one pass produced
+ * @param labels what a categorical metric value indexes (order the pass met them)
+ */
 class ScanResult(
     val source: ScanSource,
     val argument: String?,
     val values: Map<ChunkMetric, Long2LongOpenHashMap>,
+    val labels: List<String> = emptyList(),
 )
 
 /**
@@ -74,6 +84,9 @@ class ChunkScan {
     /** Cache key (nbt & block) */
     private val arguments = EnumMap<ScanSource, String?>(ScanSource::class.java)
 
+    var labels: List<String> = emptyList()
+        private set
+
     fun has(source: ScanSource) = source in done
 
     fun ready(metric: ChunkMetric, argument: String?): Boolean =
@@ -85,6 +98,8 @@ class ChunkScan {
     }
 
     fun apply(result: ScanResult) {
+        // A later pass over another source keeps its own metrics
+        if (result.labels.isNotEmpty()) labels = result.labels
         result.values.forEach { (metric, map) -> values[metric] = map }
         done += result.source
         arguments[result.source] = result.argument
@@ -94,6 +109,7 @@ class ChunkScan {
         values.clear()
         done.clear()
         arguments.clear()
+        labels = emptyList()
     }
 }
 
@@ -113,14 +129,15 @@ object ChunkScans {
         minY: Int,
         onProgress: (done: Int, total: Int) -> Unit,
     ): ScanResult = withContext(Dispatchers.IO) {
+        val labels = ArrayList<String>()
         val values = when (source) {
             ScanSource.HEADER -> scanHeader(dimension, regions, onProgress)
             ScanSource.FIELDS -> scanFields(dimension, regions, onProgress)
-            ScanSource.CHUNK -> scanChunks(dimension, regions, argument, minY, onProgress)
+            ScanSource.CHUNK -> scanChunks(dimension, regions, argument, minY, labels, onProgress)
             ScanSource.ENTITIES -> scanEntities(dimension, regions, onProgress)
             ScanSource.BLOCKS -> scanBlocks(dimension, access, regions, argument, onProgress)
         }
-        ScanResult(source, argument, values)
+        ScanResult(source, argument, values, labels)
     }
 
     private fun scanHeader(
@@ -167,13 +184,16 @@ object ChunkScans {
         )
     }
 
+    /** @param labels filled with every biome met, so [ChunkMetric.BIOME] can stay one number */
     private fun scanChunks(
         dimension: WorldDimension, regions: Collection<RegionIndex>, path: String?, minY: Int,
-        onProgress: (Int, Int) -> Unit,
+        labels: MutableList<String>, onProgress: (Int, Int) -> Unit,
     ): Map<ChunkMetric, Long2LongOpenHashMap> {
         val blockEntities = Long2LongOpenHashMap()
         val heights = Long2LongOpenHashMap()
         val paths = Long2LongOpenHashMap()
+        val biomes = Long2LongOpenHashMap()
+        val biomeIds = HashMap<String, Long>()
         val wanted = path?.takeIf { it.isNotBlank() }
         eachChunk(dimension, SUB_REGION, regions, onProgress) { store, pos ->
             val tag = store.read(pos) ?: return@eachChunk
@@ -181,11 +201,15 @@ object ChunkScans {
             blockEntities[packed] = tag.getListOrEmpty("block_entities").size.toLong()
             avgHeight(tag, minY)?.let { heights[packed] = it }
             wanted?.let { NbtPaths.number(tag, it) }?.let { paths[packed] = it }
+            surfaceBiome(tag, minY)?.let { biome ->
+                biomes[packed] = biomeIds.getOrPut(biome) { labels.add(biome); (labels.size - 1).toLong() }
+            }
         }
         return mapOf(
             ChunkMetric.BLOCK_ENTITIES to blockEntities,
             ChunkMetric.AVG_HEIGHT to heights,
             ChunkMetric.PATH to paths,
+            ChunkMetric.BIOME to biomes,
         )
     }
 
@@ -275,23 +299,60 @@ object ChunkScans {
      * The mean surface height of a chunk using `Heightmaps.MOTION_BLOCKING`
      */
     private fun avgHeight(tag: CompoundTag, minY: Int): Long? {
-        val packed = tag.getCompound("Heightmaps").orElse(null)
-            ?.getLongArray("MOTION_BLOCKING")?.orElse(null) ?: return null
-        if (packed.isEmpty()) return null
-        val perLong = (COLUMNS + packed.size - 1) / packed.size
-        val bits = 64 / perLong
-        if (bits <= 0) return null
-        val mask = (1L shl bits) - 1
+        val heightmap = Heightmap.of(tag) ?: return null
         var sum = 0L
         var counted = 0
         for (i in 0 until COLUMNS) {
-            val word = packed[i / perLong]
-            val value = (word ushr (i % perLong) * bits) and mask
+            val value = heightmap.at(i)
             if (value == 0L) continue
             sum += minY + value - 1
             counted++
         }
         return if (counted == 0) null else sum / counted
+    }
+
+    /**
+     * Picks biome of chunk centers, up-most block
+     */
+    private fun surfaceBiome(tag: CompoundTag, minY: Int): String? {
+        val height = Heightmap.of(tag)?.at(CENTER_COLUMN)?.takeIf { it > 0L } ?: return null
+        val y = (minY + height - 1).toInt()
+        val section = tag.getListOrEmpty("sections").firstOrNull { entry ->
+            (entry as? CompoundTag)?.getByte("Y")?.orElse(null)?.toInt() == y shr 4
+        } as? CompoundTag ?: return null
+        val biomes = section.getCompound("biomes").orElse(null) ?: return null
+        val palette = biomes.getListOrEmpty("palette")
+        if (palette.isEmpty) return null
+        // A single-entry palette stores no cells at all
+        val data = biomes.getLongArray("data").orElse(null)
+        if (data == null || data.isEmpty()) return palette.getStringOr(0, "").takeIf { it.isNotEmpty() }
+        val bits = Mth.ceillog2(palette.size).coerceAtLeast(1)
+        if (bits > MAX_BIOME_PALETTE_BITS) return null
+        val perLong = 64 / bits
+        // 4x4x4 cells indexed (y * 4 + z) * 4 + x, entries never spanning a long
+        val cell = ((y and 15) shr 2) * 16 + 2 * 4 + 2
+        if (cell / perLong >= data.size) return null
+        val index = ((data[cell / perLong] ushr (cell % perLong) * bits) and ((1L shl bits) - 1)).toInt()
+        return palette.getStringOr(index, "").takeIf { it.isNotEmpty() }
+    }
+}
+
+/** `Heightmaps.MOTION_BLOCKING`, unpacked per column */
+private class Heightmap(private val packed: LongArray, private val perLong: Int, private val bits: Int) {
+    private val mask = (1L shl bits) - 1
+
+    /** The stored value of one column, 0 when it holds nothing */
+    fun at(column: Int): Long = (packed[column / perLong] ushr (column % perLong) * bits) and mask
+
+    companion object {
+        fun of(tag: CompoundTag): Heightmap? {
+            val packed = tag.getCompound("Heightmaps").orElse(null)
+                ?.getLongArray("MOTION_BLOCKING")?.orElse(null) ?: return null
+            if (packed.isEmpty()) return null
+            val perLong = (COLUMNS + packed.size - 1) / packed.size
+            val bits = 64 / perLong
+            return if (bits <= 0) null else Heightmap(packed, perLong, bits)
+        }
     }
 }
 

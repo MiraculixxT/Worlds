@@ -1,6 +1,8 @@
 package de.miraculixx.chunkeditor.data
 
 import net.minecraft.client.resources.language.I18n
+import net.minecraft.locale.Language
+import net.minecraft.util.Mth
 import kotlin.math.roundToInt
 
 private const val TICKS_PER_SECOND = 20L
@@ -11,6 +13,9 @@ private const val SECONDS_PER_DAY = SECONDS_PER_HOUR * 24
 /** Heatmap stops, cold to hot */
 private val GRADIENT = intArrayOf(0x3050FF, 0x30C8E0, 0x40C840, 0xFFD040, 0xFF4040)
 private const val OVERLAY_ALPHA = 0xB0
+
+/** Knuth's multiplicative constant for fixed, unique hashes */
+private const val HASH_MIX = -0x61c88647
 
 /** What the raw number is counted against */
 enum class ValueReference {
@@ -27,12 +32,14 @@ enum class ValueFormat { TICKS, SECONDS, NUMBER, BLOCKS }
 
 /**
  * A per-chunk value drawn as a heatmap over the terrain
+ * @param categorical the value is an index into [ChunkScan.labels]
  */
 enum class ChunkOverlay(
     val labelKey: String,
     val metric: ChunkMetric,
     val format: ValueFormat,
     val reference: ValueReference = ValueReference.NONE,
+    val categorical: Boolean = false,
 ) {
     INHABITED_TIME("chunkeditor.overlay.inhabited", ChunkMetric.INHABITED_TIME, ValueFormat.TICKS),
     LAST_SAVE("chunkeditor.overlay.last_save", ChunkMetric.LAST_UPDATE, ValueFormat.TICKS, ValueReference.WORLD_TIME),
@@ -41,6 +48,7 @@ enum class ChunkOverlay(
     ENTITIES("chunkeditor.overlay.entities", ChunkMetric.ENTITY_COUNT, ValueFormat.NUMBER),
     BLOCK_ENTITIES("chunkeditor.overlay.block_entities", ChunkMetric.BLOCK_ENTITIES, ValueFormat.NUMBER),
     AVG_HEIGHT("chunkeditor.overlay.avg_height", ChunkMetric.AVG_HEIGHT, ValueFormat.BLOCKS),
+    BIOME("chunkeditor.overlay.biome", ChunkMetric.BIOME, ValueFormat.NUMBER, categorical = true),
     BLOCK_COUNT("chunkeditor.overlay.block_count", ChunkMetric.BLOCK_COUNT, ValueFormat.NUMBER),
     /** Whatever number a user-given NBT path resolves to */
     PATH("chunkeditor.overlay.path", ChunkMetric.PATH, ValueFormat.NUMBER);
@@ -113,4 +121,17 @@ object OverlayColors {
     }
 
     private fun mix(from: Int, to: Int, fraction: Double) = (from + (to - from) * fraction).roundToInt()
+
+    /**
+     * One ARGB per name (stable hased by name)
+     */
+    fun categorical(name: String, alpha: Int = OVERLAY_ALPHA): Int {
+        val hash = name.hashCode() * HASH_MIX
+        val hue = (hash ushr 8 and 0xFFFF) / 65536f
+        val saturation = 0.5f + (hash ushr 2 and 0x3) * 0.12f
+        val value = 0.72f + (hash and 0x3) * 0.08f
+        return (alpha shl 24) or (Mth.hsvToArgb(hue, saturation, value, 0) and 0xFFFFFF)
+    }
+
+    fun categoryName(id: String): String = Language.getInstance().getOrDefault("biome." + id.replace(':', '.'), id)
 }
