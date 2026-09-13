@@ -22,6 +22,7 @@ import net.minecraft.client.gui.components.tabs.Tab as GuiTab
 import net.minecraft.client.gui.screens.ConfirmScreen
 import net.minecraft.client.gui.screens.worldselection.WorldSelectionList
 import net.minecraft.client.gui.screens.Screen
+import net.minecraft.client.input.CharacterEvent
 import net.minecraft.client.input.KeyEvent
 import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.resources.language.I18n
@@ -56,6 +57,7 @@ internal class ClipNameScreen(
     private lateinit var clipToggle: Checkbox
     private lateinit var selectionToggle: Checkbox
     private lateinit var acceptButton: Button
+    private var swallowChars = true
 
     override fun init() {
         val left = width / 2 - panelW / 2 + 10
@@ -115,6 +117,21 @@ internal class ClipNameScreen(
             return true
         }
         return super.keyPressed(event)
+    }
+
+    /**
+     * Avoid entering the pressed shortcut into a text field
+     */
+    override fun charTyped(event: CharacterEvent): Boolean {
+        if (swallowChars) {
+            swallowChars = false
+            return true
+        }
+        return super.charTyped(event)
+    }
+
+    override fun tick() {
+        swallowChars = false
     }
 
     override fun extractBackground(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {

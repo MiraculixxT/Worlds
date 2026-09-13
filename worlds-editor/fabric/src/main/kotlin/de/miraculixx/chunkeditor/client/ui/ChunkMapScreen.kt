@@ -60,12 +60,13 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 private const val HEADER_H = 32
-private const val FOOTER_H = 32
 private const val MARGIN = 8
 private const val DROPDOWN_W = 140
+private const val MENU_W = 78
 
-/** The coordinate bar between the map and the footer buttons. */
-private const val INFO_H = 18
+/** The two-row info bar under the map: coordinates + zoom, then the world summary */
+private const val INFO_H = 30
+private const val INFO_ROW_H = 13
 
 /** Widest value each coordinate field can ever hold, the last step of [COORD_TIERS] */
 private const val BLOCK_EXTREME = "-30000000"
@@ -73,6 +74,9 @@ private const val CHUNK_EXTREME = "-1875000"
 private const val REGION_EXTREME = "-58594"
 
 private val COORD_TIERS = listOf(-99 to 999, -9999 to 999999)
+
+/** The same idea for the selected-chunk count, which is never negative */
+private val COUNT_TIERS = listOf(999, 999999)
 
 /** The zoom slider filling whatever the coordinate row leaves of the info bar */
 private const val SLIDER_MIN_W = 48
@@ -107,19 +111,18 @@ private const val SELECTED_COLOR = 0x9033B5E5.toInt()
 private const val GRID_COLOR = 0x30FFFFFF
 private const val REGION_LINE_COLOR = 0x80FFFFFF.toInt()
 
-/** Selection sprites: `assets/chunkeditor/textures/gui/sprites/` */
-private val SELECT_ALL_SPRITE = Identifier.fromNamespaceAndPath(Constants.MOD_ID, "select-all")
-private val SELECT_INVERT_SPRITE = Identifier.fromNamespaceAndPath(Constants.MOD_ID, "select-invert")
-private val SELECT_NONE_SPRITE = Identifier.fromNamespaceAndPath(Constants.MOD_ID, "select-none")
+private class Shortcut(private val ctrl: Boolean, private val glfwKey: Int, val label: String) {
+    fun matches(event: KeyEvent) = event.key() == glfwKey && event.hasControlDownWithQuirk() == ctrl
+}
 
-/** The three bulk selection buttons, each also bound to its hardcoded Ctrl shortcut. */
-private class SelectionAction(val key: String, val sprite: Identifier, val glfwKey: Int, val shortcut: String)
-
-private val SELECTION_ACTIONS = listOf(
-    SelectionAction("chunkeditor.map.select_all", SELECT_ALL_SPRITE, GLFW.GLFW_KEY_A, "Ctrl+A"),
-    SelectionAction("chunkeditor.map.invert", SELECT_INVERT_SPRITE, GLFW.GLFW_KEY_I, "Ctrl+I"),
-    SelectionAction("chunkeditor.map.clear", SELECT_NONE_SPRITE, GLFW.GLFW_KEY_C, "Ctrl+C"),
-)
+private val SC_SELECT_ALL = Shortcut(true, GLFW.GLFW_KEY_A, "Ctrl+A")
+private val SC_INVERT = Shortcut(true, GLFW.GLFW_KEY_I, "Ctrl+I")
+private val SC_CLEAR = Shortcut(false, GLFW.GLFW_KEY_BACKSPACE, "Backspace")
+private val SC_TRIM = Shortcut(false, GLFW.GLFW_KEY_T, "T")
+private val SC_EXPORT = Shortcut(false, GLFW.GLFW_KEY_E, "E")
+private val SC_IMPORT = Shortcut(false, GLFW.GLFW_KEY_I, "I")
+private val SC_DELETE = Shortcut(false, GLFW.GLFW_KEY_DELETE, "Del")
+private val SC_REFRESH = Shortcut(true, GLFW.GLFW_KEY_R, "Ctrl+R")
 
 private val DELETE_ACTION: Component get() = Component.translatable("selectWorld.delete")
 private val PASTE_ACTION: Component get() = Component.translatable("chunkeditor.clip.import")
@@ -200,9 +203,8 @@ internal class ChunkMapScreen(
     private var tintsLoading = false
     private var tintsDone = false
 
-    private lateinit var deleteButton: Button
-    private lateinit var exportButton: Button
     private lateinit var dimensionPicker: Dropdown<WorldDimension>
+    private var menus: List<MenuDropdown> = emptyList()
 
     /** Non-null while a clip is following the cursor, waiting to be placed. */
     private var pasteClip: ClipInfo? = null
@@ -226,51 +228,61 @@ internal class ChunkMapScreen(
 
         dimensionPicker = Dropdown(MARGIN, 6, DROPDOWN_W, dimensions, dim, { it.label }, ::switchDimension)
         addRenderableWidget(dimensionPicker.button)
-        addRenderableWidget(
-            Button.builder(Component.translatable("chunkeditor.map.reset_view")) { resetView() }
-                .bounds(MARGIN + 146, 6, 84, 20).build()
-        )
-        addRenderableWidget(
-            Button.builder(Component.translatable("selectServer.refresh")) { dimension?.let { loadDimension(it) } }
-                .bounds(MARGIN + 236, 6, 70, 20).build()
-        )
 
-        var x = MARGIN
-        val y = height - FOOTER_H + 6
-        SELECTION_ACTIONS.forEach { action ->
-            val label = Component.translatable(action.key)
-            val button = addRenderableWidget(IconButton(x, y, 20, label, action.sprite) { run(action) })
-            button.setTooltip(
-                Tooltip.create(
-                    Component.empty().append(label)
-                        .append(Component.literal(" (${action.shortcut})").withStyle(ChatFormatting.GRAY))
-                )
-            )
-            x += 24
+        var x = MARGIN + DROPDOWN_W + 6
+        menus = listOf(
+            menu("chunkeditor.menu.selection", x, selectionMenu()),
+            menu("chunkeditor.menu.edit", x + MENU_W + 4, editMenu()),
+            menu("chunkeditor.menu.view", x + 2 * (MENU_W + 4), viewMenu()),
+        )
+        // One menu at a time, or two overlays would fight over the same pixels.
+        menus.forEach { dropdown ->
+            dropdown.onOpen = { opened -> menus.forEach { if (it !== opened) it.close() } }
+            addRenderableWidget(dropdown.button)
         }
-        addRenderableWidget(
-            Button.builder(Component.translatable("chunkeditor.map.trim")) { openTrim() }.bounds(x, y, 78, 20).build()
-        )
-        x += 82
-        exportButton = addRenderableWidget(
-            Button.builder(Component.translatable("chunkeditor.clip.export")) { openExport() }
-                .bounds(x, y, 70, 20).build()
-        )
-        x += 74
-        addRenderableWidget(
-            Button.builder(Component.translatable("chunkeditor.clip.import")) { openLibrary() }
-                .bounds(x, y, 70, 20).build()
-        )
-        deleteButton = addRenderableWidget(
-            Button.builder(Component.translatable("chunkeditor.map.delete_selected")) { confirmDelete() }
-                .bounds(width - MARGIN - 190, y, 110, 20).build()
-        )
+
         addRenderableWidget(
             Button.builder(CommonComponents.GUI_DONE) { onClose() }
-                .bounds(width - MARGIN - 76, y, 76, 20).build()
+                .bounds(width - MARGIN - 76, 6, 76, 20).build()
         )
-        syncDeleteButton()
     }
+
+    private fun menu(key: String, x: Int, entries: List<MenuEntry>) =
+        MenuDropdown(Component.translatable(key), x, 6, MENU_W, entries)
+
+    /** Things to select chunks */
+    private fun selectionMenu(): List<MenuEntry> = listOf(
+        MenuEntry.Item(Component.translatable("chunkeditor.map.select_all"), SC_SELECT_ALL.label) { selectAll() },
+        MenuEntry.Item(Component.translatable("chunkeditor.map.invert"), SC_INVERT.label) { invertSelection() },
+        MenuEntry.Item(Component.translatable("chunkeditor.map.clear"), SC_CLEAR.label) { clearSelection() },
+        MenuEntry.Separator,
+        MenuEntry.Item(Component.translatable("chunkeditor.map.trim"), SC_TRIM.label) { openTrim() },
+    )
+
+    /** Things to edit selected chunks */
+    private fun editMenu(): List<MenuEntry> = listOf(
+        MenuEntry.Item(
+            Component.translatable("chunkeditor.clip.export"), SC_EXPORT.label,
+            enabled = { selected.isNotEmpty() && !clipBusy },
+        ) { openExport() },
+        MenuEntry.Item(
+            Component.translatable("chunkeditor.clip.import"), SC_IMPORT.label,
+            enabled = { !clipBusy },
+        ) { openLibrary() },
+        MenuEntry.Separator,
+        MenuEntry.Item(
+            Component.translatable("selectWorld.delete"), SC_DELETE.label,
+            enabled = { selected.isNotEmpty() },
+        ) { confirmDelete() },
+    )
+
+    /** Things to edit how the map looks */
+    private fun viewMenu(): List<MenuEntry> = listOf(
+        MenuEntry.Item(Component.translatable("chunkeditor.map.reset_view")) { resetView() },
+        MenuEntry.Item(Component.translatable("selectServer.refresh"), SC_REFRESH.label) {
+            dimension?.let { loadDimension(it) }
+        },
+    )
 
     //
     // Clips
@@ -584,15 +596,6 @@ internal class ChunkMapScreen(
 
     private fun onSelectionChanged() {
         selection.releaseAll()
-        syncDeleteButton()
-    }
-
-    private fun syncDeleteButton() {
-        deleteButton.active = selected.isNotEmpty()
-        if (::exportButton.isInitialized) exportButton.active = selected.isNotEmpty() && !clipBusy
-        deleteButton.message =
-            if (selected.isEmpty()) Component.translatable("chunkeditor.map.delete_selected")
-            else Component.literal("${I18n.get("selectWorld.delete")} ${selected.size}")
     }
 
     /**
@@ -637,7 +640,6 @@ internal class ChunkMapScreen(
                 dropTextures()
                 // A render started before the delete would land with the deleted chunks still on it.
                 loadGen++
-                syncDeleteButton()
             }
         }
     }
@@ -649,7 +651,7 @@ internal class ChunkMapScreen(
     private fun mapLeft() = MARGIN
     private fun mapTop() = HEADER_H
     private fun mapRight() = width - MARGIN
-    private fun mapBottom() = height - FOOTER_H - INFO_H
+    private fun mapBottom() = height - MARGIN - INFO_H
 
     private fun screenX(blockX: Double) = (mapLeft() + mapRight()) / 2.0 + (blockX - centerX) * scale
     private fun screenY(blockZ: Double) = (mapTop() + mapBottom()) / 2.0 + (blockZ - centerZ) * scale
@@ -696,6 +698,7 @@ internal class ChunkMapScreen(
         drawInfo(graphics, mouseX, mouseY)
 
         dimensionPicker.renderOverlay(graphics, font, mouseX, mouseY)
+        menus.forEach { it.renderOverlay(graphics, font, mouseX, mouseY) }
     }
 
     private fun visibleRegions(): List<RegionIndex> {
@@ -856,9 +859,10 @@ internal class ChunkMapScreen(
         // Starts on the map's own bottom border rather than below it, or the two boxes would stack
         // their 1 px edges into a 2 px rule.
         val top = mapBottom() - 1
-        val bottom = height - FOOTER_H
+        val bottom = height - MARGIN
         drawBox(graphics, MARGIN, top, width - MARGIN, bottom)
-        val textY = top + (bottom - top - font.lineHeight) / 2 + 1
+        val textY = top + (INFO_ROW_H - font.lineHeight) / 2 + 2
+        val secondY = textY + INFO_ROW_H
 
         val hovering = inMap(mouseX.toDouble(), mouseY.toDouble())
         val blockPosX = if (hovering) floor(blockX(mouseX.toDouble())).toInt() else null
@@ -870,7 +874,7 @@ internal class ChunkMapScreen(
         x = coordGroup(graphics, "chunkeditor.map.block", blockPosX, blockPosZ, BLOCK_EXTREME, x, textY)
 
         val barRight = width - MARGIN - 6
-        sliderY = (top + bottom) / 2
+        sliderY = textY + font.lineHeight / 2
         sliderX2 = barRight
         sliderX1 = max(x + 8, barRight - SLIDER_MAX_W)
         if (sliderX2 - sliderX1 < SLIDER_MIN_W) {
@@ -878,16 +882,30 @@ internal class ChunkMapScreen(
             sliderX2 = 0
         } else drawZoomSlider(graphics, mouseX, mouseY)
 
+        val selectedLabel = "${I18n.get("chunkeditor.map.selected")}:"
+        graphics.text(font, selectedLabel, MARGIN + 6, secondY, SUBTEXT_COLOR)
+        val countX = MARGIN + 6 + font.width(selectedLabel) + 4
+        graphics.text(font, selected.size.toString(), countX, secondY, -1)
+        val summaryX = countX + font.width(reservedCount(selected.size)) + 14
+
+        val summary = when {
+            dimension == null -> I18n.get("chunkeditor.map.no_regions")
+            loading -> I18n.get("chunkeditor.map.reading")
+            else -> I18n.get("chunkeditor.map.summary", indices.size, totalChunks, bytes(totalBytes))
+        }
+        graphics.text(font, summary, summaryX, secondY, -1)
+
         val progress = scanProgress
-        val hint = when {
+        val status = when {
             clipMessage != null -> clipMessage!!
             progress != null -> I18n.get("chunkeditor.map.scanning", progress.first, progress.second)
             tintsLoading -> I18n.get("chunkeditor.map.biomes")
             else -> I18n.get("chunkeditor.map.hint")
         }
-        val hintRight = if (sliderX2 > sliderX1) sliderX1 - 8 else barRight
-        val hintX = hintRight - font.width(hint)
-        if (hintX > x) graphics.text(font, hint, hintX, textY, SUBTEXT_COLOR)
+        val statusX = barRight - font.width(status)
+        if (statusX > summaryX + font.width(summary) + 8) {
+            graphics.text(font, status, statusX, secondY, SUBTEXT_COLOR)
+        }
     }
 
     private fun drawZoomSlider(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
@@ -921,6 +939,10 @@ internal class ChunkMapScreen(
         graphics.text(font, "${vx ?: "–"},${vz ?: "–"}", valueX, y, -1)
         return valueX + font.width(reserved(vx, vz, extreme)) + 14
     }
+
+    /** The same stepped reservation as [reserved], for a single count */
+    private fun reservedCount(value: Int): String =
+        COUNT_TIERS.firstOrNull { value <= it }?.toString() ?: value.toString()
 
     /** The widest value of the first [COORD_TIERS] step both coordinates fit in */
     private fun reserved(vx: Int?, vz: Int?, extreme: String): String {
@@ -1068,6 +1090,7 @@ internal class ChunkMapScreen(
         val x = event.x()
         val y = event.y()
         if (dimensionPicker.mouseClicked(x, y)) return true
+        if (menus.any { it.mouseClicked(x, y) }) return true
         if (pasteClip != null) {
             clickSound()
             if (event.button() == 0 && inMap(x, y)) confirmPaste(pasteOrigin(x, y)) else cancelPaste()
@@ -1142,17 +1165,27 @@ internal class ChunkMapScreen(
 
     override fun keyPressed(event: KeyEvent): Boolean {
         if (dimensionPicker.keyPressed(event)) return true
+        if (menus.any { it.keyPressed(event) }) return true
         if (pasteClip != null && event.isEscape) {
             cancelPaste()
             return true
         }
-        if (event.hasControlDownWithQuirk()) {
-            val action = SELECTION_ACTIONS.firstOrNull { it.glfwKey == event.key() }
-            if (action != null) {
-                run(action)
-                clickSound()
-                return true
-            }
+        // Same guards the menu items carry
+        val handled = when {
+            SC_SELECT_ALL.matches(event) -> run { selectAll(); true }
+            SC_INVERT.matches(event) -> run { invertSelection(); true }
+            SC_CLEAR.matches(event) -> run { clearSelection(); true }
+            SC_TRIM.matches(event) -> run { openTrim(); true }
+            SC_EXPORT.matches(event) -> selected.isNotEmpty() && !clipBusy && run { openExport(); true }
+            SC_IMPORT.matches(event) -> !clipBusy && run { openLibrary(); true }
+            SC_DELETE.matches(event) -> selected.isNotEmpty() && run { confirmDelete(); true }
+            SC_REFRESH.matches(event) -> dimension?.let { loadDimension(it); true } ?: false
+            else -> false
+        }
+        if (handled) {
+            menus.forEach { it.close() }
+            clickSound()
+            return true
         }
         return super.keyPressed(event)
     }
