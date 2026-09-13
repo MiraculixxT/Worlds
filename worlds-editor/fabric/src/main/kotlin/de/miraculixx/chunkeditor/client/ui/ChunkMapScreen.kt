@@ -3,8 +3,10 @@ package de.miraculixx.chunkeditor.client.ui
 import com.mojang.blaze3d.platform.NativeImage
 import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.BiomeTints
-import de.miraculixx.chunkeditor.data.ChunkFacts
 import de.miraculixx.chunkeditor.data.ChunkMapRenderer
+import de.miraculixx.chunkeditor.data.ChunkMetric
+import de.miraculixx.chunkeditor.data.ChunkScan
+import de.miraculixx.chunkeditor.data.ChunkScans
 import de.miraculixx.chunkeditor.data.ChunkClipExport
 import de.miraculixx.chunkeditor.data.ChunkClipImport
 import de.miraculixx.chunkeditor.data.ChunkRegions
@@ -18,6 +20,8 @@ import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.REGION_SIZE
 import de.miraculixx.chunkeditor.data.RegionIndex
 import de.miraculixx.chunkeditor.data.LevelFacts
+import de.miraculixx.chunkeditor.data.OverlayColors
+import de.miraculixx.chunkeditor.data.OverlaySettings
 import de.miraculixx.chunkeditor.data.PlayerMarker
 import de.miraculixx.chunkeditor.data.PlayerMarkers
 import de.miraculixx.chunkeditor.data.WorldDimension
@@ -126,6 +130,9 @@ private const val OVERLAY_CACHE = 512
 /** Fixed marker sizes */
 private const val PLAYER_ICON = 12
 
+/** The gradient strip of the overlay legend in the info bar */
+private const val LEGEND_W = 40
+
 private const val PRESENT_COLOR = 0x70A8B4C8
 private const val UNREADABLE_COLOR = 0xB0C05050.toInt()
 private const val SELECTED_COLOR = 0x9033B5E5.toInt()
@@ -195,6 +202,7 @@ internal class ChunkMapScreen(
     private val coarse = TextureCache(COARSE_CACHE)
     private val presence = TextureCache(OVERLAY_CACHE)
     private val selection = TextureCache(OVERLAY_CACHE)
+    private val overlayTextures = TextureCache(OVERLAY_CACHE)
     private val rendering = HashSet<Long>()
     private val coarseRendering = HashSet<Long>()
     private var coarseJobs = 0
@@ -234,6 +242,15 @@ internal class ChunkMapScreen(
     private var playersLoading = false
     private var showPlayers = false
     private val skins = HashMap<UUID, Supplier<PlayerSkin>>()
+
+    private val scan = ChunkScan()
+
+    private var overlaySettings = OverlaySettings()
+    private var overlayVisible = false
+    private var overlayMin = 0L
+    private var overlayMax = 0L
+    private var overlayReady = false
+    private var overlayNow = 0L
 
     private var tints: BiomeTints? = null
     private var tintsLoading = false
@@ -322,6 +339,12 @@ internal class ChunkMapScreen(
         MenuEntry.Item(
             Component.translatable("chunkeditor.map.players"), checked = { showPlayers },
         ) { togglePlayers() },
+        MenuEntry.Separator,
+        MenuEntry.Item(
+            Component.translatable("chunkeditor.overlay.toggle"),
+            enabled = { overlaySettings.scannable }, checked = { overlayVisible },
+        ) { toggleOverlay() },
+        MenuEntry.Item(Component.translatable("chunkeditor.overlay.title")) { openOverlays() },
     )
 
     //
@@ -512,6 +535,7 @@ internal class ChunkMapScreen(
                 dropTextures()
                 // A render started before the write would land with the old terrain on it.
                 loadGen++
+                invalidateScan()
                 onSelectionChanged()
             }
         }
@@ -534,6 +558,8 @@ internal class ChunkMapScreen(
         val generation = ++loadGen
         loading = true
         players = null
+        scan.clear()
+        overlayReady = false
         yKnown = false
         yMin = DEFAULT_Y_MIN
         yMax = DEFAULT_Y_MAX
@@ -560,6 +586,7 @@ internal class ChunkMapScreen(
                 yCut = yMax
                 loading = false
                 if (showPlayers) loadPlayers()
+                if (overlayVisible) ensureOverlay()
             }
         }
     }
@@ -624,47 +651,115 @@ internal class ChunkMapScreen(
     }
 
     private fun openTrim() {
-        val dim = dimension ?: return
-        minecraft.gui.setScreen(ChunkTrimScreen(this) { criteria -> applyTrim(dim, criteria) })
+        if (dimension == null) return
+        minecraft.gui.setScreen(ChunkTrimScreen(this) { criteria -> applyTrim(criteria) })
     }
 
     /**
      * Turns the criteria into a selection. Scans all chunk data if needed.
      */
-    private fun applyTrim(dim: WorldDimension, criteria: TrimCriteria) {
+    private fun applyTrim(criteria: TrimCriteria) {
         minecraft.gui.setScreen(this)
         if (criteria.isEmpty) return
         if (!criteria.needsScan) {
-            select(criteria, emptyMap())
+            select(criteria)
             return
         }
+        requireScan(ChunkMetric.INHABITED_TIME) { select(criteria) }
+    }
+
+    /**
+     * Runs a scan action for [metric] through all regions
+     */
+    private fun requireScan(metric: ChunkMetric, action: () -> Unit) {
+        val argument = overlaySettings.argument
+        if (scan.ready(metric, argument)) {
+            action()
+            return
+        }
+        val dim = dimension ?: return
         val generation = loadGen
         val regions = indices.values.toList()
         scanProgress = 0 to regions.size
         scanJob?.cancel()
         scanJob = Constants.SCOPE.launch {
-            val facts = ChunkRegions.scanFields(dim, regions) { done, total ->
+            val result = ChunkScans.scan(dim, access, regions, metric.source, argument, yMin) { done, total ->
                 minecraft.execute { if (generation == loadGen) scanProgress = done to total }
             }
             minecraft.execute {
                 scanProgress = null
-                if (generation == loadGen) select(criteria, facts)
+                if (generation != loadGen) return@execute
+                scan.apply(result)
+                action()
             }
         }
     }
 
-    private fun select(criteria: TrimCriteria, facts: Map<Long, ChunkFacts>) {
+    private fun toggleOverlay() {
+        if (!overlaySettings.scannable) return
+        overlayVisible = !overlayVisible
+        overlayTextures.releaseAll()
+        if (overlayVisible) ensureOverlay()
+    }
+
+    private fun openOverlays() {
+        minecraft.gui.setScreen(OverlayScreen(this, overlaySettings) { settings ->
+            minecraft.gui.setScreen(this)
+            overlaySettings = settings
+            overlayVisible = settings.scannable
+            overlayReady = false
+            overlayTextures.releaseAll()
+            if (overlayVisible) ensureOverlay()
+        })
+    }
+
+    private fun ensureOverlay() {
+        val mode = overlaySettings.overlay ?: return
+        if (!overlaySettings.scannable) return
+        requireScan(mode.metric) { computeOverlayRange() }
+    }
+
+    /** The gradient spans what this dimension holds, unless the overlay screen pinned an end of it */
+    private fun computeOverlayRange() {
+        overlayTextures.releaseAll()
+        overlayReady = false
+        val mode = overlaySettings.overlay ?: return
+        overlayNow = System.currentTimeMillis() / 1000
+        var low = Long.MAX_VALUE
+        var high = Long.MIN_VALUE
+        indices.values.forEach { region ->
+            ChunkRegions.forEachChunk(region) { pos ->
+                val raw = scan.value(mode.metric, pos.pack()) ?: return@forEachChunk
+                val value = mode.value(raw, worldTime, overlayNow)
+                if (value < low) low = value
+                if (value > high) high = value
+            }
+        }
+        if (low > high) return
+        overlayMin = overlaySettings.min ?: low
+        overlayMax = overlaySettings.max ?: high
+        overlayReady = true
+    }
+
+    /** A disk modify requires a full rescan */
+    private fun invalidateScan() {
+        scan.clear()
+        overlayReady = false
+        overlayTextures.releaseAll()
+        if (overlayVisible) ensureOverlay()
+    }
+
+    private fun select(criteria: TrimCriteria) {
         val spawnChunk = ChunkPos(spawn.x shr 4, spawn.z shr 4)
         indices.values.forEach { region ->
             ChunkRegions.forEachChunk(region) { pos ->
                 val packed = pos.pack()
-                val fact = facts[packed]
                 val hit = (criteria.minSpawnDistance == null ||
                     pos.getChessboardDistance(spawnChunk) > criteria.minSpawnDistance) &&
                     (criteria.maxInhabitedTicks == null ||
-                        (fact?.inhabitedTime ?: 0L) < criteria.maxInhabitedTicks) &&
+                        (scan.value(ChunkMetric.INHABITED_TIME, packed) ?: 0L) < criteria.maxInhabitedTicks) &&
                     (criteria.olderThanTicks == null ||
-                        worldTime - (fact?.lastUpdate ?: 0L) > criteria.olderThanTicks)
+                        worldTime - (scan.value(ChunkMetric.LAST_UPDATE, packed) ?: 0L) > criteria.olderThanTicks)
                 if (hit) selected.add(packed)
             }
         }
@@ -717,6 +812,7 @@ internal class ChunkMapScreen(
                 dropTextures()
                 // A render started before the delete would land with the deleted chunks still on it.
                 loadGen++
+                invalidateScan()
             }
         }
     }
@@ -822,7 +918,10 @@ internal class ChunkMapScreen(
             if (perChunk) blit(graphics, presenceTexture(region), x, y, w, h, REGION_SIZE)
             else graphics.fill(x, y, x + w, y + h, density(region))
         }
-        if (perChunk) selectionTexture(region)?.let { blit(graphics, it, x, y, w, h, REGION_SIZE) }
+        if (perChunk) {
+            if (overlayVisible) overlayTexture(region)?.let { blit(graphics, it, x, y, w, h, REGION_SIZE) }
+            selectionTexture(region)?.let { blit(graphics, it, x, y, w, h, REGION_SIZE) }
+        }
     }
 
     /**
@@ -1058,12 +1157,36 @@ internal class ChunkMapScreen(
             clipMessage != null -> clipMessage!!
             progress != null -> I18n.get("chunkeditor.map.scanning", progress.first, progress.second)
             tintsLoading -> I18n.get("chunkeditor.map.biomes")
-            else -> I18n.get("chunkeditor.map.hint")
+            else -> if (drawOverlayLegend(graphics, barRight, secondY, summaryX + font.width(summary) + 8)) {
+                return
+            } else I18n.get("chunkeditor.map.hint")
         }
         val statusX = barRight - font.width(status)
         if (statusX > summaryX + font.width(summary) + 8) {
             graphics.text(font, status, statusX, secondY, SUBTEXT_COLOR)
         }
+    }
+
+    /** `<overlay>: <min> gradient <max>` right aligned */
+    private fun drawOverlayLegend(graphics: GuiGraphicsExtractor, right: Int, y: Int, minX: Int): Boolean {
+        val mode = overlaySettings.overlay ?: return false
+        if (!overlayVisible || !overlayReady) return false
+        val name = "${mode.label}:"
+        val low = mode.format(overlayMin)
+        val high = mode.format(overlayMax)
+        var x = right - (font.width(name) + font.width(low) + font.width(high) + LEGEND_W + 12)
+        if (x < minX) return false
+        graphics.text(font, name, x, y, SUBTEXT_COLOR)
+        x += font.width(name) + 4
+        graphics.text(font, low, x, y, -1)
+        x += font.width(low) + 4
+        val top = y + 1
+        for (i in 0 until LEGEND_W) {
+            graphics.fill(x + i, top, x + i + 1, top + font.lineHeight - 2, OverlayColors.color(i / (LEGEND_W - 1.0), 0xFF))
+        }
+        x += LEGEND_W + 4
+        graphics.text(font, high, x, y, -1)
+        return true
     }
 
     private fun drawZoomSlider(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
@@ -1158,6 +1281,38 @@ internal class ChunkMapScreen(
         return register("chunkmap/selection/${region.rx}_${region.rz}", image).also { selection[regionKey] = it }
     }
 
+    /** The heatmap of a region, a pixel per chunk. Null until the scan and its range are in */
+    private fun overlayTexture(region: RegionIndex): Identifier? {
+        val mode = overlaySettings.overlay ?: return null
+        if (!overlayReady) return null
+        val regionKey = key(region.rx, region.rz)
+        overlayTextures[regionKey]?.let { return it }
+        val span = (overlayMax - overlayMin).toDouble()
+        var any = false
+        val image = NativeImage(NativeImage.Format.RGBA, REGION_SIZE, REGION_SIZE, false)
+        for (z in 0 until REGION_SIZE) {
+            for (x in 0 until REGION_SIZE) {
+                val pos = ChunkPos(region.rx * REGION_SIZE + x, region.rz * REGION_SIZE + z)
+                val raw = scan.value(mode.metric, pos.pack())
+                val value = raw?.let { mode.value(it, worldTime, overlayNow) }
+                if (value == null) {
+                    image.setPixelABGR(x, z, 0)
+                    continue
+                }
+                any = true
+                // A dimension where every chunk holds the same value has no gradient to show
+                val t = if (span <= 0.0) 0.5 else (value - overlayMin) / span
+                image.setPixelABGR(x, z, abgr(OverlayColors.color(t)))
+            }
+        }
+        if (!any) {
+            image.close()
+            return null
+        }
+        return register("chunkmap/overlay/${region.rx}_${region.rz}", image)
+            .also { overlayTextures[regionKey] = it }
+    }
+
     private fun requestTerrain(region: RegionIndex) {
         if (!tintsDone) return
         val dim = dimension ?: return
@@ -1221,6 +1376,7 @@ internal class ChunkMapScreen(
         coarse.releaseAll()
         presence.releaseAll()
         selection.releaseAll()
+        overlayTextures.releaseAll()
     }
 
     /**

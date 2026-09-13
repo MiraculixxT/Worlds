@@ -12,6 +12,8 @@ the game regenerates them on the next visit.
   * Respects data driven properties (biome tint, blocks, ...)
   * 3 LoD layers based on zoom
   * Max-height slider to cut the view down (e.g. under Nether roof)
+  * Overlays/heatmaps (e.g. inhabit time, #(tile-)entity, custom NBT path, ...)
+  * Markers (e.g. player markers)
 * Every dimension the save has, including custom dimensions
 * Deletes `region/`, `entities/` and `poi/` together (after backup)
 

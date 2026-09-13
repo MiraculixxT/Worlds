@@ -6,9 +6,6 @@ import kotlinx.coroutines.withContext
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.core.registries.Registries
 import net.minecraft.nbt.CompoundTag
-import net.minecraft.nbt.LongTag
-import net.minecraft.nbt.visitors.CollectFields
-import net.minecraft.nbt.visitors.FieldSelector
 import net.minecraft.resources.Identifier
 import net.minecraft.resources.ResourceKey
 import net.minecraft.world.level.ChunkPos
@@ -37,9 +34,6 @@ class RegionIndex(val rx: Int, val rz: Int, val present: BitSet, val bytes: Long
     operator fun contains(pos: ChunkPos): Boolean =
         present[pos.regionLocalZ * REGION_SIZE + pos.regionLocalX]
 }
-
-/** The two per-chunk longs the trim criteria compare against. */
-data class ChunkFacts(val inhabitedTime: Long, val lastUpdate: Long)
 
 const val REGION_SIZE = 32
 const val SUB_REGION = "region"
@@ -155,36 +149,23 @@ object ChunkRegions {
     }
 
     /**
-     * Reads `InhabitedTime` / `LastUpdate` of every generated chunk in [regions]
+     * Quick scan timestamps of each chunk via header
      */
-    suspend fun scanFields(
-        dimension: WorldDimension,
-        regions: Collection<RegionIndex>,
-        onProgress: (done: Int, total: Int) -> Unit,
-    ): Map<Long, ChunkFacts> = withContext(Dispatchers.IO) {
-        val facts = HashMap<Long, ChunkFacts>()
-        storage(dimension, SUB_REGION)?.use { store ->
-            regions.forEachIndexed { done, region ->
-                forEachChunk(region) { pos ->
-                    val collector = CollectFields(
-                        FieldSelector(LongTag.TYPE, "InhabitedTime"),
-                        FieldSelector(LongTag.TYPE, "LastUpdate"),
-                    )
-                    try {
-                        store.scanChunk(pos, collector)
-                        val tag = collector.result as? CompoundTag ?: return@forEachChunk
-                        facts[pos.pack()] = ChunkFacts(
-                            tag.getLongOr("InhabitedTime", 0L),
-                            tag.getLongOr("LastUpdate", 0L),
-                        )
-                    } catch (e: Exception) {
-                        Constants.LOG.warn("Failed to scan chunk {}: {}", pos, e.message)
-                    }
-                }
-                onProgress(done + 1, regions.size)
+    fun readTimestamps(dir: Path, rx: Int, rz: Int): IntArray? {
+        val file = regionFile(dir, rx, rz)
+        if (!Files.isRegularFile(file)) return null
+        return try {
+            val header = ByteBuffer.allocate(HEADER_BYTES * 2)
+            FileChannel.open(file, StandardOpenOption.READ).use { channel ->
+                while (header.hasRemaining() && channel.read(header) > 0) Unit
             }
+            if (header.position() < HEADER_BYTES * 2) return null
+            header.flip().position(HEADER_BYTES)
+            IntArray(REGION_SIZE * REGION_SIZE) { header.int }
+        } catch (e: Exception) {
+            Constants.LOG.warn("Failed to read region timestamps {}: {}", file, e.message)
+            null
         }
-        facts
     }
 
     /**
