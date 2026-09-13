@@ -3,6 +3,7 @@
   "chunkeditor.dimension.nether": "Nether",
   "chunkeditor.dimension.end": "Das Ende",
   "chunkeditor.map.title": "Chunk-Karte",
+  "chunkeditor.map.players": "Spieler-Marker",
   "chunkeditor.map.reset_view": "Zurücksetzen",
   "chunkeditor.map.select_all": "Alle wählen",
   "chunkeditor.map.invert": "Umkehren",

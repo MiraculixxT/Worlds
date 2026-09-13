@@ -18,6 +18,8 @@ import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.REGION_SIZE
 import de.miraculixx.chunkeditor.data.RegionIndex
 import de.miraculixx.chunkeditor.data.LevelFacts
+import de.miraculixx.chunkeditor.data.PlayerMarker
+import de.miraculixx.chunkeditor.data.PlayerMarkers
 import de.miraculixx.chunkeditor.data.WorldDimension
 import de.miraculixx.common.client.ui.BackupActionScreen
 import de.miraculixx.common.client.ui.Dropdown
@@ -30,7 +32,9 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import net.minecraft.client.gui.GuiGraphicsExtractor
+import com.mojang.authlib.GameProfile
 import net.minecraft.client.gui.components.Button
+import net.minecraft.client.gui.components.PlayerFaceExtractor
 import net.minecraft.client.gui.components.Checkbox
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.screens.Screen
@@ -45,9 +49,12 @@ import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.TextColor
 import net.minecraft.resources.Identifier
+import net.minecraft.world.entity.player.PlayerSkin
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.storage.LevelStorageSource
 import org.lwjgl.glfw.GLFW
+import java.util.UUID
+import java.util.function.Supplier
 import kotlin.io.path.name
 import kotlin.io.path.nameWithoutExtension
 import kotlin.math.abs
@@ -115,6 +122,9 @@ private const val MAX_COARSE_JOBS = 3
 private const val TERRAIN_CACHE = 32
 private const val COARSE_CACHE = 512
 private const val OVERLAY_CACHE = 512
+
+/** Fixed marker sizes */
+private const val PLAYER_ICON = 12
 
 private const val PRESENT_COLOR = 0x70A8B4C8
 private const val UNREADABLE_COLOR = 0xB0C05050.toInt()
@@ -219,6 +229,12 @@ internal class ChunkMapScreen(
     private var scanJob: Job? = null
     private var scanProgress: Pair<Int, Int>? = null
 
+    /** Null until the first time the markers are switched on */
+    private var players: List<PlayerMarker>? = null
+    private var playersLoading = false
+    private var showPlayers = false
+    private val skins = HashMap<UUID, Supplier<PlayerSkin>>()
+
     private var tints: BiomeTints? = null
     private var tintsLoading = false
     private var tintsDone = false
@@ -302,6 +318,10 @@ internal class ChunkMapScreen(
         MenuEntry.Item(Component.translatable("selectServer.refresh"), SC_REFRESH.label) {
             dimension?.let { loadDimension(it) }
         },
+        MenuEntry.Separator,
+        MenuEntry.Item(
+            Component.translatable("chunkeditor.map.players"), checked = { showPlayers },
+        ) { togglePlayers() },
     )
 
     //
@@ -513,6 +533,7 @@ internal class ChunkMapScreen(
     private fun loadDimension(dim: WorldDimension) {
         val generation = ++loadGen
         loading = true
+        players = null
         yKnown = false
         yMin = DEFAULT_Y_MIN
         yMax = DEFAULT_Y_MAX
@@ -538,6 +559,7 @@ internal class ChunkMapScreen(
                 }
                 yCut = yMax
                 loading = false
+                if (showPlayers) loadPlayers()
             }
         }
     }
@@ -545,6 +567,25 @@ internal class ChunkMapScreen(
     private fun firstChunk(region: RegionIndex): ChunkPos {
         val i = region.present.nextSetBit(0)
         return ChunkPos(region.rx * REGION_SIZE + i % REGION_SIZE, region.rz * REGION_SIZE + i / REGION_SIZE)
+    }
+
+    private fun togglePlayers() {
+        showPlayers = !showPlayers
+        if (showPlayers) loadPlayers()
+    }
+
+    /** Read once per dimension load */
+    private fun loadPlayers() {
+        if (playersLoading || players != null) return
+        playersLoading = true
+        val generation = loadGen
+        Constants.SCOPE.launch {
+            val read = PlayerMarkers.read(access)
+            minecraft.execute {
+                playersLoading = false
+                if (generation == loadGen) players = read
+            }
+        }
     }
 
     private fun loadTints() {
@@ -728,6 +769,7 @@ internal class ChunkMapScreen(
         visible.forEach { region -> drawRegion(graphics, region, withTerrain, perChunk) }
         pumpCoarse(visible)
         drawGrid(graphics, visible)
+        drawPlayers(graphics)
         drawDragRect(graphics)
         drawPasteGhost(graphics, mouseX, mouseY)
         graphics.disableScissor()
@@ -843,6 +885,21 @@ internal class ChunkMapScreen(
             }
         }
     }
+
+    /** Every player saved in this dimension */
+    private fun drawPlayers(graphics: GuiGraphicsExtractor) {
+        if (!showPlayers) return
+        val here = dimension?.key?.identifier() ?: return
+        players?.forEach { marker ->
+            if (marker.dimension != here) return@forEach
+            val x = screenX(marker.pos.x).roundToInt() - PLAYER_ICON / 2
+            val y = screenY(marker.pos.z).roundToInt() - PLAYER_ICON / 2
+            PlayerFaceExtractor.extractRenderState(graphics, skinOf(marker.id), x, y, PLAYER_ICON)
+        }
+    }
+
+    private fun skinOf(id: UUID): PlayerSkin =
+        skins.getOrPut(id) { minecraft.skinManager.createLookup(GameProfile(id, ""), false) }.get()
 
     private fun drawDragRect(graphics: GuiGraphicsExtractor) {
         val from = dragFrom ?: return

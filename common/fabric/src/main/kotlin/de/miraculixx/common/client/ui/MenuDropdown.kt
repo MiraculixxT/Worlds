@@ -12,6 +12,9 @@ private const val ROW_H = 14
 private const val SEPARATOR_H = 5
 private const val PADDING = 6
 private const val SHORTCUT_GAP = 20
+private const val CHECK_W = 10
+private const val CHECK_ON = "☒"
+private const val CHECK_OFF = "☐"
 private const val ARROW = " ▾"
 
 sealed interface MenuEntry {
@@ -19,6 +22,7 @@ sealed interface MenuEntry {
         val label: Component,
         val shortcut: String? = null,
         val enabled: () -> Boolean = { true },
+        val checked: (() -> Boolean)? = null,
         val action: () -> Unit,
     ) : MenuEntry
 
@@ -73,7 +77,12 @@ class MenuDropdown(
                         mouseY >= rowTop && mouseY < rowTop + ROW_H
                     if (hovered) graphics.fill(x + 1, rowTop, x + width - 1, rowTop + ROW_H, HOVER_COLOR)
                     val textY = rowTop + (ROW_H - font.lineHeight) / 2 + 1
-                    graphics.text(font, entry.label, x + PADDING, textY, if (enabled) -1 else SUBTEXT_COLOR)
+                    val entryW = when (entry.checked?.invoke()) {
+                        true -> { graphics.text(font, CHECK_ON, x + 4, textY, -1); CHECK_W }
+                        false -> { graphics.text(font, CHECK_OFF, x + 4, textY, -1); CHECK_W }
+                        null -> 0
+                    }
+                    graphics.text(font, entry.label, x + PADDING + entryW, textY, if (enabled) -1 else SUBTEXT_COLOR)
                     entry.shortcut?.let {
                         graphics.text(font, it, x + width - PADDING - font.width(it), textY, SUBTEXT_COLOR)
                     }
@@ -93,7 +102,7 @@ class MenuDropdown(
         if (mouseX >= x && mouseX < x + popupWidth(font) && mouseY >= top && mouseY < top + height()) {
             itemAt(mouseY - top - 1)?.let { item ->
                 if (!item.enabled()) return true
-                open = false
+                if (item.checked == null) open = false
                 clickSound()
                 item.action()
             }
@@ -128,6 +137,7 @@ class MenuDropdown(
         val widest = entries.filterIsInstance<MenuEntry.Item>().maxOfOrNull { item ->
             font.width(item.label) + (item.shortcut?.let { SHORTCUT_GAP + font.width(it) } ?: 0)
         } ?: 0
-        return maxOf(widest + 2 * PADDING, button.width)
+        val extraWidth = entries.firstOrNull { it is MenuEntry.Item && it.checked != null }?.let { CHECK_W } ?: 0
+        return maxOf(widest + extraWidth + 2 * PADDING, button.width)
     }
 }
