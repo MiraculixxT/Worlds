@@ -20,6 +20,7 @@ import de.miraculixx.chunkeditor.data.SelectionFile
 import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.REGION_SIZE
 import de.miraculixx.chunkeditor.data.RegionIndex
+import de.miraculixx.chunkeditor.data.ScanSource
 import de.miraculixx.chunkeditor.data.LevelFacts
 import de.miraculixx.chunkeditor.data.OverlayColors
 import de.miraculixx.chunkeditor.data.OverlaySettings
@@ -140,8 +141,9 @@ private const val SELECTED_COLOR = 0x9033B5E5.toInt()
 private const val GRID_COLOR = 0x30FFFFFF
 private const val REGION_LINE_COLOR = 0x80FFFFFF.toInt()
 
-private class Shortcut(private val ctrl: Boolean, private val glfwKey: Int, val label: String) {
-    fun matches(event: KeyEvent) = event.key() == glfwKey && event.hasControlDownWithQuirk() == ctrl
+private class Shortcut(private val ctrl: Boolean, private val glfwKey: Int, val label: String, private val shift: Boolean = false) {
+    fun matches(event: KeyEvent) =
+        event.key() == glfwKey && event.hasControlDownWithQuirk() == ctrl && event.hasShiftDown() == shift
 }
 
 private val SC_SELECT_ALL = Shortcut(true, GLFW.GLFW_KEY_A, "Ctrl+A")
@@ -152,6 +154,9 @@ private val SC_EXPORT = Shortcut(false, GLFW.GLFW_KEY_E, "E")
 private val SC_IMPORT = Shortcut(false, GLFW.GLFW_KEY_I, "I")
 private val SC_DELETE = Shortcut(false, GLFW.GLFW_KEY_DELETE, "Del")
 private val SC_REFRESH = Shortcut(true, GLFW.GLFW_KEY_R, "Ctrl+R")
+private val SC_PLAYERS = Shortcut(false, GLFW.GLFW_KEY_P, "Shift+P", shift = true)
+private val SC_OVERLAYS = Shortcut(false, GLFW.GLFW_KEY_O, "O")
+private val SC_OVERLAY_TOGGLE = Shortcut(false, GLFW.GLFW_KEY_O, "Shift+O", shift = true)
 
 private val DELETE_ACTION: Component get() = Component.translatable("selectWorld.delete")
 private val PASTE_ACTION: Component get() = Component.translatable("chunkeditor.clip.import")
@@ -237,6 +242,11 @@ internal class ChunkMapScreen(
 
     private var scanJob: Job? = null
     private var scanProgress: Pair<Int, Int>? = null
+
+    /** Prevent double scanning */
+    private var scanKey: Pair<ScanSource, String?>? = null
+    private var scanToken = 0
+    private val scanWaiting = ArrayList<() -> Unit>()
 
     /** Null until the first time the markers are switched on */
     private var players: List<PlayerMarker>? = null
@@ -339,14 +349,14 @@ internal class ChunkMapScreen(
         },
         MenuEntry.Separator,
         MenuEntry.Item(
-            Component.translatable("chunkeditor.map.players"), checked = { showPlayers },
+            Component.translatable("chunkeditor.map.players"), SC_PLAYERS.label, checked = { showPlayers },
         ) { togglePlayers() },
         MenuEntry.Separator,
         MenuEntry.Item(
-            Component.translatable("chunkeditor.overlay.toggle"),
+            Component.translatable("chunkeditor.overlay.toggle"), SC_OVERLAY_TOGGLE.label,
             enabled = { overlaySettings.scannable }, checked = { overlayVisible },
         ) { toggleOverlay() },
-        MenuEntry.Item(Component.translatable("chunkeditor.overlay.title")) { openOverlays() },
+        MenuEntry.Item(Component.translatable("chunkeditor.overlay.title"), SC_OVERLAYS.label) { openOverlays() },
     )
 
     //
@@ -560,6 +570,7 @@ internal class ChunkMapScreen(
         val generation = ++loadGen
         loading = true
         players = null
+        cancelScan()
         scan.clear()
         overlayReady = false
         yKnown = false
@@ -679,22 +690,44 @@ internal class ChunkMapScreen(
             action()
             return
         }
+        val key = metric.source to argument
+        if (scanJob?.isActive == true && scanKey == key) {
+            scanWaiting += action
+            return
+        }
         val dim = dimension ?: return
         val generation = loadGen
         val regions = indices.values.toList()
+        cancelScan()
+        val token = scanToken
+        scanKey = key
+        scanWaiting += action
         scanProgress = 0 to regions.size
-        scanJob?.cancel()
         scanJob = Constants.SCOPE.launch {
             val result = ChunkScans.scan(dim, access, regions, metric.source, argument, yMin) { done, total ->
-                minecraft.execute { if (generation == loadGen) scanProgress = done to total }
+                minecraft.execute { if (generation == loadGen && token == scanToken) scanProgress = done to total }
             }
             minecraft.execute {
+                if (token != scanToken) return@execute
                 scanProgress = null
+                scanKey = null
+                val pending = scanWaiting.toList()
+                scanWaiting.clear()
                 if (generation != loadGen) return@execute
                 scan.apply(result)
-                action()
+                pending.forEach { it() }
             }
         }
+    }
+
+    /** Drops the running pass and everything waiting on it */
+    private fun cancelScan() {
+        scanToken++
+        scanJob?.cancel()
+        scanJob = null
+        scanKey = null
+        scanWaiting.clear()
+        scanProgress = null
     }
 
     private fun toggleOverlay() {
@@ -751,6 +784,7 @@ internal class ChunkMapScreen(
 
     /** A disk modify requires a full rescan */
     private fun invalidateScan() {
+        cancelScan()
         scan.clear()
         overlayReady = false
         overlayTextures.releaseAll()
@@ -1546,6 +1580,9 @@ internal class ChunkMapScreen(
             SC_IMPORT.matches(event) -> !clipBusy && run { openLibrary(); true }
             SC_DELETE.matches(event) -> selected.isNotEmpty() && run { confirmDelete(); true }
             SC_REFRESH.matches(event) -> dimension?.let { loadDimension(it); true } ?: false
+            SC_PLAYERS.matches(event) -> run { togglePlayers(); true }
+            SC_OVERLAYS.matches(event) -> run { openOverlays(); true }
+            SC_OVERLAY_TOGGLE.matches(event) -> overlaySettings.scannable && run { toggleOverlay(); true }
             else -> false
         }
         if (handled) {
@@ -1592,7 +1629,7 @@ internal class ChunkMapScreen(
     private fun exists(pos: ChunkPos) = indices[key(pos.regionX, pos.regionZ)]?.contains(pos) == true
 
     override fun onClose() {
-        scanJob?.cancel()
+        cancelScan()
         // Bumping the generation is what makes an in-flight render close its image on arrival instead
         // of registering it into a cache nothing will release again.
         loadGen++
