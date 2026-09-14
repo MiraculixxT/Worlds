@@ -2,7 +2,7 @@
 
 An MCA-Selector like chunk map, in game.
 
-Adds a **Chunk Editor** button to Minecraft's world edit screen.
+Adds a **Chunk Editor** button to Minecraft's world edit screen (`World Menu -> Edit -> Chunk Editor`).
 View the whole map & select chunks by hand or by criteria (playtime, staleness, distance from spawn), and delete them so
 the game regenerates them on the next visit.
 
@@ -20,6 +20,8 @@ the game regenerates them on the next visit.
 ![fun with zoom](https://i.postimg.cc/4yyfMz5x/MCA.webp)
 
 ---
+
+# 📒 Wiki / Guide
 
 ### Exporting
 A selection & world-clip can be exported, containing all region, POI & entity data stored in vanilla format.
@@ -53,5 +55,28 @@ The importer allows **every** version to be important, as long as it's lower tha
 | 19           | 0            | Only the top section (y `304..319`)                                                           |
 
 </details>
+
+### Overlays
+See information directly on the map via Overlays.
+Choose an Overlay in the menu `View -> Overlays` and it will scan the specific data and cache it for future toggles.
+
+Number range overlays will show as heatmap in either manual set ranges or in automatic calculated ranges.
+Categoric overlays (e.g. biomes) render in hashed colors and show the current hovered region info (e.g. river)
+
+<details>
+  <summary> Advanced Settings </summary>
+
+Some overlays take additional arguments, like the block & custom NBT overlay.
+Those can be used to display everything that can be mapped to a numeric value.
+
+**Block Count**: Input takes either ` ` (count all blocks), a block id `minecraft:spawner` or a block tag `#minecraft:logs` (tags resolve against installed datapacks)
+
+**NBT Path**: Point at any NBT value from `region/*.mca` files. Arrays/Lists get resolved to their size.
+Paths can be walked down with `.` & lists picked with `[n]` like `sections[0].Y`. 
+Read more about available data here: https://minecraft.wiki/w/Chunk_format
+
+</details>
+
+---
 
 Directly integrated by [**Worlds**](https://modrinth.com/mod/world) with more useful world configurations & faster loading!
