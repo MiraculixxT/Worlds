@@ -1,15 +1,13 @@
 package de.miraculixx.chunkeditor.client.ui
 
 import com.mojang.blaze3d.platform.NativeImage
+import net.minecraft.core.Registry
+import net.minecraft.world.level.biome.Biome
 import de.miraculixx.chunkeditor.Constants
-import de.miraculixx.chunkeditor.data.BiomeTints
-import de.miraculixx.chunkeditor.data.ChunkMapRenderer
 import de.miraculixx.chunkeditor.data.ChunkMetric
 import de.miraculixx.chunkeditor.data.ChunkOverlay
 import de.miraculixx.chunkeditor.data.ChunkScan
-import de.miraculixx.chunkeditor.data.ChunkScans
 import de.miraculixx.chunkeditor.data.ChunkClipExport
-import de.miraculixx.chunkeditor.data.ChunkClipImport
 import de.miraculixx.chunkeditor.data.ChunkRegions
 import de.miraculixx.chunkeditor.data.ClipImportOptions
 import de.miraculixx.chunkeditor.data.ExistingChunks
@@ -21,12 +19,12 @@ import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.REGION_SIZE
 import de.miraculixx.chunkeditor.data.RegionIndex
 import de.miraculixx.chunkeditor.data.ScanSource
-import de.miraculixx.chunkeditor.data.LevelFacts
+import de.miraculixx.chunkeditor.data.EditorBackend
 import de.miraculixx.chunkeditor.data.OverlayColors
 import de.miraculixx.chunkeditor.data.OverlaySettings
 import de.miraculixx.chunkeditor.data.PlayerMarker
-import de.miraculixx.chunkeditor.data.PlayerMarkers
 import de.miraculixx.chunkeditor.data.WorldDimension
+import net.minecraft.locale.Language
 import de.miraculixx.common.client.ui.BackupActionScreen
 import de.miraculixx.common.client.ui.Dropdown
 import de.miraculixx.common.client.ui.MenuDropdown
@@ -34,6 +32,7 @@ import de.miraculixx.common.client.ui.MenuEntry
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
 import de.miraculixx.common.client.ui.clickSound
 import de.miraculixx.common.client.ui.drawBox
+import de.miraculixx.chunkeditor.data.RegionPixels
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -57,7 +56,6 @@ import net.minecraft.network.chat.TextColor
 import net.minecraft.resources.Identifier
 import net.minecraft.world.entity.player.PlayerSkin
 import net.minecraft.world.level.ChunkPos
-import net.minecraft.world.level.storage.LevelStorageSource
 import org.lwjgl.glfw.GLFW
 import java.util.UUID
 import java.util.function.Supplier
@@ -127,6 +125,8 @@ private const val MAX_COARSE_JOBS = 3
 
 private const val TERRAIN_CACHE = 32
 private const val COARSE_CACHE = 512
+/** Limit max tint queue to 48mb (a region is at worst 1.5mb) */
+private const val MAX_PENDING_TINT = 48L * 1024 * 1024
 private const val OVERLAY_CACHE = 512
 
 /** Fixed marker sizes */
@@ -171,12 +171,14 @@ private fun noUndoLabel(action: Component): Component = Component.translatable(
     Component.translatable("chunkeditor.confirm.no_undo_tag").withColor(TextColor.RED),
 )
 
-/** Past this many chunks a paste ghost draws only its hull — a quad each would swamp the frame. */
-private const val PASTE_FILL_MAX = 4096
+/** Past this footprint a paste ghost draws only its hull */
+private const val PASTE_GHOST_MAX = 1 shl 20
 private const val PASTE_COLOR = 0x6033B5E5
 
 private const val CLICK_SLOP = 3.0
 private const val TICKS_PER_MINUTE = 1200L
+
+private val WorldDimension.name: String get() = Language.getInstance().getOrDefault(labelKey, labelKey)
 
 /**
  * MCA-Selector like interface.
@@ -184,14 +186,14 @@ private const val TICKS_PER_MINUTE = 1200L
  */
 internal class ChunkMapScreen(
     private val parent: Screen,
-    private val access: LevelStorageSource.LevelStorageAccess,
+    private val backend: EditorBackend,
 ) : Screen(Component.translatable("chunkeditor.map.title")) {
 
-    private val facts = LevelFacts.read(access)
+    private val facts = backend.facts
     private val worldTime = facts.gameTime
     private val spawn: BlockPos = facts.spawn
 
-    private val dimensions = ChunkRegions.dimensions(access)
+    private val dimensions = backend.dimensions
     private var dimension = dimensions.firstOrNull()
 
     /** Region key (packed rx/rz) its chunk bitmap. Filled once per dimension. */
@@ -204,8 +206,16 @@ internal class ChunkMapScreen(
     private val selected = LongOpenHashSet()
     private val unreadable = LongOpenHashSet()
 
-    private val terrain = TextureCache(TERRAIN_CACHE)
-    private val coarse = TextureCache(COARSE_CACHE)
+    /** Renders that landed before the biome colors */
+    private val pendingTerrain = HashMap<Long, RegionPixels>()
+    private val pendingCoarse = HashMap<Long, RegionPixels>()
+    /** If tint building takes too long and maxes [MAX_PENDING_TINT] cache, drop & rebuild */
+    private val staleTerrain = LongOpenHashSet()
+    private val staleCoarse = LongOpenHashSet()
+    private var pendingBytes = 0L
+
+    private val terrain = TextureCache(TERRAIN_CACHE, pendingTerrain)
+    private val coarse = TextureCache(COARSE_CACHE, pendingCoarse)
     private val presence = TextureCache(OVERLAY_CACHE)
     private val selection = TextureCache(OVERLAY_CACHE)
     private val overlayTextures = TextureCache(OVERLAY_CACHE)
@@ -264,7 +274,8 @@ internal class ChunkMapScreen(
     private var overlayNow = 0L
     private var overlayColors = IntArray(0)
 
-    private var tints: BiomeTints? = null
+    @Volatile
+    private var biomes: Registry<Biome>? = null
     private var tintsLoading = false
     private var tintsDone = false
 
@@ -278,9 +289,16 @@ internal class ChunkMapScreen(
     /** minX, minZ, maxX, maxZ of [pasteOffsets] */
     private var pasteBounds = intArrayOf(0, 0, 0, 0)
 
+    private var pasteTexture: Identifier? = null
+    private var pasteW = 0
+    private var pasteH = 0
+
     @Volatile
     private var clipMessage: String? = null
     private var clipBusy = false
+
+    /** If the backend (server) does a backup before next write */
+    private var pendingBackup = false
 
     override fun init() {
         val dim = dimension
@@ -291,7 +309,7 @@ internal class ChunkMapScreen(
         }
         loadTints()
 
-        dimensionPicker = Dropdown(MARGIN, 6, DROPDOWN_W, dimensions, dim, { it.label }, ::switchDimension)
+        dimensionPicker = Dropdown(MARGIN, 6, DROPDOWN_W, dimensions, dim, { it.name }, ::switchDimension)
         addRenderableWidget(dimensionPicker.button)
 
         var x = MARGIN + DROPDOWN_W + 6
@@ -366,7 +384,7 @@ internal class ChunkMapScreen(
     private fun openExport() {
         val dim = dimension ?: return
         if (selected.isEmpty() || clipBusy) return
-        minecraft.gui.setScreen(ClipNameScreen(this, "${dim.label.lowercase()}-${selected.size}") { name, kinds ->
+        minecraft.gui.setScreen(ClipNameScreen(this, "${dim.name.lowercase()}-${selected.size}") { name, kinds ->
             minecraft.gui.setScreen(this)
             runExports(dim, name, kinds)
         })
@@ -455,13 +473,33 @@ internal class ChunkMapScreen(
             pasteOffsets.minOfOrNull { it.x } ?: 0, pasteOffsets.minOfOrNull { it.z } ?: 0,
             pasteOffsets.maxOfOrNull { it.x } ?: 0, pasteOffsets.maxOfOrNull { it.z } ?: 0,
         )
+        buildPasteTexture()
         clipMessage = I18n.get("chunkeditor.clip.paste_hint", clip.name)
     }
 
     private fun cancelPaste() {
         pasteClip = null
         pasteOffsets = emptyList()
+        releasePasteTexture()
         clipMessage = null
+    }
+
+    /** One pixel per chunk of the footprint, drawn wherever the cursor puts it. */
+    private fun buildPasteTexture() {
+        releasePasteTexture()
+        val w = pasteBounds[2] - pasteBounds[0] + 1
+        val h = pasteBounds[3] - pasteBounds[1] + 1
+        if (w <= 0 || h <= 0 || w.toLong() * h > PASTE_GHOST_MAX) return
+        val image = NativeImage(NativeImage.Format.RGBA, w, h, true)
+        pasteOffsets.forEach { image.setPixelABGR(it.x - pasteBounds[0], it.z - pasteBounds[1], abgr(PASTE_COLOR)) }
+        pasteW = w
+        pasteH = h
+        pasteTexture = register("chunkmap/paste", image)
+    }
+
+    private fun releasePasteTexture() {
+        pasteTexture?.let { minecraft.textureManager.release(it) }
+        pasteTexture = null
     }
 
     /** Where the clip's own origin would land, given the cursor. */
@@ -482,7 +520,7 @@ internal class ChunkMapScreen(
         clipBusy = true
         clipMessage = I18n.get("chunkeditor.clip.checking")
         Constants.SCOPE.launch {
-            val conflicts = ChunkClipImport.conflicts(clip, dim, origin)
+            val conflicts = backend.conflicts(dim, clip, origin)
             minecraft.execute {
                 clipBusy = false
                 clipMessage = null
@@ -498,8 +536,7 @@ internal class ChunkMapScreen(
                     BackupActionScreen(
                         { minecraft.gui.setScreen(this@ChunkMapScreen) },
                         { backup, _ ->
-                            EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access)
-                                .thenAcceptAsync({ runPaste(clip, dim, origin, options) }, minecraft)
+                            withBackup(backup) { runPaste(clip, dim, origin, options) }
                         },
                         Component.translatable("chunkeditor.clip.paste_title", clip.name),
                         Component.translatable(warning, conflicts),
@@ -517,13 +554,13 @@ internal class ChunkMapScreen(
         clipBusy = true
         clipMessage = I18n.get("chunkeditor.clip.importing", 0, clip.chunks.size)
         Constants.SCOPE.launch {
-            val result = ChunkClipImport.import(clip, dim, origin, options) { done, total ->
+            val result = backend.paste(dim, clip, origin, options, pendingBackup) { done, total ->
                 clipMessage = I18n.get("chunkeditor.clip.importing", done, total)
             }
             val touched = clip.chunks
                 .map { ChunkPos(it.x + origin.x - clip.origin.x, it.z + origin.z - clip.origin.z) }
                 .map { it.regionX to it.regionZ }.distinct()
-            val refreshed = touched.map { (rx, rz) -> key(rx, rz) to ChunkRegions.readIndex(dim, rx, rz) }
+            val refreshed = touched.map { (rx, rz) -> key(rx, rz) to backend.index(dim, rx, rz) }
             minecraft.execute {
                 clipBusy = false
                 clipMessage = when (result) {
@@ -583,9 +620,9 @@ internal class ChunkMapScreen(
         coarseRendering.clear()
         dropTextures()
         Constants.SCOPE.launch {
-            val read = ChunkRegions.listRegions(dim).mapNotNull { (rx, rz) -> ChunkRegions.readIndex(dim, rx, rz) }
+            val read = backend.regionList(dim).mapNotNull { (rx, rz) -> backend.index(dim, rx, rz) }
             // One chunk carries the dimension's build height
-            val bounds = read.firstOrNull { it.count > 0 }?.let { ChunkRegions.heightBounds(dim, firstChunk(it)) }
+            val bounds = read.firstOrNull { it.count > 0 }?.let { backend.heightBounds(dim, firstChunk(it)) }
             minecraft.execute {
                 if (generation != loadGen) return@execute
                 read.forEach { indices[key(it.rx, it.rz)] = it }
@@ -620,7 +657,7 @@ internal class ChunkMapScreen(
         playersLoading = true
         val generation = loadGen
         Constants.SCOPE.launch {
-            val read = PlayerMarkers.read(access)
+            val read = backend.players()
             minecraft.execute {
                 playersLoading = false
                 if (generation == loadGen) players = read
@@ -632,11 +669,12 @@ internal class ChunkMapScreen(
         if (tintsLoading || tintsDone) return
         tintsLoading = true
         Constants.SCOPE.launch {
-            val loaded = BiomeTints.load(access)
+            val loaded = backend.biomes()
             minecraft.execute {
-                tints = loaded
+                biomes = loaded
                 tintsLoading = false
                 tintsDone = true
+                applyPendingTints()
             }
         }
     }
@@ -704,7 +742,7 @@ internal class ChunkMapScreen(
         scanWaiting += action
         scanProgress = 0 to regions.size
         scanJob = Constants.SCOPE.launch {
-            val result = ChunkScans.scan(dim, access, regions, metric.source, argument, yMin) { done, total ->
+            val result = backend.scan(dim, regions, metric.source, argument, yMin) { done, total ->
                 minecraft.execute { if (generation == loadGen && token == scanToken) scanProgress = done to total }
             }
             minecraft.execute {
@@ -812,10 +850,21 @@ internal class ChunkMapScreen(
         selection.releaseAll()
     }
 
+
     /**
-     * Vanilla's backup prompt doubles as the confirmation: its three buttons are backup-and-proceed,
-     * proceed without one, and cancel.
+     * Local backups direct, remote flags backup on for shutdown
      */
+    private fun withBackup(backup: Boolean, andThen: () -> Unit) {
+        val access = backend.localAccess
+        pendingBackup = backup
+        if (access == null) {
+            andThen()
+            return
+        }
+        EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access)
+            .thenAcceptAsync({ andThen() }, minecraft)
+    }
+
     private fun confirmDelete() {
         val dim = dimension ?: return
         val count = selected.size
@@ -823,11 +872,10 @@ internal class ChunkMapScreen(
             BackupActionScreen(
                 { minecraft.gui.setScreen(this) },
                 { backup, _ ->
-                    EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access)
-                        .thenAcceptAsync({ runDelete(dim) }, minecraft)
+                    withBackup(backup) { runDelete(dim) }
                 },
                 Component.translatable("chunkeditor.map.delete_title", count),
-                Component.translatable("chunkeditor.map.delete_warning", dim.label),
+                Component.translatable("chunkeditor.map.delete_warning", dim.name),
                 backupLabel(DELETE_ACTION),
                 noUndoLabel(DELETE_ACTION),
             )
@@ -839,9 +887,9 @@ internal class ChunkMapScreen(
         val generation = loadGen
         minecraft.gui.setScreen(this)
         Constants.SCOPE.launch {
-            ChunkRegions.deleteChunks(dim, chunks)
+            backend.delete(dim, chunks, pendingBackup)
             val touched = chunks.map { it.regionX to it.regionZ }.distinct()
-            val refreshed = touched.map { (rx, rz) -> key(rx, rz) to ChunkRegions.readIndex(dim, rx, rz) }
+            val refreshed = touched.map { (rx, rz) -> key(rx, rz) to backend.index(dim, rx, rz) }
             minecraft.execute {
                 if (generation != loadGen) return@execute
                 refreshed.forEach { (regionKey, index) ->
@@ -970,7 +1018,7 @@ internal class ChunkMapScreen(
      * Queues overview renders for the visible regions that have none, a few at a time
      */
     private fun pumpCoarse(visible: List<RegionIndex>) {
-        if (!tintsDone || visible.size > OVERLAY_CACHE) return
+        if (visible.size > OVERLAY_CACHE) return
         for (region in visible) {
             if (coarseJobs >= MAX_COARSE_JOBS) return
             val regionKey = key(region.rx, region.rz)
@@ -1061,22 +1109,15 @@ internal class ChunkMapScreen(
         if (pasteClip == null) return
         if (!inMap(mouseX.toDouble(), mouseY.toDouble())) return
         val origin = pasteOrigin(mouseX.toDouble(), mouseY.toDouble())
-        if (pasteOffsets.size <= PASTE_FILL_MAX) {
-            pasteOffsets.forEach { offset ->
-                val cx = origin.x + offset.x
-                val cz = origin.z + offset.z
-                val x = screenX(cx * 16.0).roundToInt()
-                val y = screenY(cz * 16.0).roundToInt()
-                val x2 = screenX((cx + 1) * 16.0).roundToInt()
-                val y2 = screenY((cz + 1) * 16.0).roundToInt()
-                if (x2 > x && y2 > y) graphics.fill(x, y, x2, y2, PASTE_COLOR)
-            }
-        }
-        // The hull is drawn whatever the count, so a clip too big to fill still shows where it lands.
         val x = screenX((origin.x + pasteBounds[0]) * 16.0).roundToInt()
         val y = screenY((origin.z + pasteBounds[1]) * 16.0).roundToInt()
         val x2 = screenX((origin.x + pasteBounds[2] + 1) * 16.0).roundToInt()
         val y2 = screenY((origin.z + pasteBounds[3] + 1) * 16.0).roundToInt()
+        pasteTexture?.let {
+            if (x2 > x && y2 > y) {
+                graphics.blit(RenderPipelines.GUI_TEXTURED, it, x, y, 0f, 0f, x2 - x, y2 - y, pasteW, pasteH, pasteW, pasteH)
+            }
+        }
         graphics.fill(x, y, x2, y + 1, REGION_LINE_COLOR)
         graphics.fill(x, y2 - 1, x2, y2, REGION_LINE_COLOR)
         graphics.fill(x, y, x + 1, y2, REGION_LINE_COLOR)
@@ -1384,21 +1425,24 @@ internal class ChunkMapScreen(
     }
 
     private fun requestTerrain(region: RegionIndex) {
-        if (!tintsDone) return
         val dim = dimension ?: return
         val regionKey = key(region.rx, region.rz)
         if (!rendering.add(regionKey)) return
         val generation = loadGen
+        val registry = biomes
         Constants.SCOPE.launch {
-            val rendered = ChunkMapRenderer.renderRegion(dim, region.rx, region.rz, tints = tints, maxY = heightCut())
+            val rendered = backend.render(dim, region.rx, region.rz, 1, heightCut())
+            // Tinting and the image itself are plain memory
+            val image = rendered?.let { RegionTexture.image(it, registry) }
             minecraft.execute {
                 // A region that cannot be rendered at all keeps its in-flight marker
                 if (rendered != null) rendering.remove(regionKey)
-                if (generation != loadGen || rendered == null) {
-                    rendered?.image?.close()
+                if (generation != loadGen || rendered == null || image == null) {
+                    image?.close()
                     return@execute
                 }
-                terrain[regionKey] = register("chunkmap/terrain/${region.rx}_${region.rz}", rendered.image)
+                terrain[regionKey] = register("chunkmap/terrain/${region.rx}_${region.rz}", retintIfLate(registry, rendered, image))
+                if (registry == null && !tintsDone) retainPixels(pendingTerrain, staleTerrain, regionKey, rendered)
                 if (rendered.unreadable.isNotEmpty()) {
                     unreadable.addAll(rendered.unreadable)
                     presence.remove(regionKey)?.let { minecraft.textureManager.release(it) }
@@ -1413,25 +1457,96 @@ internal class ChunkMapScreen(
         if (!coarseRendering.add(regionKey)) return
         coarseJobs++
         val generation = loadGen
+        val registry = biomes
         Constants.SCOPE.launch {
-            val rendered = ChunkMapRenderer.renderRegion(dim, region.rx, region.rz, COARSE_STEP, tints, heightCut())
+            val rendered = backend.render(dim, region.rx, region.rz, COARSE_STEP, heightCut())
+            val image = rendered?.let { RegionTexture.image(it, registry) }
             minecraft.execute {
                 coarseJobs--
                 if (rendered != null) coarseRendering.remove(regionKey)
-                if (generation != loadGen || rendered == null) {
-                    rendered?.image?.close()
+                if (generation != loadGen || rendered == null || image == null) {
+                    image?.close()
                     return@execute
                 }
                 if (coarse.containsKey(regionKey)) {
-                    rendered.image.close()
+                    image.close()
                     return@execute
                 }
-                coarse[regionKey] = register("chunkmap/coarse/${region.rx}_${region.rz}", rendered.image)
+                coarse[regionKey] = register("chunkmap/coarse/${region.rx}_${region.rz}", retintIfLate(registry, rendered, image))
+                if (registry == null && !tintsDone) retainPixels(pendingCoarse, staleCoarse, regionKey, rendered)
                 if (rendered.unreadable.isNotEmpty()) {
                     unreadable.addAll(rendered.unreadable)
                     presence.remove(regionKey)?.let { minecraft.textureManager.release(it) }
                 }
             }
+        }
+    }
+
+    /**
+     * The fallback, when tinting lands while rendering this region
+     */
+    private fun retintIfLate(registry: Registry<Biome>?, pixels: RegionPixels, image: NativeImage): NativeImage {
+        val landed = biomes
+        if (registry != null || landed == null) return image
+        image.close()
+        return RegionTexture.image(pixels, landed)
+    }
+
+    /** Holds a flat render's pixels for [applyPendingTints], as long as the budget has room. */
+    private fun retainPixels(
+        pending: MutableMap<Long, RegionPixels>, stale: LongOpenHashSet, regionKey: Long, pixels: RegionPixels,
+    ) {
+        if (pixels.tintIndex == null) return
+        if (pendingBytes + pixels.bytes > MAX_PENDING_TINT) {
+            stale.add(regionKey)
+            return
+        }
+        dropPending(pending, regionKey)
+        pending[regionKey] = pixels
+        pendingBytes += pixels.bytes
+    }
+
+    private fun dropPending(pending: MutableMap<Long, RegionPixels>?, regionKey: Long) {
+        pending?.remove(regionKey)?.let { pendingBytes -= it.bytes }
+    }
+
+    /**
+     * Apply tint to all cached regions & store for coming regions.
+     * If the cache overflowed, drop the overflow forcing a rerender.
+     */
+    private fun applyPendingTints() {
+        staleTerrain.forEach { terrain.remove(it)?.let { id -> minecraft.textureManager.release(id) } }
+        staleCoarse.forEach { coarse.remove(it)?.let { id -> minecraft.textureManager.release(id) } }
+        staleTerrain.clear()
+        staleCoarse.clear()
+        val registry = biomes
+        val terrainWork = HashMap(pendingTerrain)
+        val coarseWork = HashMap(pendingCoarse)
+        pendingTerrain.clear()
+        pendingCoarse.clear()
+        pendingBytes = 0
+        if (registry == null || (terrainWork.isEmpty() && coarseWork.isEmpty())) return
+        val generation = loadGen
+        // Like rendering, tinting must be off-thread
+        Constants.SCOPE.launch {
+            val builtTerrain = terrainWork.mapValues { RegionTexture.image(it.value, registry) }
+            val builtCoarse = coarseWork.mapValues { RegionTexture.image(it.value, registry) }
+            minecraft.execute {
+                install(terrain, "terrain", builtTerrain, generation)
+                install(coarse, "coarse", builtCoarse, generation)
+            }
+        }
+    }
+
+    private fun install(cache: TextureCache, kind: String, images: Map<Long, NativeImage>, generation: Int) {
+        images.forEach { (regionKey, image) ->
+            val id = if (generation == loadGen) cache[regionKey] else null
+            if (id == null) {
+                image.close()
+                return@forEach
+            }
+            minecraft.textureManager.release(id)
+            cache[regionKey] = register("chunkmap/$kind/${(regionKey shr 32).toInt()}_${regionKey.toInt()}", image)
         }
     }
 
@@ -1442,6 +1557,8 @@ internal class ChunkMapScreen(
     }
 
     private fun dropTextures() {
+        staleTerrain.clear()
+        staleCoarse.clear()
         terrain.releaseAll()
         coarse.releaseAll()
         presence.releaseAll()
@@ -1453,16 +1570,24 @@ internal class ChunkMapScreen(
      * Access-ordered LRU. Registering the same [Identifier] twice would leak the previous texture, so
      * eviction has to hand it back to the texture manager.
      */
-    private inner class TextureCache(private val cap: Int) : LinkedHashMap<Long, Identifier>(16, 0.75f, true) {
+    private inner class TextureCache(
+        private val cap: Int,
+        private val pending: MutableMap<Long, RegionPixels>? = null,
+    ) : LinkedHashMap<Long, Identifier>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Identifier>): Boolean {
             if (size <= cap) return false
             minecraft.textureManager.release(eldest.value)
+            dropPending(pending, eldest.key)
             return true
         }
 
         fun releaseAll() {
             values.forEach { minecraft.textureManager.release(it) }
             clear()
+            pending?.let { map ->
+                map.values.forEach { pendingBytes -= it.bytes }
+                map.clear()
+            }
         }
     }
 
@@ -1634,6 +1759,7 @@ internal class ChunkMapScreen(
         // of registering it into a cache nothing will release again.
         loadGen++
         dropTextures()
+        releasePasteTexture()
         minecraft.gui.setScreen(parent)
     }
 

@@ -1,12 +1,14 @@
 package de.miraculixx.chunkeditor.neoforge
 
-import de.miraculixx.chunkeditor.client.initChunkEditorClient
+import de.miraculixx.chunkeditor.initChunkEditor
 import net.neoforged.api.distmarker.Dist
 import net.neoforged.fml.common.Mod
+import net.neoforged.fml.loading.FMLEnvironment
 
-@Mod(value = "chunkeditor", dist = [Dist.CLIENT])
+@Mod("chunkeditor")
 object ChunkEditorNeoForge {
     init {
-        initChunkEditorClient()
+        initChunkEditor()
+        if (FMLEnvironment.getDist() == Dist.CLIENT) ChunkEditorNeoForgeClient.init()
     }
 }

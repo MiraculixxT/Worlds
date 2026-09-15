@@ -13,8 +13,11 @@
   },
   "license": "All-Rights-Reserved",
   "icon": "assets/chunkeditor/icon.png",
-  "environment": "client",
+  "environment": "*",
   "entrypoints": {
+    "main": [
+      "de.miraculixx.chunkeditor.ChunkEditorMod"
+    ],
     "client": [
       "de.miraculixx.chunkeditor.client.ChunkEditorClient"
     ]

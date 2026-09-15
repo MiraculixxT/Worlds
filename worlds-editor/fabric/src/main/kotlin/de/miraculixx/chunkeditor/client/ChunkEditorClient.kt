@@ -4,7 +4,7 @@ import de.miraculixx.chunkeditor.Constants
 import net.fabricmc.api.ClientModInitializer
 
 fun initChunkEditorClient() {
-    Constants.LOG.info("Chunk Editor loaded")
+    Constants.LOG.debug("Chunk Editor client ready")
 }
 
 class ChunkEditorClient : ClientModInitializer {

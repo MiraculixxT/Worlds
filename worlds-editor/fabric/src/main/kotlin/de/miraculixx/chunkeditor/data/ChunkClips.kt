@@ -1,10 +1,10 @@
 package de.miraculixx.chunkeditor.data
 
 import de.miraculixx.chunkeditor.Constants
+import de.miraculixx.common.Loader
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import net.minecraft.SharedConstants
-import net.minecraft.client.Minecraft
 import net.minecraft.resources.Identifier
 import net.minecraft.resources.ResourceKey
 import net.minecraft.world.level.ChunkPos
@@ -59,7 +59,7 @@ object ChunkClips {
 
     val currentDataVersion: Int get() = SharedConstants.getCurrentVersion().dataVersion().version()
 
-    fun libraryDir(): Path = Minecraft.getInstance().gameDirectory.toPath().resolve("chunkclips")
+    fun libraryDir(): Path = Loader.gameDir.resolve("chunkclips")
 
     fun list(): List<ClipInfo> {
         val dir = libraryDir()

@@ -50,6 +50,14 @@ loom {
     runs {
         configureEach { runDir("../../run") }
 
+        named("server") {
+            runDir("../../run/server")
+            if (providers.gradleProperty("mixinAudit").isPresent) {
+                property("mixin.debug.verbose", "true")
+                property("mixin.debug.countInjections", "true")
+            }
+        }
+
         named("client") {
             programArgs("--username", "Notch")
             // `-PmixinAudit` is the only way to see a mixin succeed
@@ -85,4 +93,13 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.withType<KotlinCompile>().configureEach {
     compilerOptions.jvmTarget.set(JvmTarget.fromTarget(TARGET_JAVA_VERSION.toString()))
+}
+
+tasks.matching { it.name == "runServer" }.configureEach {
+    doFirst {
+        val dir = rootProject.layout.projectDirectory.dir("run/server").asFile
+        dir.mkdirs()
+        val eula = File(dir, "eula.txt")
+        if (!eula.exists()) eula.writeText("eula=true\n")
+    }
 }

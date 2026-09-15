@@ -17,6 +17,7 @@ dependencies {
 }
 
 modPublish {
+    environments.set(setOf("Client", "Server"))
     loader.set("fabric")
     modrinthId.set(property("chunkEditorModrinthId") as String)
     curseforgeId.set(property("chunkEditorCurseforgeId") as String)
