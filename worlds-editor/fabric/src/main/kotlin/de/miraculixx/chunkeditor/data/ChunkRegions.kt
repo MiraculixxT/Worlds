@@ -1,3 +1,5 @@
+@file:Suppress("UnusedExpression")
+
 package de.miraculixx.chunkeditor.data
 
 import de.miraculixx.chunkeditor.Constants

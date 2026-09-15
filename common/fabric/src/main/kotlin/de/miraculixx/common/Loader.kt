@@ -1,3 +1,5 @@
+@file:Suppress("SameParameterValue")
+
 package de.miraculixx.common
 
 import net.fabricmc.loader.api.FabricLoader

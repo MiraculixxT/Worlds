@@ -16,7 +16,6 @@ import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.storage.LevelStorageSource
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.UUID
 import kotlin.io.path.createDirectories
 import kotlin.io.path.name
 import kotlin.io.path.readText
@@ -87,8 +86,6 @@ object ServerJobs {
     }
 
     fun cancel(id: String): Boolean = delete(dirOf(id))
-
-    fun newId(): String = UUID.randomUUID().toString()
 
     /** Runs everything queued, in the order it was asked for */
     fun applyAll(path: Path) {

@@ -9,7 +9,6 @@ import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.NbtOps
 import net.minecraft.nbt.NbtUtils
-import net.minecraft.resources.Identifier
 import net.minecraft.util.ARGB
 import net.minecraft.util.datafix.DataFixTypes
 import net.minecraft.util.datafix.DataFixers
@@ -52,7 +51,6 @@ object ChunkMapRenderer {
     /**
      * One region as a square image, or null when the region file is gone.
      * @param step Quality state of the image
-     * @param tints Biome tinting, when the save's biome registry has been loaded
      * @param maxY Highest block the column walk may start at, or null for the whole chunk
      */
     suspend fun renderRegion(
@@ -112,7 +110,7 @@ object ChunkMapRenderer {
                 val states = section.getCompound("block_states").orElse(null) ?: return@mapNotNull null
                 if (isAirOnly(states)) null else Section(y, states, section)
             }.sortedByDescending { it.y }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return false
         }
         if (sections.isEmpty()) return true
