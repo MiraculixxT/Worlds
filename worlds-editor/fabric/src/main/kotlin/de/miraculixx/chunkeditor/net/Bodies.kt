@@ -494,8 +494,9 @@ object LibraryBodies {
             chunks.forEach { buf.writeLong(it.pack()) }
         }
 
-    fun selectionExportRequest(name: String, chunks: Collection<ChunkPos>): ByteArray = Bodies.write { buf ->
+    fun selectionExportRequest(name: String, chunks: Collection<ChunkPos>, inverted: Boolean): ByteArray = Bodies.write { buf ->
         buf.writeUtf(name)
+        buf.writeBoolean(inverted)
         buf.writeVarInt(chunks.size)
         chunks.forEach { buf.writeLong(it.pack()) }
     }

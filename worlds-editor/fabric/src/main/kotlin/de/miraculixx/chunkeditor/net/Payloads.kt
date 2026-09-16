@@ -6,7 +6,7 @@ import net.minecraft.network.codec.StreamCodec
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload
 import net.minecraft.resources.Identifier
 
-const val PROTOCOL_VERSION = 4
+const val PROTOCOL_VERSION = 5
 
 /**
  * The one packet handling all communication to avoid having 100 registered packets

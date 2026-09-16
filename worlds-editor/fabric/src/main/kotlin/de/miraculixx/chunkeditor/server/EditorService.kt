@@ -272,8 +272,9 @@ object EditorService {
 
                 C2S.SELECTION_EXPORT -> Bodies.read(body) { buf ->
                     val name = buf.readUtf()
+                    val inverted = buf.readBoolean()
                     val chunks = (0 until buf.readVarInt()).map { ChunkPos.unpack(buf.readLong()) }
-                    reply(player, request, LibraryBodies.writeBoolean(backend.exportSelection(name, chunks)))
+                    reply(player, request, LibraryBodies.writeBoolean(backend.exportSelection(name, chunks, inverted)))
                 }
 
                 C2S.JOB_DELETE -> Bodies.read(body) { buf ->

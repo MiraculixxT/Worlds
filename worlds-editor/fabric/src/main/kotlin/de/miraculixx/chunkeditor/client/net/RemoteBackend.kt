@@ -95,9 +95,9 @@ class RemoteBackend(hello: Hello) : EditorBackend {
         ClientNet.request(C2S.CLIP_EXPORT, LibraryBodies.exportRequest(name, dimension, chunks), onProgress),
     )
 
-    override suspend fun exportSelection(name: String, chunks: Collection<ChunkPos>): Boolean =
+    override suspend fun exportSelection(name: String, chunks: Collection<ChunkPos>, inverted: Boolean): Boolean =
         LibraryBodies.readBoolean(
-            ClientNet.request(C2S.SELECTION_EXPORT, LibraryBodies.selectionExportRequest(name, chunks)),
+            ClientNet.request(C2S.SELECTION_EXPORT, LibraryBodies.selectionExportRequest(name, chunks, inverted)),
         )
 
     override suspend fun conflicts(dimension: WorldDimension, clip: ClipFootprint, origin: ChunkPos): Int =

@@ -462,20 +462,43 @@ internal class ChunkMapScreen(
         }
     }
 
-    /** Opens local client lib to upload clips to the remote server */
+    /** Opens local client lib to upload clips and selections to the remote server */
     private fun openUpload() {
         val remote = backend as? RemoteBackend ?: return
         if (clipBusy) return
+        val label = Component.translatable("chunkeditor.clip.upload")
         minecraft.gui.setScreen(
             ClipLibraryScreen(
-                this, LocalLibrary, Component.translatable("chunkeditor.clip.upload"),
+                this, LocalLibrary, label,
                 { clip ->
                     minecraft.gui.setScreen(this)
                     runUpload(remote, clip.name)
                 },
-                null,
+                { selection ->
+                    minecraft.gui.setScreen(this)
+                    runSelectionUpload(remote, selection.name)
+                },
+                label,
             )
         )
+    }
+
+    /** Small enough to go as one request */
+    private fun runSelectionUpload(remote: RemoteBackend, name: String) {
+        clipBusy = true
+        clipMessage = I18n.get("chunkeditor.clip.uploading", 0, 1)
+        Constants.SCOPE.launch {
+            val parsed = LocalLibrary.selection(name)
+            val chunks = parsed?.chunks?.map { ChunkPos.unpack(it) }
+            val sent = chunks != null && runCatching { remote.exportSelection(name, chunks, parsed.inverted) }
+                .onFailure { Constants.LOG.warn("Could not upload selection {}", name, it) }
+                .getOrDefault(false)
+            minecraft.execute {
+                clipBusy = false
+                clipMessage = if (!sent) I18n.get("chunkeditor.remote.error.upload")
+                else I18n.get("chunkeditor.clip.uploaded", name)
+            }
+        }
     }
 
     private fun runUpload(remote: RemoteBackend, name: String) {

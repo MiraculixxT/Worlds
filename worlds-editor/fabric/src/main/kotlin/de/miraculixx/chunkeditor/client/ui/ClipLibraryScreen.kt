@@ -150,6 +150,7 @@ internal class ClipNameScreen(
 /**
  * Everything a [ClipLibrary] holds (local or remote)
  * @param pickLabel what the pick button says (import or upload)
+ * @param selectionLabel the same on the selections tab
  * @param onPickSelection null hides the selections tab, for a browse that is only about clips
  */
 internal class ClipLibraryScreen(
@@ -158,6 +159,7 @@ internal class ClipLibraryScreen(
     private val pickLabel: Component,
     private val onPickClip: (ClipEntry) -> Unit,
     private val onPickSelection: ((SelectionEntry) -> Unit)?,
+    private val selectionLabel: Component = Component.translatable("chunkeditor.clip.select"),
 ) : Screen(Component.translatable("chunkeditor.clip.library_title")) {
 
     private enum class Tab(val key: String) {
@@ -261,7 +263,7 @@ internal class ClipLibraryScreen(
         importButton.active = selected
         deleteButton.active = selected
         importButton.message =
-            if (tab == Tab.CLIPS) pickLabel else Component.translatable("chunkeditor.clip.select")
+            if (tab == Tab.CLIPS) pickLabel else selectionLabel
     }
 
     private fun pick() {

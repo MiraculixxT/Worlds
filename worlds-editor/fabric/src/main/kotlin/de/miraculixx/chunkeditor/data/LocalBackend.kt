@@ -68,9 +68,9 @@ class LocalBackend(
         }
     }
 
-    override suspend fun exportSelection(name: String, chunks: Collection<ChunkPos>): Boolean =
+    override suspend fun exportSelection(name: String, chunks: Collection<ChunkPos>, inverted: Boolean): Boolean =
         withContext(Dispatchers.IO) {
-            runCatching { SelectionCsv.write(name, chunks) }
+            runCatching { SelectionCsv.write(name, chunks, inverted) }
                 .onFailure { Constants.LOG.error("Selection export failed", it) }
                 .isSuccess
         }

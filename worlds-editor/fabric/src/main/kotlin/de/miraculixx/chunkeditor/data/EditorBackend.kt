@@ -54,7 +54,7 @@ interface EditorBackend {
         onProgress: (done: Int, total: Int) -> Unit,
     ): ClipExportResult
 
-    suspend fun exportSelection(name: String, chunks: Collection<ChunkPos>): Boolean
+    suspend fun exportSelection(name: String, chunks: Collection<ChunkPos>, inverted: Boolean = false): Boolean
 
     suspend fun conflicts(dimension: WorldDimension, clip: ClipFootprint, origin: ChunkPos): Int
 
