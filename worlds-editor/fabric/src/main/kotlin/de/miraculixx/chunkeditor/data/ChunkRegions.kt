@@ -184,6 +184,7 @@ object ChunkRegions {
      */
     fun deleteChunks(dimension: WorldDimension, chunks: Collection<ChunkPos>): Int {
         if (chunks.isEmpty()) return 0
+        val started = System.nanoTime()
         var deleted = 0
         CHUNK_SUBS.forEach { sub ->
             storage(dimension, sub)?.use { store ->
@@ -205,6 +206,10 @@ object ChunkRegions {
                 if (index.isEmpty) runCatching { Files.deleteIfExists(file) }
             }
         }
+        Constants.LOG.info(
+            "delete {}: {} of {} chunks in {} ms",
+            dimension.dir.fileName, deleted, chunks.size, Constants.ms(started),
+        )
         return deleted
     }
 

@@ -64,6 +64,7 @@ object ChunkClipImport {
         options: ClipImportOptions,
         onProgress: (Int, Int) -> Unit,
     ): ImportResult {
+        val started = System.nanoTime()
         val source = clip.chunks
         if (source.isEmpty()) return ImportResult.Failure("chunkeditor.clip.error.empty")
         val clipVersion = clip.manifest?.dataVersion ?: 0
@@ -118,6 +119,10 @@ object ChunkClipImport {
                     ChunkRelocate.mergePoi(tag, existing)
                 } else tag
             }
+            Constants.LOG.info(
+                "paste {} into {}: {} written, {} skipped, {} clipped in {} ms",
+                clip.name, target.dir.fileName, written, skipped, clipped, Constants.ms(started),
+            )
             ImportResult.Success(written, skipped, clipped)
         } catch (e: Exception) {
             Constants.LOG.error("Clip import failed", e)
@@ -126,11 +131,14 @@ object ChunkClipImport {
     }
 
     /** @return amt of override chunks */
-    fun conflicts(clip: ClipInfo, target: WorldDimension, origin: ChunkPos): Int {
+    fun conflicts(clip: ClipInfo, target: WorldDimension, origin: ChunkPos): Int =
+        conflicts(clip.chunks, clip.origin, target, origin)
+
+    fun conflicts(chunks: Collection<ChunkPos>, clipOrigin: ChunkPos, target: WorldDimension, origin: ChunkPos): Int {
         val existing = existingChunks(target)
-        val dx = origin.x - clip.origin.x
-        val dz = origin.z - clip.origin.z
-        return clip.chunks.count { ChunkPos(it.x + dx, it.z + dz) in existing }
+        val dx = origin.x - clipOrigin.x
+        val dz = origin.z - clipOrigin.z
+        return chunks.count { ChunkPos(it.x + dx, it.z + dz) in existing }
     }
 
     private fun copy(

@@ -3,7 +3,7 @@ package de.miraculixx.chunkeditor.server
 import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.common.Loader
 import de.miraculixx.chunkeditor.data.ChunkClipImport
-import de.miraculixx.chunkeditor.data.ChunkClips
+import de.miraculixx.chunkeditor.data.LocalLibrary
 import de.miraculixx.chunkeditor.data.ChunkRegions
 import de.miraculixx.chunkeditor.data.ClipImportOptions
 import de.miraculixx.chunkeditor.data.ExistingChunks
@@ -16,6 +16,7 @@ import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.storage.LevelStorageSource
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.UUID
 import kotlin.io.path.createDirectories
 import kotlin.io.path.name
 import kotlin.io.path.readText
@@ -33,6 +34,7 @@ data class Job(
     val id: String,
     val kind: JobKind,
     val dimension: String,
+    val clip: String = "",
     val chunks: List<Long> = emptyList(),
     val originX: Int = 0,
     val originZ: Int = 0,
@@ -60,8 +62,6 @@ data class Job(
 object ServerJobs {
 
     private const val MANIFEST = "job.json"
-    const val CLIP_DIR = "clip"
-
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true; encodeDefaults = true }
 
     fun root(): Path = Loader.configDir.resolve("chunkeditor/jobs")
@@ -76,7 +76,7 @@ object ServerJobs {
 
     fun dirOf(id: String): Path = root().resolve(id)
 
-    /** @return the job's own folder, where a pastes clip is expected under [CLIP_DIR] */
+    /** @return the job's own folder */
     fun submit(job: Job): Path {
         val dir = dirOf(job.id)
         dir.createDirectories()
@@ -87,13 +87,16 @@ object ServerJobs {
 
     fun cancel(id: String): Boolean = delete(dirOf(id))
 
+    fun newId(): String = UUID.randomUUID().toString()
+
     /** Runs everything queued, in the order it was asked for */
     fun applyAll(path: Path) {
         val jobs = list()
         if (jobs.isEmpty()) return
         // LevelResource.ROOT is ".", so the server hands over `./world/.`
         val worldRoot = path.toAbsolutePath().normalize()
-        Constants.LOG.info("Applying {} queued chunk editor job(s) to {}", jobs.size, worldRoot)
+        val started = System.nanoTime()
+        Constants.LOG.info("applying {} queued job(s) to {}", jobs.size, worldRoot)
         if (jobs.any { it.backup }) backup(worldRoot)
         val dimensions = ChunkRegions.dimensions(worldRoot).associateBy { it.key.identifier().toString() }
         jobs.forEach { job ->
@@ -103,36 +106,34 @@ object ServerJobs {
                 return@forEach
             }
             try {
-                if (apply(job, dimension)) delete(dirOf(job.id))
+                val jobStarted = System.nanoTime()
+                val done = apply(job, dimension)
+                Constants.LOG.info("job {} {}: {} in {} ms", job.kind, job.id, if (done) "applied" else "kept", Constants.ms(jobStarted))
+                if (done) delete(dirOf(job.id))
             } catch (e: Exception) {
                 Constants.LOG.error("Job {} failed and stays queued", job.id, e)
             }
         }
+        Constants.LOG.info("applied {} job(s) in {} ms", jobs.size, Constants.ms(started))
     }
 
     private fun apply(job: Job, dimension: WorldDimension): Boolean = when (job.kind) {
+        // ChunkRegions and ChunkClipImport log the counts and the cost themselves
         JobKind.DELETE -> {
-            val chunks = job.chunks.map(ChunkPos::unpack)
-            val deleted = ChunkRegions.deleteChunks(dimension, chunks)
-            Constants.LOG.info("Job {} deleted {} chunk(s) of {}", job.id, deleted, dimension.labelKey)
+            ChunkRegions.deleteChunks(dimension, job.chunks.map(ChunkPos::unpack))
             true
         }
 
         JobKind.PASTE -> {
-            val clip = ChunkClips.read(dirOf(job.id).resolve(CLIP_DIR))
+            val clip = LocalLibrary.read(job.clip)
             if (clip == null) {
-                Constants.LOG.warn("Job {} has no readable clip", job.id)
+                Constants.LOG.warn("job {} names clip {}, which the library has not", job.id, job.clip)
                 false
             } else {
                 val result = ChunkClipImport.import(
                     clip, dimension, ChunkPos(job.originX, job.originZ), job.options(),
                 ) { _, _ -> }
-                when (result) {
-                    is ImportResult.Success ->
-                        Constants.LOG.info("Job {} wrote {} chunk(s)", job.id, result.written)
-
-                    is ImportResult.Failure -> Constants.LOG.warn("Job {} failed: {}", job.id, result.message)
-                }
+                if (result is ImportResult.Failure) Constants.LOG.warn("job {} failed: {}", job.id, result.message)
                 result is ImportResult.Success
             }
         }
@@ -142,6 +143,7 @@ object ServerJobs {
      * Vanillas own backup zip (server frees, backup locks & freeze again)
      */
     private fun backup(worldRoot: Path) {
+        val started = System.nanoTime()
         try {
             val base = worldRoot.parent ?: return
             // Not createDefault to put a proper backup folder
@@ -153,7 +155,7 @@ object ServerJobs {
             )
             source.createAccess(worldRoot.name).use { access ->
                 val bytes = access.makeWorldBackup()
-                Constants.LOG.info("Backed up {} ({} bytes) before applying queued jobs", worldRoot.name, bytes)
+                Constants.LOG.info("backup {}: {} bytes in {} ms", worldRoot.name, bytes, Constants.ms(started))
             }
         } catch (e: Exception) {
             Constants.LOG.error("Could not back up {} — jobs are applied anyway", worldRoot, e)
@@ -161,7 +163,9 @@ object ServerJobs {
     }
 
     private fun read(dir: Path): Job? = try {
-        json.decodeFromString<Job>(dir.resolve(MANIFEST).readText())
+        // A folder with no manifest is a clip still being uploaded, not a broken job
+        val manifest = dir.resolve(MANIFEST)
+        if (!Files.isRegularFile(manifest)) null else json.decodeFromString<Job>(manifest.readText())
     } catch (e: Exception) {
         Constants.LOG.warn("Unreadable job in {}: {}", dir, e.message)
         null

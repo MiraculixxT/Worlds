@@ -45,14 +45,26 @@ interface EditorBackend {
 
     suspend fun biomes(): Registry<Biome>?
 
-    suspend fun conflicts(dimension: WorldDimension, clip: ClipInfo, origin: ChunkPos): Int
+    val library: ClipLibrary
+
+    suspend fun exportClip(
+        name: String,
+        dimension: WorldDimension,
+        chunks: Collection<ChunkPos>,
+        onProgress: (done: Int, total: Int) -> Unit,
+    ): ClipExportResult
+
+    suspend fun exportSelection(name: String, chunks: Collection<ChunkPos>): Boolean
+
+    suspend fun conflicts(dimension: WorldDimension, clip: ClipFootprint, origin: ChunkPos): Int
 
     /** @param backup only relevant when [writesAreQueued] */
     suspend fun delete(dimension: WorldDimension, chunks: Collection<ChunkPos>, backup: Boolean): Int
 
+    /** @param clip a name in [library] not a path (backend resolves path) */
     suspend fun paste(
         dimension: WorldDimension,
-        clip: ClipInfo,
+        clip: String,
         origin: ChunkPos,
         options: ClipImportOptions,
         backup: Boolean,

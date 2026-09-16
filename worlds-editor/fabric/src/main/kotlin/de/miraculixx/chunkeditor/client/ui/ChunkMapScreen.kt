@@ -7,14 +7,9 @@ import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.ChunkMetric
 import de.miraculixx.chunkeditor.data.ChunkOverlay
 import de.miraculixx.chunkeditor.data.ChunkScan
-import de.miraculixx.chunkeditor.data.ChunkClipExport
 import de.miraculixx.chunkeditor.data.ChunkRegions
 import de.miraculixx.chunkeditor.data.ClipImportOptions
 import de.miraculixx.chunkeditor.data.ExistingChunks
-import de.miraculixx.chunkeditor.data.ClipInfo
-import de.miraculixx.chunkeditor.data.ExportResult
-import de.miraculixx.chunkeditor.data.SelectionCsv
-import de.miraculixx.chunkeditor.data.SelectionFile
 import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.REGION_SIZE
 import de.miraculixx.chunkeditor.data.RegionIndex
@@ -32,7 +27,12 @@ import de.miraculixx.common.client.ui.MenuEntry
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
 import de.miraculixx.common.client.ui.clickSound
 import de.miraculixx.common.client.ui.drawBox
+import de.miraculixx.chunkeditor.client.net.RemoteBackend
+import de.miraculixx.chunkeditor.data.ClipFootprint
+import de.miraculixx.chunkeditor.data.ClipExportResult
+import de.miraculixx.chunkeditor.data.LocalLibrary
 import de.miraculixx.chunkeditor.data.RegionPixels
+import de.miraculixx.chunkeditor.data.SelectionEntry
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -282,8 +282,8 @@ internal class ChunkMapScreen(
     private lateinit var dimensionPicker: Dropdown<WorldDimension>
     private var menus: List<MenuDropdown> = emptyList()
 
-    /** Non-null while a clip is following the cursor, waiting to be placed. */
-    private var pasteClip: ClipInfo? = null
+    private var pasteClip: String? = null
+    private var pasteFootprint: ClipFootprint? = null
     private var pasteOffsets: List<ChunkPos> = emptyList()
 
     /** minX, minZ, maxX, maxZ of [pasteOffsets] */
@@ -343,28 +343,41 @@ internal class ChunkMapScreen(
     )
 
     /** Things to edit selected chunks */
-    private fun editMenu(): List<MenuEntry> = listOf(
-        MenuEntry.Item(
-            Component.translatable("chunkeditor.clip.export"), SC_EXPORT.label,
-            enabled = { selected.isNotEmpty() && !clipBusy },
-        ) { openExport() },
-        MenuEntry.Item(
-            Component.translatable("chunkeditor.clip.import"), SC_IMPORT.label,
-            enabled = { !clipBusy },
-        ) { openLibrary() },
-        MenuEntry.Separator,
-        MenuEntry.Item(
-            Component.translatable("selectWorld.delete"), SC_DELETE.label,
-            enabled = { selected.isNotEmpty() },
-        ) { confirmDelete() },
-    )
+    private fun editMenu(): List<MenuEntry> = buildList {
+        if (!backend.canWrite) return@buildList
+        add(
+            MenuEntry.Item(
+                Component.translatable("chunkeditor.clip.export"), SC_EXPORT.label,
+                enabled = { selected.isNotEmpty() && !clipBusy },) { openExport() }
+        )
+        add(
+            MenuEntry.Item(
+                Component.translatable("chunkeditor.clip.import"), SC_IMPORT.label,
+                enabled = { !clipBusy },
+            ) { openLibrary() },
+        )
+        // Pushing a clip from this machine onto the server's shelf only means anything remotely
+        if (backend is RemoteBackend) {
+            add(
+                MenuEntry.Item(
+                    Component.translatable("chunkeditor.clip.upload"),
+                    enabled = { !clipBusy },
+                ) { openUpload() },
+            )
+        }
+        add(MenuEntry.Separator)
+        add(
+            MenuEntry.Item(
+                Component.translatable("selectWorld.delete"), SC_DELETE.label,
+                enabled = { selected.isNotEmpty() },
+            ) { confirmDelete() },
+        )
+    }
 
     /** Things to edit how the map looks */
     private fun viewMenu(): List<MenuEntry> = listOf(
         MenuEntry.Item(Component.translatable("chunkeditor.map.reset_view")) { resetView() },
-        MenuEntry.Item(Component.translatable("selectServer.refresh"), SC_REFRESH.label) {
-            dimension?.let { loadDimension(it) }
-        },
+        MenuEntry.Item(Component.translatable("selectServer.refresh"), SC_REFRESH.label) { refresh() },
         MenuEntry.Separator,
         MenuEntry.Item(
             Component.translatable("chunkeditor.map.players"), SC_PLAYERS.label, checked = { showPlayers },
@@ -399,20 +412,18 @@ internal class ChunkMapScreen(
         Constants.SCOPE.launch {
             val messages = ArrayList<String>(2)
             if (ExportKind.CLIP in kinds) {
-                val result = ChunkClipExport.export(dim, chunks, name) { done, total ->
+                val result = backend.exportClip(name, dim, chunks) { done, total ->
                     clipMessage = I18n.get("chunkeditor.clip.exporting", done, total)
                 }
                 messages += when (result) {
-                    is ExportResult.Success -> I18n.get("chunkeditor.clip.exported", result.chunks, result.dir.name)
-                    is ExportResult.Failure -> I18n.get(result.message)
+                    is ClipExportResult.Success -> I18n.get("chunkeditor.clip.exported", result.chunks, result.name)
+                    is ClipExportResult.Failure -> I18n.get(result.message)
                 }
             }
             if (ExportKind.SELECTION in kinds) {
-                val file = runCatching { SelectionCsv.write(name, chunks) }
-                    .onFailure { Constants.LOG.error("Selection export failed", it) }
-                    .getOrNull()
-                messages += if (file == null) I18n.get("chunkeditor.clip.error.write")
-                else I18n.get("chunkeditor.clip.selection_exported", chunks.size, file.nameWithoutExtension)
+                val written = backend.exportSelection(name, chunks)
+                messages += if (!written) I18n.get("chunkeditor.clip.error.write")
+                else I18n.get("chunkeditor.clip.selection_exported", chunks.size, name)
             }
             minecraft.execute {
                 clipBusy = false
@@ -425,10 +436,10 @@ internal class ChunkMapScreen(
         if (clipBusy) return
         minecraft.gui.setScreen(
             ClipLibraryScreen(
-                this,
+                this, backend.library, Component.translatable("chunkeditor.clip.import"),
                 { clip ->
-                    startPaste(clip)
                     minecraft.gui.setScreen(this)
+                    armPaste(clip.name)
                 },
                 { selection ->
                     minecraft.gui.setScreen(this)
@@ -438,13 +449,58 @@ internal class ChunkMapScreen(
         )
     }
 
+    /** The footprint is the one thing a paste needs from the clip itself */
+    private fun armPaste(clip: String) {
+        clipBusy = true
+        Constants.SCOPE.launch {
+            val footprint = runCatching { backend.library.footprint(clip) }.getOrNull()
+            minecraft.execute {
+                clipBusy = false
+                if (footprint == null) clipMessage = I18n.get("chunkeditor.clip.error.read")
+                else startPaste(clip, footprint)
+            }
+        }
+    }
+
+    /** Opens local client lib to upload clips to the remote server */
+    private fun openUpload() {
+        val remote = backend as? RemoteBackend ?: return
+        if (clipBusy) return
+        minecraft.gui.setScreen(
+            ClipLibraryScreen(
+                this, LocalLibrary, Component.translatable("chunkeditor.clip.upload"),
+                { clip ->
+                    minecraft.gui.setScreen(this)
+                    runUpload(remote, clip.name)
+                },
+                null,
+            )
+        )
+    }
+
+    private fun runUpload(remote: RemoteBackend, name: String) {
+        clipBusy = true
+        clipMessage = I18n.get("chunkeditor.clip.uploading", 0, 1)
+        Constants.SCOPE.launch {
+            val local = LocalLibrary.read(name)
+            val landed = if (local == null) null else remote.upload(local) { done, total ->
+                clipMessage = I18n.get("chunkeditor.clip.uploading", done, total)
+            }
+            minecraft.execute {
+                clipBusy = false
+                clipMessage = if (landed == null) I18n.get("chunkeditor.remote.error.upload")
+                else I18n.get("chunkeditor.clip.uploaded", landed)
+            }
+        }
+    }
+
     /**
      * A CSV contains chunk names (unvailables are dropped)
      */
-    private fun applySelection(file: SelectionFile) {
+    private fun applySelection(file: SelectionEntry) {
         clipBusy = true
         Constants.SCOPE.launch {
-            val parsed = SelectionCsv.read(file.path)
+            val parsed = runCatching { backend.library.selection(file.name) }.getOrNull()
             minecraft.execute {
                 clipBusy = false
                 if (parsed == null) {
@@ -465,20 +521,22 @@ internal class ChunkMapScreen(
     }
 
     /** Arms paste mode: the clip's footprint now follows the cursor until a click or Escape. */
-    private fun startPaste(clip: ClipInfo) {
+    private fun startPaste(clip: String, footprint: ClipFootprint) {
         pasteClip = clip
-        val origin = clip.origin
-        pasteOffsets = clip.chunks.map { ChunkPos(it.x - origin.x, it.z - origin.z) }
+        pasteFootprint = footprint
+        val origin = footprint.origin
+        pasteOffsets = footprint.chunks.map { ChunkPos(it.x - origin.x, it.z - origin.z) }
         pasteBounds = intArrayOf(
             pasteOffsets.minOfOrNull { it.x } ?: 0, pasteOffsets.minOfOrNull { it.z } ?: 0,
             pasteOffsets.maxOfOrNull { it.x } ?: 0, pasteOffsets.maxOfOrNull { it.z } ?: 0,
         )
         buildPasteTexture()
-        clipMessage = I18n.get("chunkeditor.clip.paste_hint", clip.name)
+        clipMessage = I18n.get("chunkeditor.clip.paste_hint", clip)
     }
 
     private fun cancelPaste() {
         pasteClip = null
+        pasteFootprint = null
         pasteOffsets = emptyList()
         releasePasteTexture()
         clipMessage = null
@@ -508,25 +566,28 @@ internal class ChunkMapScreen(
     /** Placement done; the options screen decides *how* the clip lands before anything is written. */
     private fun confirmPaste(origin: ChunkPos) {
         val clip = pasteClip ?: return
+        val footprint = pasteFootprint ?: return
         cancelPaste()
         minecraft.gui.setScreen(ClipImportScreen(this, clip, origin) { options ->
             minecraft.gui.setScreen(this)
-            checkConflicts(clip, origin, options)
+            checkConflicts(clip, footprint, origin, options)
         })
     }
 
-    private fun checkConflicts(clip: ClipInfo, origin: ChunkPos, options: ClipImportOptions) {
+    private fun checkConflicts(
+        clip: String, footprint: ClipFootprint, origin: ChunkPos, options: ClipImportOptions,
+    ) {
         val dim = dimension ?: return
         clipBusy = true
         clipMessage = I18n.get("chunkeditor.clip.checking")
         Constants.SCOPE.launch {
-            val conflicts = backend.conflicts(dim, clip, origin)
+            val conflicts = backend.conflicts(dim, footprint, origin)
             minecraft.execute {
                 clipBusy = false
                 clipMessage = null
                 // Only prompt when data is lost/overriden
                 if (conflicts == 0 || options.existing == ExistingChunks.SKIP) {
-                    runPaste(clip, dim, origin, options)
+                    runPaste(clip, footprint, dim, origin, options)
                     return@execute
                 }
                 val warning = if (options.existing == ExistingChunks.MERGE) {
@@ -536,9 +597,9 @@ internal class ChunkMapScreen(
                     BackupActionScreen(
                         { minecraft.gui.setScreen(this@ChunkMapScreen) },
                         { backup, _ ->
-                            withBackup(backup) { runPaste(clip, dim, origin, options) }
+                            withBackup(backup) { runPaste(clip, footprint, dim, origin, options) }
                         },
-                        Component.translatable("chunkeditor.clip.paste_title", clip.name),
+                        Component.translatable("chunkeditor.clip.paste_title", clip),
                         Component.translatable(warning, conflicts),
                         backupLabel(PASTE_ACTION),
                         noUndoLabel(PASTE_ACTION),
@@ -548,17 +609,32 @@ internal class ChunkMapScreen(
         }
     }
 
-    private fun runPaste(clip: ClipInfo, dim: WorldDimension, origin: ChunkPos, options: ClipImportOptions) {
+    private fun runPaste(
+        clip: String, footprint: ClipFootprint, dim: WorldDimension, origin: ChunkPos, options: ClipImportOptions,
+    ) {
         val generation = loadGen
         minecraft.gui.setScreen(this)
         clipBusy = true
-        clipMessage = I18n.get("chunkeditor.clip.importing", 0, clip.chunks.size)
+        clipMessage = I18n.get("chunkeditor.clip.importing", 0, footprint.chunks.size)
+        if (backend.writesAreQueued) {
+            Constants.SCOPE.launch {
+                val result = backend.paste(dim, clip, origin, options, pendingBackup) { _, _ -> }
+                minecraft.execute {
+                    clipBusy = false
+                    clipMessage = when (result) {
+                        is ImportResult.Success -> I18n.get("chunkeditor.remote.queued_paste", result.written)
+                        is ImportResult.Failure -> I18n.get(result.message)
+                    }
+                }
+            }
+            return
+        }
         Constants.SCOPE.launch {
             val result = backend.paste(dim, clip, origin, options, pendingBackup) { done, total ->
                 clipMessage = I18n.get("chunkeditor.clip.importing", done, total)
             }
-            val touched = clip.chunks
-                .map { ChunkPos(it.x + origin.x - clip.origin.x, it.z + origin.z - clip.origin.z) }
+            val touched = footprint.chunks
+                .map { ChunkPos(it.x + origin.x - footprint.origin.x, it.z + origin.z - footprint.origin.z) }
                 .map { it.regionX to it.regionZ }.distinct()
             val refreshed = touched.map { (rx, rz) -> key(rx, rz) to backend.index(dim, rx, rz) }
             minecraft.execute {
@@ -577,8 +653,10 @@ internal class ChunkMapScreen(
                 totalBytes = indices.values.sumOf { it.bytes }
                 selected.clear()
                 if (result is ImportResult.Success) {
-                    clip.chunks.forEach {
-                        selected.add(ChunkPos(it.x + origin.x - clip.origin.x, it.z + origin.z - clip.origin.z).pack())
+                    footprint.chunks.forEach {
+                        selected.add(
+                            ChunkPos(it.x + origin.x - footprint.origin.x, it.z + origin.z - footprint.origin.z).pack(),
+                        )
                     }
                 }
                 dropTextures()
@@ -620,9 +698,14 @@ internal class ChunkMapScreen(
         coarseRendering.clear()
         dropTextures()
         Constants.SCOPE.launch {
+            val started = System.nanoTime()
             val read = backend.regionList(dim).mapNotNull { (rx, rz) -> backend.index(dim, rx, rz) }
             // One chunk carries the dimension's build height
             val bounds = read.firstOrNull { it.count > 0 }?.let { backend.heightBounds(dim, firstChunk(it)) }
+            Constants.LOG.info(
+                "dimension {}: {} regions, {} chunks in {} ms",
+                dim.labelKey, read.size, read.sumOf { it.count }, Constants.ms(started),
+            )
             minecraft.execute {
                 if (generation != loadGen) return@execute
                 read.forEach { indices[key(it.rx, it.rz)] = it }
@@ -699,6 +782,24 @@ internal class ChunkMapScreen(
     private fun clearSelection() {
         selected.clear()
         onSelectionChanged()
+    }
+
+    /** Refresh from disk, or ask the server to save before refreshing */
+    private fun refresh() {
+        val dim = dimension ?: return
+        val remote = backend as? RemoteBackend
+        if (remote == null || !backend.canWrite) {
+            loadDimension(dim)
+            return
+        }
+        clipMessage = I18n.get("chunkeditor.remote.saving")
+        Constants.SCOPE.launch {
+            runCatching { remote.forceSave() }
+            minecraft.execute {
+                clipMessage = null
+                dimension?.let { loadDimension(it) }
+            }
+        }
     }
 
     private fun openTrim() {
@@ -861,8 +962,12 @@ internal class ChunkMapScreen(
             andThen()
             return
         }
+        val started = System.nanoTime()
         EditWorldScreen.conditionallyMakeBackupAndShowToast(backup, access)
-            .thenAcceptAsync({ andThen() }, minecraft)
+            .thenAcceptAsync({
+                if (backup) Constants.LOG.info("backup {}: {} ms", access.levelId, Constants.ms(started))
+                andThen()
+            }, minecraft)
     }
 
     private fun confirmDelete() {
@@ -875,7 +980,11 @@ internal class ChunkMapScreen(
                     withBackup(backup) { runDelete(dim) }
                 },
                 Component.translatable("chunkeditor.map.delete_title", count),
-                Component.translatable("chunkeditor.map.delete_warning", dim.name),
+                Component.translatable(
+                    if (backend.writesAreQueued) "chunkeditor.map.delete_warning_queued"
+                    else "chunkeditor.map.delete_warning",
+                    dim.name,
+                ),
                 backupLabel(DELETE_ACTION),
                 noUndoLabel(DELETE_ACTION),
             )
@@ -886,6 +995,14 @@ internal class ChunkMapScreen(
         val chunks = selected.toLongArray().map { ChunkPos.unpack(it) }
         val generation = loadGen
         minecraft.gui.setScreen(this)
+        if (backend.writesAreQueued) {
+            Constants.SCOPE.launch {
+                val queued = backend.delete(dim, chunks, pendingBackup)
+                // Nothing on disk changed
+                minecraft.execute { clipMessage = I18n.get("chunkeditor.remote.queued_delete", queued) }
+            }
+            return
+        }
         Constants.SCOPE.launch {
             backend.delete(dim, chunks, pendingBackup)
             val touched = chunks.map { it.regionX to it.regionZ }.distinct()

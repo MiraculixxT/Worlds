@@ -112,19 +112,20 @@ class ChunkScan {
 object ChunkScans {
 
     /**
-     * @param access only read by [ScanSource.BLOCKS], to resolve a block tag against the save's packs
+     * @param access resolves block tags against the packs (on remote null, as alr in reg)
      * @param minY the dimension's build floor
      * @param argument the key to look for
      */
     suspend fun scan(
         dimension: WorldDimension,
-        access: LevelStorageSource.LevelStorageAccess,
+        access: LevelStorageSource.LevelStorageAccess?,
         regions: Collection<RegionIndex>,
         source: ScanSource,
         argument: String?,
         minY: Int,
         onProgress: (done: Int, total: Int) -> Unit,
     ): ScanResult = withContext(Dispatchers.IO) {
+        val started = System.nanoTime()
         val labels = ArrayList<String>()
         val values = when (source) {
             ScanSource.HEADER -> scanHeader(dimension, regions, onProgress)
@@ -133,6 +134,11 @@ object ChunkScans {
             ScanSource.ENTITIES -> scanEntities(dimension, regions, onProgress)
             ScanSource.BLOCKS -> scanBlocks(dimension, access, regions, argument, onProgress)
         }
+        Constants.LOG.info(
+            "scan {} {}: {} regions, {} chunks in {} ms",
+            source, dimension.dir.fileName, regions.size,
+            values.values.maxOfOrNull { it.size } ?: 0, Constants.ms(started),
+        )
         ScanResult(source, argument, values, labels)
     }
 
@@ -221,7 +227,7 @@ object ChunkScans {
     }
 
     private fun scanBlocks(
-        dimension: WorldDimension, access: LevelStorageSource.LevelStorageAccess,
+        dimension: WorldDimension, access: LevelStorageSource.LevelStorageAccess?,
         regions: Collection<RegionIndex>, block: String?, onProgress: (Int, Int) -> Unit,
     ): Map<ChunkMetric, Long2LongOpenHashMap> {
         val counts = Long2LongOpenHashMap()

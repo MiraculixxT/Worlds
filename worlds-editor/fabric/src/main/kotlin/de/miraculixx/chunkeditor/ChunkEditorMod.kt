@@ -1,5 +1,6 @@
 package de.miraculixx.chunkeditor
 
+import de.miraculixx.chunkeditor.fabric.FabricNet
 import net.fabricmc.api.ModInitializer
 
 fun initChunkEditor() {
@@ -9,5 +10,6 @@ fun initChunkEditor() {
 class ChunkEditorMod : ModInitializer {
     override fun onInitialize() {
         initChunkEditor()
+        FabricNet.register()
     }
 }

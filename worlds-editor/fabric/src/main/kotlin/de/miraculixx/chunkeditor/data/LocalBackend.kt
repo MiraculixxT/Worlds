@@ -1,5 +1,8 @@
 package de.miraculixx.chunkeditor.data
 
+import de.miraculixx.chunkeditor.Constants
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import net.minecraft.core.Registry
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.biome.Biome
@@ -51,18 +54,42 @@ class LocalBackend(
 
     override suspend fun biomes(): Registry<Biome>? = biomes.invoke()
 
-    override suspend fun conflicts(dimension: WorldDimension, clip: ClipInfo, origin: ChunkPos) =
-        ChunkClipImport.conflicts(clip, dimension, origin)
+    override val library: ClipLibrary = LocalLibrary
+
+    override suspend fun exportClip(
+        name: String,
+        dimension: WorldDimension,
+        chunks: Collection<ChunkPos>,
+        onProgress: (Int, Int) -> Unit,
+    ): ClipExportResult = withContext(Dispatchers.IO) {
+        when (val result = ChunkClipExport.export(dimension, chunks, name, onProgress)) {
+            is ExportResult.Success -> ClipExportResult.Success(result.dir.fileName.toString(), result.chunks)
+            is ExportResult.Failure -> ClipExportResult.Failure(result.message)
+        }
+    }
+
+    override suspend fun exportSelection(name: String, chunks: Collection<ChunkPos>): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching { SelectionCsv.write(name, chunks) }
+                .onFailure { Constants.LOG.error("Selection export failed", it) }
+                .isSuccess
+        }
+
+    override suspend fun conflicts(dimension: WorldDimension, clip: ClipFootprint, origin: ChunkPos) =
+        ChunkClipImport.conflicts(clip.chunks, clip.origin, dimension, origin)
 
     override suspend fun delete(dimension: WorldDimension, chunks: Collection<ChunkPos>, backup: Boolean) =
         ChunkRegions.deleteChunks(dimension, chunks)
 
     override suspend fun paste(
         dimension: WorldDimension,
-        clip: ClipInfo,
+        clip: String,
         origin: ChunkPos,
         options: ClipImportOptions,
         backup: Boolean,
         onProgress: (Int, Int) -> Unit,
-    ) = ChunkClipImport.import(clip, dimension, origin, options, onProgress)
+    ): ImportResult = withContext(Dispatchers.IO) {
+        val found = LocalLibrary.read(clip) ?: return@withContext ImportResult.Failure("chunkeditor.clip.error.read")
+        ChunkClipImport.import(found, dimension, origin, options, onProgress)
+    }
 }

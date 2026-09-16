@@ -1,6 +1,7 @@
 package de.miraculixx.chunkeditor.client
 
 import de.miraculixx.chunkeditor.Constants
+import de.miraculixx.chunkeditor.fabric.FabricClientNet
 import net.fabricmc.api.ClientModInitializer
 
 fun initChunkEditorClient() {
@@ -8,5 +9,8 @@ fun initChunkEditorClient() {
 }
 
 class ChunkEditorClient : ClientModInitializer {
-    override fun onInitializeClient() = initChunkEditorClient()
+    override fun onInitializeClient() {
+        initChunkEditorClient()
+        FabricClientNet.register()
+    }
 }

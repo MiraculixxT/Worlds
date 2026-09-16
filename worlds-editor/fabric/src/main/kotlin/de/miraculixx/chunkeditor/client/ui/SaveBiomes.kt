@@ -24,6 +24,7 @@ internal object SaveBiomes {
 
     suspend fun load(access: LevelStorageSource.LevelStorageAccess): Registry<Biome>? =
         withContext(Dispatchers.IO) {
+            val started = System.nanoTime()
             try {
                 val packConfig = WorldLoader.PackConfig(
                     ServerPacksSource.createPackRepository(access), readDataConfiguration(access), false, false,
@@ -40,6 +41,7 @@ internal object SaveBiomes {
                     Util.backgroundExecutor(),
                     Minecraft.getInstance(),
                 ).join()
+                Constants.LOG.info("biomes {}: {} entries in {} ms", access.levelId, registry.size(), Constants.ms(started))
                 registry
             } catch (e: Exception) {
                 Constants.LOG.warn("Failed to load the biomes of {}", access.levelId, e)
