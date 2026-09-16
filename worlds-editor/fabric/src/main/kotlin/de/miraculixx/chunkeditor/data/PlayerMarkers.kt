@@ -58,7 +58,7 @@ object PlayerMarkers {
     suspend fun read(root: Path, selfId: UUID? = null): List<PlayerMarker> = withContext(Dispatchers.IO) {
         val started = System.nanoTime()
         val found = LinkedHashMap<UUID, PlayerMarker>()
-        val dir = root.resolve("playerdata")
+        val dir = root.resolve(LevelResource.PLAYER_DATA_DIR.id())
         if (Files.isDirectory(dir)) {
             readFolder(dir, root.name) { id -> readPlayerFile(dir.resolve("$id.dat")) }
                 .forEach { found[it.id] = it }
