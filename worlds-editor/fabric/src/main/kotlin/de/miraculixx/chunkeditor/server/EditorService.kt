@@ -15,13 +15,14 @@ import de.miraculixx.chunkeditor.net.C2S
 import de.miraculixx.chunkeditor.net.UPLOAD_PIECE
 import de.miraculixx.chunkeditor.net.EditorPacket
 import de.miraculixx.chunkeditor.net.Hello
+import de.miraculixx.chunkeditor.net.JobQueue
+import de.miraculixx.chunkeditor.net.JobSummary
 import de.miraculixx.chunkeditor.net.Net
 import de.miraculixx.chunkeditor.net.PROTOCOL_VERSION
 import de.miraculixx.chunkeditor.net.Reassembler
 import de.miraculixx.chunkeditor.net.S2C
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job as CoroutineJob
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -272,7 +273,7 @@ object EditorService {
                     val dimension = backend.dimension(buf.readUtf()) ?: return@read fail(player, request, DIMENSION_GONE)
                     val backup = buf.readBoolean()
                     val chunks = (0 until buf.readVarInt()).map { ChunkPos.unpack(buf.readLong()) }
-                    reply(player, request, Bodies.writeInt(backend.delete(dimension, chunks, backup)))
+                    reply(player, request, Bodies.writeInt(backend.queueDelete(dimension, chunks, backup, player.name.string)))
                 }
 
                 C2S.JOB_PASTE -> Bodies.read(body) { buf ->
@@ -283,9 +284,9 @@ object EditorService {
                     val ranges = (0 until buf.readVarInt()).map { buf.readInt()..buf.readInt() }
                     val existing = ExistingChunks.entries[buf.readVarInt()]
                     val backup = buf.readBoolean()
-                    val result = backend.paste(
-                        dimension, clip, origin, ClipImportOptions(yOffset, ranges, existing), backup,
-                    ) { _, _ -> }
+                    val result = backend.queuePaste(
+                        dimension, clip, origin, ClipImportOptions(yOffset, ranges, existing), backup, player.name.string,
+                    )
                     when (result) {
                         is ImportResult.Success -> {
                             Constants.LOG.info("queued paste of {} by {}: {} chunks", clip, player.name.string, result.written)
@@ -294,6 +295,21 @@ object EditorService {
 
                         is ImportResult.Failure -> fail(player, request, result.message)
                     }
+                }
+
+                C2S.JOB_LIST -> reply(player, request, Bodies.writeJobQueue(queue()))
+
+                C2S.JOB_CANCEL -> {
+                    val id = Bodies.read(body) { it.readUtf() }
+                    if (ServerJobs.cancel(id)) Constants.LOG.info("job {} removed from the queue by {}", id, player.name.string)
+                    reply(player, request, Bodies.writeJobQueue(queue()))
+                }
+
+                C2S.JOB_BACKUP -> {
+                    val backup = Bodies.read(body) { it.readBoolean() }
+                    ServerJobs.setBackup(backup)
+                    Constants.LOG.info("queue backup turned {} by {}", if (backup) "on" else "off", player.name.string)
+                    reply(player, request, Bodies.writeJobQueue(queue()))
                 }
 
                 C2S.OPEN -> {
@@ -383,13 +399,21 @@ object EditorService {
         0L
     }
 
+    private fun queue(): JobQueue {
+        val jobs = ServerJobs.list()
+        return JobQueue(
+            jobs.map { JobSummary(it.id, it.kind, it.dimension, it.chunks.size, it.clip, it.originX, it.originZ, it.by, it.at) },
+            jobs.any { it.backup },
+        )
+    }
+
     private const val DIMENSION_GONE = "chunkeditor.remote.error.dimension"
 
     /** Everything that changes the world, queue or lib */
     private val WRITE_KINDS = setOf(
         C2S.JOB_DELETE, C2S.JOB_PASTE, C2S.FORCE_SAVE,
         C2S.CLIP_UPLOAD_OPEN, C2S.CLIP_UPLOAD, C2S.CLIP_UPLOAD_END, C2S.CLIP_EXPORT, C2S.SELECTION_EXPORT,
-        C2S.CLIP_DELETE, C2S.SELECTION_DELETE,
+        C2S.CLIP_DELETE, C2S.SELECTION_DELETE, C2S.JOB_LIST, C2S.JOB_CANCEL, C2S.JOB_BACKUP,
     )
 
     /**

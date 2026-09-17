@@ -40,6 +40,14 @@ private const val LIST_TOP = 32
 private const val ROW_H = 26
 private const val SELECTED_COLOR = 0x5033B5E5
 
+/** In the world list format, `?` for unknown */
+internal fun formatDate(epochMillis: Long): String {
+    if (epochMillis <= 0L) return "?"
+    return WorldSelectionList.DATE_FORMAT.format(
+        ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault())
+    )
+}
+
 /** What an export writes: the chunks themselves, the list of which ones are selected, or both */
 enum class ExportKind { CLIP, SELECTION }
 
@@ -397,7 +405,7 @@ internal class ClipLibraryScreen(
             override val subtitle: String
                 get() = I18n.get(
                     "chunkeditor.clip.info", clip.chunks, clip.dimension, clip.mcVersion,
-                    bytes(clip.bytes), date(clip.modified),
+                    bytes(clip.bytes), formatDate(clip.modified),
                 )
         }
 
@@ -407,17 +415,9 @@ internal class ClipLibraryScreen(
                 get() = I18n.get(
                     if (selection.inverted) "chunkeditor.clip.selection_info_inverted"
                     else "chunkeditor.clip.selection_info",
-                    selection.chunks, bytes(selection.bytes), date(selection.modified),
+                    selection.chunks, bytes(selection.bytes), formatDate(selection.modified),
                 )
         }
-    }
-
-    /** Last write of the folder or file, the only date a clip from another tool carries */
-    private fun date(epochMillis: Long): String {
-        if (epochMillis <= 0L) return "?"
-        return WorldSelectionList.DATE_FORMAT.format(
-            ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault())
-        )
     }
 
     private fun bytes(value: Long): String = when {

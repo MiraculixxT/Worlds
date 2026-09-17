@@ -121,5 +121,15 @@
   "chunkeditor.remote.off.missing": "Chunk Editor is not on this server",
   "chunkeditor.remote.off.version": "This server runs a different Chunk Editor version",
   "chunkeditor.clip.upload": "Import To Server",
-  "chunkeditor.clip.uploaded": "Uploaded as %s"
+  "chunkeditor.clip.uploaded": "Uploaded as %s",
+  "chunkeditor.jobs.title": "Queued Actions",
+  "chunkeditor.jobs.hint": "Applied in this order when the server stops",
+  "chunkeditor.jobs.empty": "Nothing queued",
+  "chunkeditor.jobs.delete": "Delete %s chunk(s)",
+  "chunkeditor.jobs.paste": "Paste clip '%s' at chunk %s, %s",
+  "chunkeditor.jobs.info": "%s · by %s · %s",
+  "chunkeditor.jobs.backup": "Back up world before applying",
+  "chunkeditor.jobs.remove": "Remove",
+  "chunkeditor.jobs.remove_title": "Remove queued action?",
+  "chunkeditor.jobs.remove_warning": "It will not be applied when the server stops"
 }

@@ -15,6 +15,7 @@ import de.miraculixx.chunkeditor.data.ScanResult
 import de.miraculixx.chunkeditor.data.ScanSource
 import de.miraculixx.chunkeditor.data.TintKey
 import de.miraculixx.chunkeditor.data.WorldDimension
+import de.miraculixx.chunkeditor.server.JobKind
 import io.netty.buffer.Unpooled
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap
 import net.minecraft.core.BlockPos
@@ -41,6 +42,22 @@ class Hello(
     val facts: LevelFacts,
     val pendingJobs: Int,
 )
+
+/** A queued [de.miraculixx.chunkeditor.server.Job] without its chunk list */
+class JobSummary(
+    val id: String,
+    val kind: JobKind,
+    val dimension: String,
+    val chunks: Int,
+    val clip: String,
+    val originX: Int,
+    val originZ: Int,
+    val by: String,
+    val at: Long,
+)
+
+/** The queue in apply order */
+class JobQueue(val jobs: List<JobSummary>, val backup: Boolean)
 
 /**
  * The body encodings for both sides (own encoding to avoid 100 packets)
@@ -239,6 +256,33 @@ object Bodies {
 
     fun readRange(bytes: ByteArray): IntRange? = read(bytes) { buf ->
         if (buf.readBoolean()) buf.readInt()..buf.readInt() else null
+    }
+
+    fun writeJobQueue(queue: JobQueue): ByteArray = write { buf ->
+        buf.writeBoolean(queue.backup)
+        buf.writeVarInt(queue.jobs.size)
+        queue.jobs.forEach {
+            buf.writeUtf(it.id)
+            buf.writeVarInt(it.kind.ordinal)
+            buf.writeUtf(it.dimension)
+            buf.writeVarInt(it.chunks)
+            buf.writeUtf(it.clip)
+            buf.writeInt(it.originX)
+            buf.writeInt(it.originZ)
+            buf.writeUtf(it.by)
+            buf.writeLong(it.at)
+        }
+    }
+
+    fun readJobQueue(bytes: ByteArray): JobQueue = read(bytes) { buf ->
+        val backup = buf.readBoolean()
+        val jobs = (0 until buf.readVarInt()).map {
+            JobSummary(
+                buf.readUtf(), JobKind.entries[buf.readVarInt()], buf.readUtf(), buf.readVarInt(), buf.readUtf(),
+                buf.readInt(), buf.readInt(), buf.readUtf(), buf.readLong(),
+            )
+        }
+        JobQueue(jobs, backup)
     }
 
     fun writeInt(value: Int): ByteArray = write { it.writeInt(value) }

@@ -372,6 +372,12 @@ internal class ChunkMapScreen(
                 enabled = { selected.isNotEmpty() },
             ) { confirmDelete() },
         )
+        if (backend is RemoteBackend) {
+            add(MenuEntry.Separator)
+            add(MenuEntry.Item(Component.translatable("chunkeditor.jobs.title")) {
+                minecraft.gui.setScreen(JobQueueScreen(this@ChunkMapScreen, backend))
+            })
+        }
     }
 
     /** Things to edit how the map looks */

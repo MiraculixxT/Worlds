@@ -85,7 +85,14 @@ object ServerJobs {
         return dir
     }
 
-    fun cancel(id: String): Boolean = delete(dirOf(id))
+    fun cancel(id: String): Boolean = list().any { it.id == id } && delete(dirOf(id))
+
+    /** One backup covers the whole queue, so the flag is kept equal on every job */
+    fun setBackup(backup: Boolean) {
+        list().filter { it.backup != backup }.forEach {
+            dirOf(it.id).resolve(MANIFEST).writeText(json.encodeToString(it.copy(backup = backup)))
+        }
+    }
 
     fun newId(): String = UUID.randomUUID().toString()
 

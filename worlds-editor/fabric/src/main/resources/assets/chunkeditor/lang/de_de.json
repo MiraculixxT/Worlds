@@ -121,5 +121,15 @@
   "chunkeditor.remote.off.missing": "Chunk Editor ist nicht auf diesem Server",
   "chunkeditor.remote.off.version": "Dieser Server hat eine andere Chunk-Editor-Version",
   "chunkeditor.clip.upload": "Auf Server laden",
-  "chunkeditor.clip.uploaded": "Als %s hochgeladen"
+  "chunkeditor.clip.uploaded": "Als %s hochgeladen",
+  "chunkeditor.jobs.title": "Warteschlange",
+  "chunkeditor.jobs.hint": "Werden in dieser Reihenfolge beim Server-Stopp ausgeführt",
+  "chunkeditor.jobs.empty": "Leere Warteschlange",
+  "chunkeditor.jobs.delete": "%s Chunk(s) löschen",
+  "chunkeditor.jobs.paste": "Clip '%s' bei Chunk %s, %s einfügen",
+  "chunkeditor.jobs.info": "%s · von %s · %s",
+  "chunkeditor.jobs.backup": "Welt vor dem Anwenden sichern",
+  "chunkeditor.jobs.remove": "Entfernen",
+  "chunkeditor.jobs.remove_title": "Aktion entfernen?",
+  "chunkeditor.jobs.remove_warning": "Aktion wird nicht mehr ausgeführt"
 }

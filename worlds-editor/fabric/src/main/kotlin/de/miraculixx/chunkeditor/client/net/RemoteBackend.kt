@@ -21,6 +21,7 @@ import de.miraculixx.chunkeditor.net.LibraryBodies
 import de.miraculixx.chunkeditor.net.C2S
 import de.miraculixx.chunkeditor.net.UPLOAD_PIECE
 import de.miraculixx.chunkeditor.net.Hello
+import de.miraculixx.chunkeditor.net.JobQueue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -129,6 +130,14 @@ class RemoteBackend(hello: Hello) : EditorBackend {
         )
         return ImportResult.Success(queued, 0, 0)
     }
+
+    suspend fun jobs(): JobQueue = Bodies.readJobQueue(ClientNet.request(C2S.JOB_LIST, ByteArray(0)))
+
+    suspend fun cancelJob(id: String): JobQueue =
+        Bodies.readJobQueue(ClientNet.request(C2S.JOB_CANCEL, Bodies.write { it.writeUtf(id) }))
+
+    suspend fun setJobsBackup(backup: Boolean): JobQueue =
+        Bodies.readJobQueue(ClientNet.request(C2S.JOB_BACKUP, Bodies.write { it.writeBoolean(backup) }))
 
     suspend fun forceSave() {
         ClientNet.request(C2S.FORCE_SAVE, ByteArray(0))

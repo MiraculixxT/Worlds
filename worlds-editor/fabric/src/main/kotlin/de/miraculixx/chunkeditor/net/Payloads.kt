@@ -6,7 +6,7 @@ import net.minecraft.network.codec.StreamCodec
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload
 import net.minecraft.resources.Identifier
 
-const val PROTOCOL_VERSION = 6
+const val PROTOCOL_VERSION = 7
 
 /**
  * The one packet handling all communication to avoid having 100 registered packets
@@ -97,6 +97,10 @@ object C2S {
     const val CLIP_UPLOAD_END = 22
     /** Announces one file of an upload (clip name, path, size) */
     const val CLIP_UPLOAD_OPEN = 23
+    /** The queue answers [JobQueue] */
+    const val JOB_LIST = 24
+    const val JOB_CANCEL = 25
+    const val JOB_BACKUP = 26
 }
 
 /** Clientbound kinds */

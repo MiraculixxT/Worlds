@@ -111,7 +111,10 @@ class ServerBackend(private val server: MinecraftServer, private val by: String)
     override suspend fun conflicts(dimension: WorldDimension, clip: ClipFootprint, origin: ChunkPos) =
         ChunkClipImport.conflicts(clip.chunks, clip.origin, dimension, origin)
 
-    override suspend fun delete(dimension: WorldDimension, chunks: Collection<ChunkPos>, backup: Boolean): Int {
+    override suspend fun delete(dimension: WorldDimension, chunks: Collection<ChunkPos>, backup: Boolean) =
+        queueDelete(dimension, chunks, backup, by)
+
+    fun queueDelete(dimension: WorldDimension, chunks: Collection<ChunkPos>, backup: Boolean, by: String): Int {
         ServerJobs.submit(
             Job(
                 id = ServerJobs.newId(), kind = JobKind.DELETE,
@@ -129,6 +132,15 @@ class ServerBackend(private val server: MinecraftServer, private val by: String)
         options: ClipImportOptions,
         backup: Boolean,
         onProgress: (Int, Int) -> Unit,
+    ) = queuePaste(dimension, clip, origin, options, backup, by)
+
+    fun queuePaste(
+        dimension: WorldDimension,
+        clip: String,
+        origin: ChunkPos,
+        options: ClipImportOptions,
+        backup: Boolean,
+        by: String,
     ): ImportResult {
         val found = LocalLibrary.read(clip) ?: return ImportResult.Failure("chunkeditor.clip.error.read")
         ServerJobs.submit(
