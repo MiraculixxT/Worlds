@@ -98,16 +98,15 @@ object EditorService {
         val canWrite = canRead && Perms.canWrite(player)
         val backend = backend() ?: return
         if (canRead) sessions[player.uuid] = Session(player.uuid)
-        Net.toClient(
-            player, 0, S2C.HELLO,
-            Bodies.writeHello(
-                Hello(
-                    PROTOCOL_VERSION, canRead, canWrite, backend.root.fileName?.toString() ?: "world",
-                    backend.dimensions, backend.facts, ServerJobs.list().size,
-                ),
-            ),
-        )
+        Net.toClient(player, 0, S2C.HELLO, hello(backend, canRead, canWrite))
     }
+
+    private fun hello(backend: ServerBackend, canRead: Boolean, canWrite: Boolean) = Bodies.writeHello(
+        Hello(
+            PROTOCOL_VERSION, canRead, canWrite, backend.root.fileName?.toString() ?: "world",
+            backend.dimensions, backend.facts, ServerJobs.list().size,
+        ),
+    )
 
     fun onLeave(player: ServerPlayer) {
         sessions.remove(player.uuid)?.close()
@@ -117,14 +116,6 @@ object EditorService {
         val session = sessions[player.uuid] ?: return
         val body = session.frames.accept(packet) { fail(player, packet.request, "chunkeditor.remote.error.dropped") }
             ?: return
-        if (packet.kind == C2S.OPEN) {
-            Constants.LOG.info(
-                "editor opened by {} ({}) on {}",
-                player.name.string, if (Perms.canWrite(player)) "read+write" else "read only",
-                backend()?.root?.fileName ?: "?",
-            )
-            return
-        }
         if (packet.kind == C2S.CANCEL) {
             session.cancel(Bodies.readInt(body))
             return
@@ -305,8 +296,18 @@ object EditorService {
                     }
                 }
 
+                C2S.OPEN -> {
+                    val canWrite = Perms.canWrite(player)
+                    Constants.LOG.info(
+                        "editor opened by {} ({}) on {}",
+                        player.name.string, if (canWrite) "read+write" else "read only", backend.root.fileName,
+                    )
+                    backend.refresh()
+                    reply(player, request, hello(backend, true, canWrite))
+                }
+
                 C2S.FORCE_SAVE -> {
-                    backend.forceSave()
+                    backend.forceSave(player.name.string)
                     invalidate()
                     reply(player, request, Bodies.writeInt(1))
                 }

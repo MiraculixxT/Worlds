@@ -6,7 +6,7 @@ import net.minecraft.network.codec.StreamCodec
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload
 import net.minecraft.resources.Identifier
 
-const val PROTOCOL_VERSION = 5
+const val PROTOCOL_VERSION = 6
 
 /**
  * The one packet handling all communication to avoid having 100 registered packets
@@ -83,7 +83,7 @@ object C2S {
     const val JOB_PASTE = 10
     const val FORCE_SAVE = 11
     const val CANCEL = 12
-    /** One way (no answer) */
+    /** Answers a fresh [Hello] (dimensions and facts rescanned) */
     const val OPEN = 13
     const val CLIP_LIST = 14
     const val SELECTION_LIST = 15

@@ -96,9 +96,6 @@ object ClientNet {
         }
     }
 
-    /** Fire and forget: the answer is a courtesy, the upload frame is the message */
-    fun send(kind: Int, body: ByteArray) = Net.toServer(counter.getAndIncrement(), kind, body)
-
     fun reset() {
         hello = null
         protocolMismatch = false

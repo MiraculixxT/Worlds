@@ -1,6 +1,7 @@
 package de.miraculixx.chunkeditor
 
 import de.miraculixx.chunkeditor.client.net.ClientNet
+import de.miraculixx.chunkeditor.net.Bodies
 import de.miraculixx.chunkeditor.net.C2S
 import de.miraculixx.chunkeditor.client.net.RemoteBackend
 import de.miraculixx.chunkeditor.client.ui.ChunkMapScreen
@@ -12,6 +13,7 @@ import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 import net.minecraft.world.level.storage.LevelStorageSource
+import kotlinx.coroutines.launch
 
 /**
  * Quick access for other mods
@@ -43,8 +45,12 @@ object ChunkEditor {
                         "editor opened: {} on {} ({})",
                         hello.worldName, where, if (hello.canWrite) "read+write" else "read only",
                     )
-                    ClientNet.send(C2S.OPEN, ByteArray(0))
-                    minecraft.gui.setScreen(ChunkMapScreen(parent, RemoteBackend(hello)))
+                    Constants.SCOPE.launch {
+                        val fresh = runCatching { Bodies.readHello(ClientNet.request(C2S.OPEN, ByteArray(0))) }
+                            .onFailure { Constants.LOG.warn("Chunk editor open failed, using join handshake: {}", it.message) }
+                            .getOrDefault(hello)
+                        minecraft.execute { minecraft.gui.setScreen(ChunkMapScreen(parent, RemoteBackend(fresh))) }
+                    }
                 },
                 Component.translatable(
                     if (local) "chunkeditor.remote.warn.local.title" else "chunkeditor.remote.warn.live.title",

@@ -40,9 +40,19 @@ class ServerBackend(private val server: MinecraftServer, private val by: String)
     // LevelResource.ROOT is ".", so the raw path arrives as `…/world/.`
     val root: Path = server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize()
 
-    override val dimensions: List<WorldDimension> = ChunkRegions.dimensions(root)
+    /** Rescanned on every editor open */
+    @Volatile
+    override var dimensions: List<WorldDimension> = ChunkRegions.dimensions(root)
+        private set
 
-    override val facts: LevelFacts = LevelFacts.read(root)
+    @Volatile
+    override var facts: LevelFacts = LevelFacts.read(root)
+        private set
+
+    fun refresh() {
+        dimensions = ChunkRegions.dimensions(root)
+        facts = LevelFacts.read(root)
+    }
 
     override val localAccess: LevelStorageSource.LevelStorageAccess? = null
 
@@ -137,7 +147,11 @@ class ServerBackend(private val server: MinecraftServer, private val by: String)
         return ImportResult.Success(found.chunks.size, 0, 0)
     }
 
-    fun forceSave() {
-        server.executeIfPossible { server.saveEverything(true, false, false) }
+    fun forceSave(by: String) {
+        server.executeIfPossible {
+            val started = System.nanoTime()
+            server.saveEverything(true, false, false)
+            Constants.LOG.info("world save forced by {} (editor refresh) in {} ms", by, Constants.ms(started))
+        }
     }
 }
