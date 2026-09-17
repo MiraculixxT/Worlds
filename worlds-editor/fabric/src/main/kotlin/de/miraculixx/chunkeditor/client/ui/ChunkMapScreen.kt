@@ -157,6 +157,7 @@ private val SC_DELETE = Shortcut(false, GLFW.GLFW_KEY_DELETE, "Del")
 private val SC_REFRESH = Shortcut(true, GLFW.GLFW_KEY_R, "Ctrl+R")
 private val SC_PLAYERS = Shortcut(false, GLFW.GLFW_KEY_P, "Shift+P", shift = true)
 private val SC_OVERLAYS = Shortcut(false, GLFW.GLFW_KEY_O, "O")
+private val SC_JOBS = Shortcut(false, GLFW.GLFW_KEY_Q, "Q")
 private val SC_OVERLAY_TOGGLE = Shortcut(false, GLFW.GLFW_KEY_O, "Shift+O", shift = true)
 
 private val DELETE_ACTION: Component get() = Component.translatable("selectWorld.delete")
@@ -357,8 +358,9 @@ internal class ChunkMapScreen(
                 enabled = { !clipBusy },
             ) { openLibrary() },
         )
-        // Moving a clip between this machine and the servers shelf only means anything remotely
+
         if (backend is RemoteBackend) {
+            add(MenuEntry.Separator)
             add(
                 MenuEntry.Item(
                     Component.translatable("chunkeditor.clip.upload"),
@@ -372,6 +374,7 @@ internal class ChunkMapScreen(
                 ) { openDownload() },
             )
         }
+
         add(MenuEntry.Separator)
         add(
             MenuEntry.Item(
@@ -379,12 +382,16 @@ internal class ChunkMapScreen(
                 enabled = { selected.isNotEmpty() },
             ) { confirmDelete() },
         )
+
         if (backend is RemoteBackend) {
             add(MenuEntry.Separator)
-            add(MenuEntry.Item(Component.translatable("chunkeditor.jobs.title")) {
-                minecraft.gui.setScreen(JobQueueScreen(this@ChunkMapScreen, backend))
-            })
+            add(MenuEntry.Item(Component.translatable("chunkeditor.jobs.title"), SC_JOBS.label) { openJobs() })
         }
+    }
+
+    private fun openJobs() {
+        val remote = backend as? RemoteBackend ?: return
+        minecraft.gui.setScreen(JobQueueScreen(this, remote))
     }
 
     /** Things to edit how the map looks */
@@ -1913,6 +1920,7 @@ internal class ChunkMapScreen(
             SC_PLAYERS.matches(event) -> run { togglePlayers(); true }
             SC_OVERLAYS.matches(event) -> run { openOverlays(); true }
             SC_OVERLAY_TOGGLE.matches(event) -> overlaySettings.scannable && run { toggleOverlay(); true }
+            SC_JOBS.matches(event) -> backend is RemoteBackend && backend.canWrite && run { openJobs(); true }
             else -> false
         }
         if (handled) {
