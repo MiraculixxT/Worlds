@@ -24,10 +24,14 @@ object PanoramaCapture {
         WorldPanorama.select(null)
         // A leave rewrites LastPlayed, so the default-panorama pick order is stale either way
         WorldPanorama.invalidateLibrary()
-        if (!PreviewConfig.settings.autoCreate) return
         if (minecraft.player == null || minecraft.level == null) return
 
         val root = rootOf(minecraft) ?: return
+        if (PreviewConfig.settings.autoCreate) capture(minecraft, root)
+        if (minecraft.singleplayerServer == null) stampServer(root)
+    }
+
+    private fun capture(minecraft: Minecraft, root: Path) {
         val dir = WorldPanoramaTexture.manualDir(root)
         if (WorldPanoramaTexture.isComplete(dir)) return // manual present, skip
 
@@ -41,6 +45,16 @@ object PanoramaCapture {
         val result = minecraft.grabPanoramixScreenshot(dir.toFile())
         WorldPanorama.invalidate(root)
         Constants.LOG.info("Panorama for {}: {}", root.fileName, result.string)
+    }
+
+    /** Manually mark when the last play was */
+    private fun stampServer(root: Path) {
+        if (!Files.isDirectory(root)) return
+        try {
+            Files.writeString(PanoramaRoots.lastPlayedFile(root), System.currentTimeMillis().toString())
+        } catch (e: Exception) {
+            Constants.LOG.warn("Could not stamp {}: {}", root, e.message)
+        }
     }
 
     private fun rootOf(minecraft: Minecraft): Path? {

@@ -3,9 +3,9 @@ package de.miraculixx.showmyworld.client.ui.panorama
 import de.miraculixx.showmyworld.Constants
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.readText
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import net.minecraft.client.Minecraft
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.nbt.NbtAccounter
 import net.minecraft.nbt.NbtIo
@@ -31,29 +31,38 @@ enum class DefaultPanorama {
 
     companion object {
         /**
-         * Every save that ships or captured a panorama (blocking)
+         * Every save and server that ships or captured a panorama (blocking)
          */
-        fun scan(): List<PanoramaCandidate> {
-            val saves = Minecraft.getInstance().gameDirectory.toPath().resolve("saves")
-            if (!Files.isDirectory(saves)) return emptyList()
+        fun scan(): List<PanoramaCandidate> =
+            scanDir(PanoramaRoots.saves(), ::worldLastPlayed) + scanDir(PanoramaRoots.servers(), ::serverLastPlayed)
+
+        private fun scanDir(parent: Path, lastPlayed: (Path, Path) -> Long): List<PanoramaCandidate> {
+            if (!Files.isDirectory(parent)) return emptyList()
             return try {
-                Files.newDirectoryStream(saves).use { stream ->
+                Files.newDirectoryStream(parent).use { stream ->
                     stream.filter { Files.isDirectory(it) }
-                        .mapNotNull { save ->
-                            WorldPanoramaTexture.resolve(save)?.let { PanoramaCandidate(it, lastPlayed(save)) }
+                        .mapNotNull { root ->
+                            WorldPanoramaTexture.resolve(root)?.let { PanoramaCandidate(it, lastPlayed(root, it)) }
                         }
                 }
             } catch (e: Exception) {
-                Constants.LOG.warn("Could not scan saves/ for panoramas: {}", e.message)
+                Constants.LOG.warn("Could not scan {} for panoramas: {}", parent, e.message)
                 emptyList()
             }
         }
 
-        private fun lastPlayed(saveDir: Path): Long = try {
+        private fun worldLastPlayed(saveDir: Path, panorama: Path): Long = try {
             NbtIo.readCompressed(saveDir.resolve("level.dat"), NbtAccounter.unlimitedHeap())
                 .getCompoundOrEmpty("Data").getLongOr("LastPlayed", 0L)
         } catch (_: Exception) {
             0L
+        }
+
+        /** Stamp from [PanoramaCapture], else the panoramas own age */
+        private fun serverLastPlayed(serverDir: Path, panorama: Path): Long = try {
+            PanoramaRoots.lastPlayedFile(serverDir).readText().trim().toLong()
+        } catch (_: Exception) {
+            runCatching { Files.getLastModifiedTime(panorama).toMillis() }.getOrDefault(0L)
         }
     }
 }
