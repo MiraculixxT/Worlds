@@ -9,6 +9,7 @@
     "EditWorldScreenMixin",
     "GuiRendererMixin",
     "JoinMultiplayerScreenMixin",
+    "LocalPlayerMixin",
     "ManageServerScreenMixin",
     "MinecraftMixin",
     "SelectWorldScreenMixin"
