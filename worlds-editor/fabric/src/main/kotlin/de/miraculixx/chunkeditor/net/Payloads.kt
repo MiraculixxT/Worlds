@@ -101,6 +101,8 @@ object C2S {
     const val JOB_LIST = 24
     const val JOB_CANCEL = 25
     const val JOB_BACKUP = 26
+    const val CLIP_FILES = 27
+    const val CLIP_DOWNLOAD = 28
 }
 
 /** Clientbound kinds */
@@ -119,3 +121,6 @@ const val C2S_FRAGMENT = 24 * 1024
 
 /** File bytes per upload frame: the frame is a fragment minus its id, index and length varints */
 const val UPLOAD_PIECE = C2S_FRAGMENT - 16
+
+/** Both sides refuse one that would not fit the reassembly budget */
+const val MAX_CLIP_FILE = 32 * 1024 * 1024

@@ -545,6 +545,27 @@ object LibraryBodies {
         chunks.forEach { buf.writeLong(it.pack()) }
     }
 
+    fun writeFiles(files: List<Pair<String, Long>>): ByteArray = Bodies.write { buf ->
+        buf.writeVarInt(files.size)
+        files.forEach {
+            buf.writeUtf(it.first)
+            buf.writeVarLong(it.second)
+        }
+    }
+
+    fun readFiles(bytes: ByteArray): List<Pair<String, Long>> = Bodies.read(bytes) { buf ->
+        (0 until buf.readVarInt()).map { buf.readUtf() to buf.readVarLong() }
+    }
+
+    fun fileRequest(name: String, file: String): ByteArray = Bodies.write { buf ->
+        buf.writeUtf(name)
+        buf.writeUtf(file)
+    }
+
+    fun writeFile(bytes: ByteArray): ByteArray = Bodies.write { it.writeByteArray(bytes) }
+
+    fun readFile(bytes: ByteArray): ByteArray = Bodies.read(bytes) { it.readByteArray(MAX_CLIP_FILE) }
+
     fun name(name: String): ByteArray = Bodies.write { it.writeUtf(name) }
 
     fun readName(bytes: ByteArray): String = Bodies.read(bytes) { it.readUtf() }

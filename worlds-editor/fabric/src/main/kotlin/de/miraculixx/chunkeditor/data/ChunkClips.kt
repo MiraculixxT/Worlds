@@ -19,6 +19,9 @@ import kotlin.io.path.writeText
 const val CLIP_FORMAT = 1
 private const val MANIFEST = "clip.json"
 
+/** Prevent upload/downloading files that are not world related */
+val CLIP_FILE = Regex("""(clip\.json|(region|entities|poi)/r\.-?\d+\.-?\d+\.mca)""")
+
 @Serializable
 data class ClipManifest(
     val format: Int = CLIP_FORMAT,
@@ -83,6 +86,26 @@ object ChunkClips {
             ?: buildList { indices.forEach { ChunkRegions.forEachChunk(it) { pos -> add(pos) } } }
         val modified = runCatching { Files.getLastModifiedTime(dir).toMillis() }.getOrDefault(0L)
         return ClipInfo(dir, manifest, chunks, indices.sumOf { it.bytes }, modified)
+    }
+
+    /** Every file of a clip, paired with its clip relative name */
+    fun files(dir: Path): List<Pair<String, Path>> = buildList {
+        val manifest = dir.resolve(MANIFEST)
+        if (Files.isRegularFile(manifest)) add(MANIFEST to manifest)
+        CHUNK_SUBS.forEach { sub ->
+            val folder = dir.resolve(sub)
+            if (!Files.isDirectory(folder)) return@forEach
+            Files.newDirectoryStream(folder, "*.mca").use { stream ->
+                stream.forEach { add("$sub/${it.fileName}" to it) }
+            }
+        }
+    }
+
+    /** A clip relative name back to a path */
+    fun file(dir: Path, name: String): Path? {
+        if (!CLIP_FILE.matches(name)) return null
+        val path = dir.resolve(name).normalize()
+        return if (path.startsWith(dir.normalize())) path else null
     }
 
     fun write(dir: Path, manifest: ClipManifest) {

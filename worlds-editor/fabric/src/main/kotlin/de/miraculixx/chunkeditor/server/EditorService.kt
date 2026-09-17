@@ -1,6 +1,7 @@
 package de.miraculixx.chunkeditor.server
 
 import de.miraculixx.chunkeditor.Constants
+import de.miraculixx.chunkeditor.data.CLIP_FILE
 import de.miraculixx.chunkeditor.data.ChunkClips
 import de.miraculixx.chunkeditor.data.ClipFootprint
 import de.miraculixx.chunkeditor.data.ClipImportOptions
@@ -12,6 +13,7 @@ import de.miraculixx.chunkeditor.data.LocalLibrary
 import de.miraculixx.chunkeditor.net.Bodies
 import de.miraculixx.chunkeditor.net.LibraryBodies
 import de.miraculixx.chunkeditor.net.C2S
+import de.miraculixx.chunkeditor.net.MAX_CLIP_FILE
 import de.miraculixx.chunkeditor.net.UPLOAD_PIECE
 import de.miraculixx.chunkeditor.net.EditorPacket
 import de.miraculixx.chunkeditor.net.Hello
@@ -48,8 +50,6 @@ private const val MAX_SCANS = 1
 /** How much of one message may sit half-arrived */
 private const val REASSEMBLY_BYTES = 8L * 1024 * 1024
 private const val REASSEMBLY_OPEN = 8
-
-private val CLIP_FILE = Regex("""(clip\.json|(region|entities|poi)/r\.-?\d+\.-?\d+\.mca)""")
 
 /**
  * One session per admin, the reads they ask for, and a cache for shared results (prevent double scans)
@@ -233,6 +233,26 @@ object EditorService {
                     reply(player, request, LibraryBodies.name(landed))
                 }
 
+                C2S.CLIP_FILES -> {
+                    val clip = LocalLibrary.read(LibraryBodies.readName(body))
+                        ?: return fail(player, request, DOWNLOAD_FAILED)
+                    val files = ChunkClips.files(clip.dir).map { (name, path) -> name to Files.size(path) }
+                    Constants.LOG.info(
+                        "clip {} downloaded from the library by {} ({} file(s), {} bytes)",
+                        clip.name, player.name.string, files.size, files.sumOf { it.second },
+                    )
+                    reply(player, request, LibraryBodies.writeFiles(files))
+                }
+
+                C2S.CLIP_DOWNLOAD -> Bodies.read(body) { buf ->
+                    val clip = LocalLibrary.read(buf.readUtf())
+                    val path = clip?.let { ChunkClips.file(it.dir, buf.readUtf()) }
+                    if (path == null || !Files.isRegularFile(path) || Files.size(path) > MAX_CLIP_FILE) {
+                        return@read fail(player, request, DOWNLOAD_FAILED)
+                    }
+                    reply(player, request, LibraryBodies.writeFile(Files.readAllBytes(path)))
+                }
+
                 C2S.CLIP_LIST -> reply(player, request, LibraryBodies.writeClips(backend.library.clips()))
 
                 C2S.SELECTION_LIST ->
@@ -408,12 +428,14 @@ object EditorService {
     }
 
     private const val DIMENSION_GONE = "chunkeditor.remote.error.dimension"
+    private const val DOWNLOAD_FAILED = "chunkeditor.remote.error.download"
 
     /** Everything that changes the world, queue or lib */
     private val WRITE_KINDS = setOf(
         C2S.JOB_DELETE, C2S.JOB_PASTE, C2S.FORCE_SAVE,
         C2S.CLIP_UPLOAD_OPEN, C2S.CLIP_UPLOAD, C2S.CLIP_UPLOAD_END, C2S.CLIP_EXPORT, C2S.SELECTION_EXPORT,
         C2S.CLIP_DELETE, C2S.SELECTION_DELETE, C2S.JOB_LIST, C2S.JOB_CANCEL, C2S.JOB_BACKUP,
+        C2S.CLIP_FILES, C2S.CLIP_DOWNLOAD,
     )
 
     /**

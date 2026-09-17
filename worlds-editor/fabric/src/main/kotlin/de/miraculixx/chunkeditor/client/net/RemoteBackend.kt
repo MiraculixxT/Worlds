@@ -1,7 +1,8 @@
 package de.miraculixx.chunkeditor.client.net
 
 import de.miraculixx.chunkeditor.Constants
-import de.miraculixx.chunkeditor.data.CHUNK_SUBS
+import de.miraculixx.chunkeditor.data.CLIP_FILE
+import de.miraculixx.chunkeditor.data.ChunkClips
 import de.miraculixx.chunkeditor.data.ClipImportOptions
 import de.miraculixx.chunkeditor.data.ClipInfo
 import de.miraculixx.chunkeditor.data.EditorBackend
@@ -19,6 +20,7 @@ import de.miraculixx.chunkeditor.data.ClipLibrary
 import de.miraculixx.chunkeditor.net.Bodies
 import de.miraculixx.chunkeditor.net.LibraryBodies
 import de.miraculixx.chunkeditor.net.C2S
+import de.miraculixx.chunkeditor.net.MAX_CLIP_FILE
 import de.miraculixx.chunkeditor.net.UPLOAD_PIECE
 import de.miraculixx.chunkeditor.net.Hello
 import de.miraculixx.chunkeditor.net.JobQueue
@@ -34,6 +36,7 @@ import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.biome.Biome
 import net.minecraft.world.level.storage.LevelStorageSource
 import java.nio.file.Files
+import kotlin.io.path.createDirectories
 
 private const val UPLOAD_WINDOW = 32
 
@@ -148,17 +151,7 @@ class RemoteBackend(hello: Hello) : EditorBackend {
      */
     suspend fun upload(clip: ClipInfo, onProgress: (Int, Int) -> Unit): String? = withContext(Dispatchers.IO) {
         val wanted = clip.name
-        val files = buildList {
-            val manifest = clip.dir.resolve("clip.json")
-            if (Files.isRegularFile(manifest)) add("clip.json" to manifest)
-            CHUNK_SUBS.forEach { sub ->
-                val dir = clip.dir.resolve(sub)
-                if (!Files.isDirectory(dir)) return@forEach
-                Files.newDirectoryStream(dir, "*.mca").use { stream ->
-                    stream.forEach { add("$sub/${it.fileName}" to it) }
-                }
-            }
-        }
+        val files = ChunkClips.files(clip.dir)
         if (files.isEmpty()) return@withContext null
         val window = Semaphore(UPLOAD_WINDOW)
         try {
@@ -188,6 +181,43 @@ class RemoteBackend(hello: Hello) : EditorBackend {
             LibraryBodies.readName(ClientNet.request(C2S.CLIP_UPLOAD_END, LibraryBodies.name(wanted)))
         } catch (e: Exception) {
             Constants.LOG.warn("Could not upload clip {}", clip.name, e)
+            null
+        }
+    }
+
+    /**
+     * @return the name the local library gave it (different on collision)
+     */
+    suspend fun download(name: String, onProgress: (Int, Int) -> Unit): String? = withContext(Dispatchers.IO) {
+        val files = LibraryBodies.readFiles(ClientNet.request(C2S.CLIP_FILES, LibraryBodies.name(name)))
+        // The server names these, so they only ever are what a clip is made of and never grow past the budget
+        if (files.isEmpty() || files.any { !CLIP_FILE.matches(it.first) || it.second !in 0..MAX_CLIP_FILE }) {
+            Constants.LOG.warn("Server offered clip {} as {} unusable file(s)", name, files.size)
+            return@withContext null
+        }
+        val dir = ChunkClips.freeDir(name)
+        val started = System.currentTimeMillis()
+        try {
+            files.forEachIndexed { index, (file, _) ->
+                val target = ChunkClips.file(dir, file) ?: throw IllegalArgumentException(file)
+                target.parent.createDirectories()
+                Files.write(
+                    target,
+                    LibraryBodies.readFile(ClientNet.request(C2S.CLIP_DOWNLOAD, LibraryBodies.fileRequest(name, file))),
+                )
+                onProgress(index + 1, files.size)
+            }
+            check(ChunkClips.read(dir) != null) { "no region data" }
+            val landed = dir.fileName.toString()
+            Constants.LOG.info(
+                "clip {} downloaded from {} as {} ({} file(s)) in {} ms",
+                name, worldName, landed, files.size, System.currentTimeMillis() - started,
+            )
+            landed
+        } catch (e: Exception) {
+            Constants.LOG.warn("Could not download clip {}", name, e)
+            // Remove fragments on error
+            runCatching { Files.walk(dir).use { it.sorted(Comparator.reverseOrder()).forEach(Files::delete) } }
             null
         }
     }

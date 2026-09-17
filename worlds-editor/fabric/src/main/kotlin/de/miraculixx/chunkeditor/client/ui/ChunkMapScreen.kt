@@ -32,6 +32,7 @@ import de.miraculixx.chunkeditor.data.ClipFootprint
 import de.miraculixx.chunkeditor.data.ClipExportResult
 import de.miraculixx.chunkeditor.data.LocalLibrary
 import de.miraculixx.chunkeditor.data.RegionPixels
+import de.miraculixx.chunkeditor.data.SelectionCsv
 import de.miraculixx.chunkeditor.data.SelectionEntry
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet
 import kotlinx.coroutines.Job
@@ -356,13 +357,19 @@ internal class ChunkMapScreen(
                 enabled = { !clipBusy },
             ) { openLibrary() },
         )
-        // Pushing a clip from this machine onto the server's shelf only means anything remotely
+        // Moving a clip between this machine and the servers shelf only means anything remotely
         if (backend is RemoteBackend) {
             add(
                 MenuEntry.Item(
                     Component.translatable("chunkeditor.clip.upload"),
                     enabled = { !clipBusy },
                 ) { openUpload() },
+            )
+            add(
+                MenuEntry.Item(
+                    Component.translatable("chunkeditor.clip.download"),
+                    enabled = { !clipBusy },
+                ) { openDownload() },
             )
         }
         add(MenuEntry.Separator)
@@ -487,6 +494,58 @@ internal class ChunkMapScreen(
                 label,
             )
         )
+    }
+
+    /** Opens the servers lib to pull clips and selections onto this machine */
+    private fun openDownload() {
+        val remote = backend as? RemoteBackend ?: return
+        if (clipBusy) return
+        val label = Component.translatable("chunkeditor.clip.download")
+        minecraft.gui.setScreen(
+            ClipLibraryScreen(
+                this, remote.library, label,
+                { clip ->
+                    minecraft.gui.setScreen(this)
+                    runDownload(remote, clip.name)
+                },
+                { selection ->
+                    minecraft.gui.setScreen(this)
+                    runSelectionDownload(remote, selection.name)
+                },
+                label,
+            )
+        )
+    }
+
+    private fun runDownload(remote: RemoteBackend, name: String) {
+        clipBusy = true
+        clipMessage = I18n.get("chunkeditor.clip.downloading", 0, 1)
+        Constants.SCOPE.launch {
+            val landed = runCatching {
+                remote.download(name) { done, total -> clipMessage = I18n.get("chunkeditor.clip.downloading", done, total) }
+            }.onFailure { Constants.LOG.warn("Could not download clip {}", name, it) }.getOrNull()
+            minecraft.execute {
+                clipBusy = false
+                clipMessage = if (landed == null) I18n.get("chunkeditor.remote.error.download")
+                else I18n.get("chunkeditor.clip.downloaded", landed)
+            }
+        }
+    }
+
+    private fun runSelectionDownload(remote: RemoteBackend, name: String) {
+        clipBusy = true
+        clipMessage = I18n.get("chunkeditor.clip.downloading", 0, 1)
+        Constants.SCOPE.launch {
+            val written = runCatching {
+                val parsed = remote.library.selection(name) ?: return@runCatching null
+                SelectionCsv.write(name, parsed.chunks.map { ChunkPos.unpack(it) }, parsed.inverted).nameWithoutExtension
+            }.onFailure { Constants.LOG.warn("Could not download selection {}", name, it) }.getOrNull()
+            minecraft.execute {
+                clipBusy = false
+                clipMessage = if (written == null) I18n.get("chunkeditor.remote.error.download")
+                else I18n.get("chunkeditor.clip.downloaded", written)
+            }
+        }
     }
 
     /** Small enough to go as one request */
