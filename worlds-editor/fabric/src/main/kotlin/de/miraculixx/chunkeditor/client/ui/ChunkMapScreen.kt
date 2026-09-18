@@ -324,7 +324,7 @@ internal class ChunkMapScreen(
         dimensionPicker = Dropdown(pickerX, 6, DROPDOWN_W, dimensions, dim, { it.name }, ::switchDimension)
         addRenderableWidget(dimensionPicker.button)
 
-        val x = pickerX + DROPDOWN_W + 6
+        val x = pickerX + DROPDOWN_W + 4
         menus = listOf(
             menu("chunkeditor.menu.selection", x, selectionMenu()),
             menu("chunkeditor.menu.edit", x + MENU_W + 4, editMenu()),
