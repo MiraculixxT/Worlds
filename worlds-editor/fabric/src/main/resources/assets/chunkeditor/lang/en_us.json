@@ -135,5 +135,6 @@
   "chunkeditor.jobs.backup": "Back up world before applying",
   "chunkeditor.jobs.remove": "Remove",
   "chunkeditor.jobs.remove_title": "Remove queued action?",
-  "chunkeditor.jobs.remove_warning": "It will not be applied when the server stops"
+  "chunkeditor.jobs.remove_warning": "It will not be applied when the server stops",
+  "chunkeditor.settings.title": "Chunk Editor Settings"
 }

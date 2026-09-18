@@ -135,5 +135,6 @@
   "chunkeditor.jobs.backup": "Welt vor dem Anwenden sichern",
   "chunkeditor.jobs.remove": "Entfernen",
   "chunkeditor.jobs.remove_title": "Aktion entfernen?",
-  "chunkeditor.jobs.remove_warning": "Aktion wird nicht mehr ausgeführt"
+  "chunkeditor.jobs.remove_warning": "Aktion wird nicht mehr ausgeführt",
+  "chunkeditor.settings.title": "Chunk Editor Einstellungen"
 }

@@ -22,6 +22,7 @@ import de.miraculixx.chunkeditor.data.WorldDimension
 import net.minecraft.locale.Language
 import de.miraculixx.common.client.ui.BackupActionScreen
 import de.miraculixx.common.client.ui.Dropdown
+import de.miraculixx.common.client.ui.IconButton
 import de.miraculixx.common.client.ui.MenuDropdown
 import de.miraculixx.common.client.ui.MenuEntry
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
@@ -74,6 +75,8 @@ private const val HEADER_H = 32
 private const val MARGIN = 8
 private const val DROPDOWN_W = 140
 private const val MENU_W = 78
+
+private val SETTINGS_SPRITE = Identifier.fromNamespaceAndPath(Constants.MOD_ID, "menu")
 
 /** The two-row info bar under the map: coordinates + zoom, then the world summary */
 private const val INFO_H = 30
@@ -311,10 +314,17 @@ internal class ChunkMapScreen(
         }
         loadTints()
 
-        dimensionPicker = Dropdown(MARGIN, 6, DROPDOWN_W, dimensions, dim, { it.name }, ::switchDimension)
+        addRenderableWidget(
+            IconButton(MARGIN, 6, 20, Component.translatable("chunkeditor.settings.title"), SETTINGS_SPRITE) {
+                minecraft.gui.setScreen(EditorSettingsScreen(this))
+            }
+        )
+
+        val pickerX = MARGIN + 20 + 4
+        dimensionPicker = Dropdown(pickerX, 6, DROPDOWN_W, dimensions, dim, { it.name }, ::switchDimension)
         addRenderableWidget(dimensionPicker.button)
 
-        val x = MARGIN + DROPDOWN_W + 6
+        val x = pickerX + DROPDOWN_W + 6
         menus = listOf(
             menu("chunkeditor.menu.selection", x, selectionMenu()),
             menu("chunkeditor.menu.edit", x + MENU_W + 4, editMenu()),
