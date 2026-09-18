@@ -192,6 +192,7 @@ private val WorldDimension.name: String get() = Language.getInstance().getOrDefa
 internal class ChunkMapScreen(
     private val parent: Screen,
     private val backend: EditorBackend,
+    private val onClosed: () -> Unit = {},
 ) : Screen(Component.translatable("chunkeditor.map.title")) {
 
     private val facts = backend.facts
@@ -1983,6 +1984,7 @@ internal class ChunkMapScreen(
         loadGen++
         dropTextures()
         releasePasteTexture()
+        onClosed()
         minecraft.gui.setScreen(parent)
     }
 

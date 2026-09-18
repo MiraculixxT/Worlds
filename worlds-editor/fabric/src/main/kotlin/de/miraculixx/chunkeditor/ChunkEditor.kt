@@ -10,6 +10,7 @@ import de.miraculixx.chunkeditor.client.ui.SaveBiomes
 import de.miraculixx.chunkeditor.data.EditorConfig
 import de.miraculixx.chunkeditor.data.LocalBackend
 import net.minecraft.client.Minecraft
+import net.minecraft.client.gui.components.toasts.SystemToast
 import net.minecraft.client.gui.screens.ConfirmScreen
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.CommonComponents
@@ -25,6 +26,21 @@ object ChunkEditor {
         Constants.LOG.info("editor opened: local world {}", access.levelId)
         val backend = LocalBackend(access, Minecraft.getInstance().user.profileId) { SaveBiomes.load(access) }
         Minecraft.getInstance().gui.setScreen(ChunkMapScreen(parent, backend))
+    }
+
+    /** Opens a world we have no access for yet */
+    fun openOwned(parent: Screen, levelId: String) {
+        val minecraft = Minecraft.getInstance()
+        val access = try {
+            minecraft.levelSource.validateAndCreateAccess(levelId)
+        } catch (e: Exception) {
+            Constants.LOG.error("Failed to access level {}", levelId, e)
+            SystemToast.onWorldAccessFailure(minecraft, levelId)
+            return
+        }
+        Constants.LOG.info("editor opened: local world {}", access.levelId)
+        val backend = LocalBackend(access, minecraft.user.profileId) { SaveBiomes.load(access) }
+        minecraft.gui.setScreen(ChunkMapScreen(parent, backend) { access.safeClose() })
     }
 
     /** Requires handshake before, then open remote UI (same with file shares) */
