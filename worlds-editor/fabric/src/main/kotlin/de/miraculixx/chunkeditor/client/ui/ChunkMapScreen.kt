@@ -61,7 +61,6 @@ import net.minecraft.world.level.ChunkPos
 import org.lwjgl.glfw.GLFW
 import java.util.UUID
 import java.util.function.Supplier
-import kotlin.io.path.name
 import kotlin.io.path.nameWithoutExtension
 import kotlin.math.abs
 import kotlin.math.floor
