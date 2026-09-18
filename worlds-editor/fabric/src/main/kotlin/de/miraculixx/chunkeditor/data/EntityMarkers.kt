@@ -49,7 +49,7 @@ object EntityMarkers {
 
     private fun marker(tag: CompoundTag): EntityMarker? {
         val type = tag.getStringOr("id", "")
-        if (type.isEmpty() || type == PLAYER_TYPE) return null
+        if (type.isEmpty() || type == PLAYER_TYPE || EntityMarkerConfig.hidden(type)) return null
         val pos = tag.read("Pos", Vec3.CODEC).orElse(null) ?: return null
         return EntityMarker(type, pos)
     }

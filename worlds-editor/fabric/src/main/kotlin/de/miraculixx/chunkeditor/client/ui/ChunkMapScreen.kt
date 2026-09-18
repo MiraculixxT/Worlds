@@ -16,6 +16,7 @@ import de.miraculixx.chunkeditor.data.RegionIndex
 import de.miraculixx.chunkeditor.data.ScanSource
 import de.miraculixx.chunkeditor.data.EditorBackend
 import de.miraculixx.chunkeditor.data.EntityMarker
+import de.miraculixx.chunkeditor.data.EntityMarkerConfig
 import de.miraculixx.chunkeditor.data.OverlayColors
 import de.miraculixx.chunkeditor.data.OverlaySettings
 import de.miraculixx.chunkeditor.data.PlayerMarker
@@ -879,7 +880,8 @@ internal class ChunkMapScreen(
         if (!entitiesLoading.add(id)) return
         val generation = loadGen
         Constants.SCOPE.launch {
-            val read = backend.entities(dim, region.rx, region.rz)
+            // A remote filters by its own config, the local one decides what is drawn here
+            val read = backend.entities(dim, region.rx, region.rz).filterNot { EntityMarkerConfig.hidden(it.type) }
             minecraft.execute {
                 entitiesLoading.remove(id)
                 if (generation == loadGen) entities[id] = read
@@ -1361,6 +1363,7 @@ internal class ChunkMapScreen(
             }
             found.forEach { marker ->
                 if (drawn >= MAX_ENTITY_ICONS) return
+                val stack = EntityIcons.stack(marker.type) ?: return@forEach
                 val x = screenX(marker.pos.x) - ENTITY_ICON / 2.0
                 val y = screenY(marker.pos.z) - ENTITY_ICON / 2.0
                 if (x + ENTITY_ICON < mapLeft() || x > mapRight() || y + ENTITY_ICON < mapTop() || y > mapBottom()) {
@@ -1369,7 +1372,7 @@ internal class ChunkMapScreen(
                 pose.pushMatrix()
                 pose.translate(x.toFloat(), y.toFloat())
                 pose.scale(scaled, scaled)
-                graphics.item(EntityIcons.stack(marker.type), 0, 0)
+                graphics.item(stack, 0, 0)
                 pose.popMatrix()
                 drawn++
             }
