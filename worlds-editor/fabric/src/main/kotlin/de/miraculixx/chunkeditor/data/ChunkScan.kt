@@ -12,7 +12,6 @@ import net.minecraft.nbt.NumericTag
 import net.minecraft.nbt.Tag
 import net.minecraft.nbt.visitors.CollectFields
 import net.minecraft.nbt.visitors.FieldSelector
-import net.minecraft.util.Mth
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.chunk.storage.RegionFileStorage
 import net.minecraft.world.level.storage.LevelStorageSource
@@ -22,9 +21,6 @@ import java.util.EnumSet
 private const val COLUMNS = 16 * 16
 private const val BLOCKS_PER_SECTION = 16 * 16 * 16
 private const val CENTER_COLUMN = 8 * 16 + 8
-
-/** Past this a section's biomes are packed against the world registry, not against its own palette */
-private const val MAX_BIOME_PALETTE_BITS = 3
 
 /**
  * Every metric of a source is filled by that pass, so a second request on the same source is free
@@ -116,19 +112,20 @@ class ChunkScan {
 object ChunkScans {
 
     /**
-     * @param access only read by [ScanSource.BLOCKS], to resolve a block tag against the save's packs
+     * @param access resolves block tags against the packs (on remote null, as alr in reg)
      * @param minY the dimension's build floor
      * @param argument the key to look for
      */
     suspend fun scan(
         dimension: WorldDimension,
-        access: LevelStorageSource.LevelStorageAccess,
+        access: LevelStorageSource.LevelStorageAccess?,
         regions: Collection<RegionIndex>,
         source: ScanSource,
         argument: String?,
         minY: Int,
         onProgress: (done: Int, total: Int) -> Unit,
     ): ScanResult = withContext(Dispatchers.IO) {
+        val started = System.nanoTime()
         val labels = ArrayList<String>()
         val values = when (source) {
             ScanSource.HEADER -> scanHeader(dimension, regions, onProgress)
@@ -137,6 +134,11 @@ object ChunkScans {
             ScanSource.ENTITIES -> scanEntities(dimension, regions, onProgress)
             ScanSource.BLOCKS -> scanBlocks(dimension, access, regions, argument, onProgress)
         }
+        Constants.LOG.info(
+            "scan {} {}: {} regions, {} chunks in {} ms",
+            source, dimension.dir.fileName, regions.size,
+            values.values.maxOfOrNull { it.size } ?: 0, Constants.ms(started),
+        )
         ScanResult(source, argument, values, labels)
     }
 
@@ -225,7 +227,7 @@ object ChunkScans {
     }
 
     private fun scanBlocks(
-        dimension: WorldDimension, access: LevelStorageSource.LevelStorageAccess,
+        dimension: WorldDimension, access: LevelStorageSource.LevelStorageAccess?,
         regions: Collection<RegionIndex>, block: String?, onProgress: (Int, Int) -> Unit,
     ): Map<ChunkMetric, Long2LongOpenHashMap> {
         val counts = Long2LongOpenHashMap()
@@ -320,20 +322,7 @@ object ChunkScans {
         val section = tag.getListOrEmpty("sections").firstOrNull { entry ->
             (entry as? CompoundTag)?.getByte("Y")?.orElse(null)?.toInt() == y shr 4
         } as? CompoundTag ?: return null
-        val biomes = section.getCompound("biomes").orElse(null) ?: return null
-        val palette = biomes.getListOrEmpty("palette")
-        if (palette.isEmpty) return null
-        // A single-entry palette stores no cells at all
-        val data = biomes.getLongArray("data").orElse(null)
-        if (data == null || data.isEmpty()) return palette.getStringOr(0, "").takeIf { it.isNotEmpty() }
-        val bits = Mth.ceillog2(palette.size).coerceAtLeast(1)
-        if (bits > MAX_BIOME_PALETTE_BITS) return null
-        val perLong = 64 / bits
-        // 4x4x4 cells indexed (y * 4 + z) * 4 + x, entries never spanning a long
-        val cell = ((y and 15) shr 2) * 16 + 2 * 4 + 2
-        if (cell / perLong >= data.size) return null
-        val index = ((data[cell / perLong] ushr (cell % perLong) * bits) and ((1L shl bits) - 1)).toInt()
-        return palette.getStringOr(index, "").takeIf { it.isNotEmpty() }
+        return BiomeCells.of(section)?.at(8, y and 15, 8)?.takeIf { it.isNotEmpty() }
     }
 }
 

@@ -1,15 +1,17 @@
+@file:Suppress("UnusedExpression")
+
 package de.miraculixx.chunkeditor.data
 
 import de.miraculixx.chunkeditor.Constants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import net.minecraft.client.resources.language.I18n
 import net.minecraft.core.registries.Registries
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.resources.Identifier
 import net.minecraft.resources.ResourceKey
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.Level
+import net.minecraft.world.level.dimension.DimensionType
 import net.minecraft.world.level.chunk.storage.RegionFileStorage
 import net.minecraft.world.level.chunk.storage.RegionStorageInfo
 import net.minecraft.world.level.storage.LevelResource
@@ -22,8 +24,11 @@ import java.nio.file.StandardOpenOption
 import java.util.BitSet
 import kotlin.io.path.name
 
-/** One of the save's dimension folders */
-data class WorldDimension(val key: ResourceKey<Level>, val label: String, val dir: Path) {
+/**
+ * One of the save's dimension folders
+ * @param labelKey a translation key for the vanilla three, the dimension id itself for a custom one
+ */
+data class WorldDimension(val key: ResourceKey<Level>, val labelKey: String, val dir: Path) {
     val regionDir: Path get() = dir.resolve(SUB_REGION)
 }
 
@@ -54,20 +59,26 @@ object ChunkRegions {
      * Overworld / Nether / End plus every datapack dimension with a region folder.
      * Vanilla ones are short names, custom ones named `<ns>:<key>`
      */
-    fun dimensions(access: LevelStorageSource.LevelStorageAccess): List<WorldDimension> {
+    fun dimensions(access: LevelStorageSource.LevelStorageAccess): List<WorldDimension> =
+        dimensions(access.getLevelPath(LevelResource.ROOT))
+
+    /**
+     * The same scan off the save root alone
+     */
+    fun dimensions(root: Path): List<WorldDimension> {
         val found = LinkedHashMap<Path, WorldDimension>()
-        fun offer(key: ResourceKey<Level>, label: String, dir: Path) {
+        fun offer(key: ResourceKey<Level>, labelKey: String, dir: Path) {
             val normalized = dir.normalize()
             if (Files.isDirectory(normalized.resolve(SUB_REGION))) {
-                found.putIfAbsent(normalized, WorldDimension(key, label, normalized))
+                found.putIfAbsent(normalized, WorldDimension(key, labelKey, normalized))
             }
         }
         listOf(
             Level.OVERWORLD to "chunkeditor.dimension.overworld",
             Level.NETHER to "chunkeditor.dimension.nether",
             Level.END to "chunkeditor.dimension.end",
-        ).forEach { (key, label) -> offer(key, I18n.get(label), access.getDimensionPath(key)) }
-        val custom = access.getLevelPath(LevelResource.ROOT).resolve("dimensions")
+        ).forEach { (key, labelKey) -> offer(key, labelKey, DimensionType.getStorageFolder(key, root)) }
+        val custom = root.resolve("dimensions")
         if (Files.isDirectory(custom)) {
             Files.newDirectoryStream(custom).use { namespaces ->
                 namespaces.filter { Files.isDirectory(it) }.forEach { ns ->
@@ -173,6 +184,7 @@ object ChunkRegions {
      */
     fun deleteChunks(dimension: WorldDimension, chunks: Collection<ChunkPos>): Int {
         if (chunks.isEmpty()) return 0
+        val started = System.nanoTime()
         var deleted = 0
         CHUNK_SUBS.forEach { sub ->
             storage(dimension, sub)?.use { store ->
@@ -194,6 +206,10 @@ object ChunkRegions {
                 if (index.isEmpty) runCatching { Files.deleteIfExists(file) }
             }
         }
+        Constants.LOG.info(
+            "delete {}: {} of {} chunks in {} ms",
+            dimension.dir.fileName, deleted, chunks.size, Constants.ms(started),
+        )
         return deleted
     }
 
@@ -239,7 +255,7 @@ object ChunkRegions {
                 i++
             }
             present
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }

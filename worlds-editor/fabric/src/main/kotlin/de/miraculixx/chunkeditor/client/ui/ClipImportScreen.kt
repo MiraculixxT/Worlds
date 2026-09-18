@@ -2,7 +2,6 @@ package de.miraculixx.chunkeditor.client.ui
 
 import de.miraculixx.chunkeditor.data.ClipImportOptions
 import de.miraculixx.chunkeditor.data.ExistingChunks
-import de.miraculixx.chunkeditor.data.ClipInfo
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
 import de.miraculixx.common.client.ui.drawBox
 import net.minecraft.client.gui.GuiGraphicsExtractor
@@ -25,7 +24,7 @@ private const val INVALID_COLOR = 0xFFFF5555.toInt()
  */
 internal class ClipImportScreen(
     private val parent: Screen,
-    private val clip: ClipInfo,
+    private val clip: String,
     private val origin: ChunkPos,
     private val onAccept: (ClipImportOptions) -> Unit,
 ) : Screen(Component.translatable("chunkeditor.clip.options_title")) {
@@ -108,7 +107,7 @@ internal class ClipImportScreen(
         graphics.text(font, title.copy().withStyle { it.withBold(true) }, left, panelTop + 9, -1)
         graphics.text(
             font,
-            Component.translatable("chunkeditor.clip.options_subtitle", clip.name, origin.x, origin.z),
+            Component.translatable("chunkeditor.clip.options_subtitle", clip, origin.x, origin.z),
             left, panelTop + 22, SUBTEXT_COLOR,
         )
         graphics.text(

@@ -1,12 +1,12 @@
 package de.miraculixx.chunkeditor.data
 
 import net.minecraft.SharedConstants
-import net.minecraft.client.Minecraft
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.nbt.DoubleTag
 import net.minecraft.nbt.IntArrayTag
 import net.minecraft.nbt.ListTag
 import net.minecraft.util.datafix.DataFixTypes
+import net.minecraft.util.datafix.DataFixers
 import net.minecraft.world.level.ChunkPos
 import java.util.UUID
 
@@ -156,7 +156,7 @@ object ChunkRelocate {
     fun datafix(type: DataFixTypes, tag: CompoundTag): CompoundTag {
         val version = tag.getIntOr(SharedConstants.DATA_VERSION_TAG, 0)
         if (version >= ChunkClips.currentDataVersion) return tag
-        return type.updateToCurrentVersion(Minecraft.getInstance().fixerUpper, tag, version)
+        return type.updateToCurrentVersion(DataFixers.getDataFixer(), tag, version)
     }
 
     fun mergeRegion(source: CompoundTag, destination: CompoundTag): CompoundTag {

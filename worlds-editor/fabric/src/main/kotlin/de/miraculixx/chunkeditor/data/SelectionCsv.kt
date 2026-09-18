@@ -48,11 +48,12 @@ object SelectionCsv {
     }.onFailure { Constants.LOG.warn("Unreadable selection {}: {}", path.name, it.message) }.getOrNull()
 
     /** Whole regions collapse to one line, the way MCA Selector writes them */
-    fun write(name: String, chunks: Collection<ChunkPos>): Path {
+    fun write(name: String, chunks: Collection<ChunkPos>, inverted: Boolean = false): Path {
         val dir = dir()
         Files.createDirectories(dir)
         val byRegion = chunks.groupBy { it.regionX to it.regionZ }
-        val lines = ArrayList<String>(chunks.size)
+        val lines = ArrayList<String>(chunks.size + 1)
+        if (inverted) lines.add(INVERTED)
         byRegion.entries.sortedWith(compareBy({ it.key.second }, { it.key.first })).forEach { (region, inRegion) ->
             val (rx, rz) = region
             if (inRegion.size == REGION_SIZE * REGION_SIZE) {

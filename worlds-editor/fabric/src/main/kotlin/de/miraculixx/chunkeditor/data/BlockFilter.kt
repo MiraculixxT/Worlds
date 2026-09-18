@@ -25,7 +25,7 @@ class BlockFilter private constructor(private val names: Set<String>?) {
 
     companion object {
         /** Blank counts everything but air, `#ns:path` a block tag, anything else one block id */
-        fun of(access: LevelStorageSource.LevelStorageAccess, input: String?): BlockFilter {
+        fun of(access: LevelStorageSource.LevelStorageAccess?, input: String?): BlockFilter {
             val wanted = input?.trim()?.takeIf { it.isNotEmpty() } ?: return BlockFilter(null)
             if (!wanted.startsWith('#')) return BlockFilter(setOf(namespaced(wanted)))
             val id = Identifier.tryParse(namespaced(wanted.substring(1)))
@@ -39,8 +39,17 @@ class BlockFilter private constructor(private val names: Set<String>?) {
          * Load world pack storage to resolve block tags
          */
         private fun tagMembers(
-            access: LevelStorageSource.LevelStorageAccess, id: Identifier,
+            access: LevelStorageSource.LevelStorageAccess?, id: Identifier,
         ): Set<String> = try {
+            // A live server already loaded its datapacks
+            if (access == null) {
+                val set = BuiltInRegistries.BLOCK.get(TagKey.create(Registries.BLOCK, id)).orElse(null)
+                if (set == null) {
+                    Constants.LOG.warn("Unknown block tag #{}", id)
+                    return emptySet()
+                }
+                return set.mapNotNullTo(HashSet()) { it.unwrapKey().orElse(null)?.identifier()?.toString() }
+            }
             val repository = ServerPacksSource.createPackRepository(access)
             repository.reload()
             repository.setSelected(repository.availableIds)

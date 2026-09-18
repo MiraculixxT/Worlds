@@ -11,4 +11,7 @@ object Constants {
 
     /** Background scope for region file IO and rendering. */
     val SCOPE = mod.scope
+
+    /** Milliseconds since a `System.nanoTime()` mark */
+    fun ms(start: Long): Long = (System.nanoTime() - start) / 1_000_000
 }

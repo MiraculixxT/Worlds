@@ -2,9 +2,9 @@ package de.miraculixx.chunkeditor.client.ui
 
 import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.ChunkClips
-import de.miraculixx.chunkeditor.data.ClipInfo
-import de.miraculixx.chunkeditor.data.SelectionCsv
-import de.miraculixx.chunkeditor.data.SelectionFile
+import de.miraculixx.chunkeditor.data.ClipEntry
+import de.miraculixx.chunkeditor.data.ClipLibrary
+import de.miraculixx.chunkeditor.data.SelectionEntry
 import de.miraculixx.common.client.ui.HOVER_COLOR
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
 import de.miraculixx.common.client.ui.drawBox
@@ -39,6 +39,14 @@ private const val MARGIN = 16
 private const val LIST_TOP = 32
 private const val ROW_H = 26
 private const val SELECTED_COLOR = 0x5033B5E5
+
+/** In the world list format, `?` for unknown */
+internal fun formatDate(epochMillis: Long): String {
+    if (epochMillis <= 0L) return "?"
+    return WorldSelectionList.DATE_FORMAT.format(
+        ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault())
+    )
+}
 
 /** What an export writes: the chunks themselves, the list of which ones are selected, or both */
 enum class ExportKind { CLIP, SELECTION }
@@ -148,12 +156,18 @@ internal class ClipNameScreen(
 }
 
 /**
- * Everything the library holds (clips in `<gamedir>/chunkclips`, selections in `.../_selections`)
+ * Everything a [ClipLibrary] holds (local or remote)
+ * @param pickLabel what the pick button says (import or upload)
+ * @param selectionLabel the same on the selections tab
+ * @param onPickSelection null hides the selections tab, for a browse that is only about clips
  */
 internal class ClipLibraryScreen(
     private val parent: Screen,
-    private val onPickClip: (ClipInfo) -> Unit,
-    private val onPickSelection: (SelectionFile) -> Unit,
+    private val library: ClipLibrary,
+    private val pickLabel: Component,
+    private val onPickClip: (ClipEntry) -> Unit,
+    private val onPickSelection: ((SelectionEntry) -> Unit)?,
+    private val selectionLabel: Component = Component.translatable("chunkeditor.clip.select"),
 ) : Screen(Component.translatable("chunkeditor.clip.library_title")) {
 
     private enum class Tab(val key: String) {
@@ -162,7 +176,8 @@ internal class ClipLibraryScreen(
     }
 
     private var tab = Tab.CLIPS
-    private val tabPages = Tab.entries.map { GridLayoutTab(Component.translatable(it.key)) }
+    private val pages = if (onPickSelection == null) listOf(Tab.CLIPS) else Tab.entries
+    private val tabPages = pages.map { GridLayoutTab(Component.translatable(it.key)) }
     private val tabManager = TabManager(
         { addRenderableWidget(it) },
         { removeWidget(it) },
@@ -171,14 +186,15 @@ internal class ClipLibraryScreen(
     )
     private lateinit var tabBar: MenuTabBar
 
-    private var clips: List<ClipInfo> = emptyList()
-    private var selections: List<SelectionFile> = emptyList()
+    private var clips: List<ClipEntry> = emptyList()
+    private var selections: List<SelectionEntry> = emptyList()
     private var loading = true
     private var needsLoad = true
 
     private lateinit var list: LibraryList
     private lateinit var importButton: Button
     private lateinit var deleteButton: Button
+    private var busy = false
 
     override fun init() {
         tabBar = addRenderableWidget(
@@ -204,10 +220,13 @@ internal class ClipLibraryScreen(
             Button.builder(Component.translatable("selectWorld.delete")) { confirmDelete() }
                 .bounds(MARGIN + 104, y, 100, 20).build()
         )
-        addRenderableWidget(
-            Button.builder(Component.translatable("chunkeditor.clip.open_folder")) { openFolder() }
-                .bounds(width - MARGIN - 184, y, 100, 20).build()
-        )
+        // Can't open a remote folder :D
+        if (library.folder != null) {
+            addRenderableWidget(
+                Button.builder(Component.translatable("chunkeditor.clip.open_folder")) { openFolder() }
+                    .bounds(width - MARGIN - 184, y, 100, 20).build()
+            )
+        }
         addRenderableWidget(
             Button.builder(CommonComponents.GUI_DONE) { onClose() }
                 .bounds(width - MARGIN - 80, y, 80, 20).build()
@@ -221,7 +240,7 @@ internal class ClipLibraryScreen(
 
     private fun onTabSelected(page: GuiTab) {
         if (!::list.isInitialized) return
-        tab = Tab.entries[tabPages.indexOf(page).coerceAtLeast(0)]
+        tab = pages[tabPages.indexOf(page).coerceAtLeast(0)]
         list.fill()
         syncButtons()
     }
@@ -233,8 +252,10 @@ internal class ClipLibraryScreen(
 
     private fun load() {
         Constants.SCOPE.launch {
-            val foundClips = ChunkClips.list()
-            val foundSelections = SelectionCsv.list()
+            val foundClips = runCatching { library.clips() }.getOrDefault(emptyList())
+            val foundSelections =
+                if (onPickSelection == null) emptyList()
+                else runCatching { library.selections() }.getOrDefault(emptyList())
             minecraft.execute {
                 clips = foundClips
                 selections = foundSelections
@@ -246,18 +267,18 @@ internal class ClipLibraryScreen(
     }
 
     private fun syncButtons() {
-        val selected = list.selected != null
+        val selected = list.selected != null && !busy
         importButton.active = selected
         deleteButton.active = selected
-        importButton.message = Component.translatable(
-            if (tab == Tab.CLIPS) "chunkeditor.clip.import" else "chunkeditor.clip.select"
-        )
+        importButton.message =
+            if (tab == Tab.CLIPS) pickLabel else selectionLabel
     }
 
     private fun pick() {
+        if (busy) return
         when (val row = list.selected) {
             is LibraryList.ClipRow -> onPickClip(row.clip)
-            is LibraryList.SelectionRow -> onPickSelection(row.selection)
+            is LibraryList.SelectionRow -> onPickSelection?.invoke(row.selection)
             else -> {}
         }
     }
@@ -267,14 +288,7 @@ internal class ClipLibraryScreen(
         minecraft.gui.setScreen(
             ConfirmScreen(
                 { confirmed ->
-                    if (confirmed) {
-                        when (row) {
-                            is LibraryList.ClipRow -> ChunkClips.delete(row.clip)
-                            is LibraryList.SelectionRow -> SelectionCsv.delete(row.selection)
-                        }
-                        loading = true
-                        needsLoad = true
-                    }
+                    if (confirmed) delete(row)
                     minecraft.gui.setScreen(this)
                 },
                 Component.translatable("chunkeditor.clip.delete_title", row.title),
@@ -286,8 +300,25 @@ internal class ClipLibraryScreen(
         )
     }
 
+    private fun delete(row: LibraryList.Row) {
+        busy = true
+        Constants.SCOPE.launch {
+            runCatching {
+                when (row) {
+                    is LibraryList.ClipRow -> library.deleteClip(row.clip.name)
+                    is LibraryList.SelectionRow -> library.deleteSelection(row.selection.name)
+                }
+            }
+            minecraft.execute {
+                busy = false
+                loading = true
+                load()
+            }
+        }
+    }
+
     private fun openFolder() {
-        val dir = if (tab == Tab.CLIPS) ChunkClips.libraryDir() else SelectionCsv.dir()
+        val dir = (if (tab == Tab.CLIPS) library.folder else library.selectionFolder) ?: return
         runCatching { Files.createDirectories(dir) }
         Util.getPlatform().openPath(dir)
     }
@@ -369,32 +400,24 @@ internal class ClipLibraryScreen(
             }
         }
 
-        inner class ClipRow(val clip: ClipInfo) : Row() {
+        inner class ClipRow(val clip: ClipEntry) : Row() {
             override val title: String get() = clip.name
             override val subtitle: String
                 get() = I18n.get(
-                    "chunkeditor.clip.info", clip.chunks.size, clip.dimension, clip.mcVersion,
-                    bytes(clip.bytes), date(clip.modified),
+                    "chunkeditor.clip.info", clip.chunks, clip.dimension, clip.mcVersion,
+                    bytes(clip.bytes), formatDate(clip.modified),
                 )
         }
 
-        inner class SelectionRow(val selection: SelectionFile) : Row() {
+        inner class SelectionRow(val selection: SelectionEntry) : Row() {
             override val title: String get() = selection.name
             override val subtitle: String
                 get() = I18n.get(
                     if (selection.inverted) "chunkeditor.clip.selection_info_inverted"
                     else "chunkeditor.clip.selection_info",
-                    selection.chunks, bytes(selection.bytes), date(selection.modified),
+                    selection.chunks, bytes(selection.bytes), formatDate(selection.modified),
                 )
         }
-    }
-
-    /** Last write of the folder or file, the only date a clip from another tool carries */
-    private fun date(epochMillis: Long): String {
-        if (epochMillis <= 0L) return "?"
-        return WorldSelectionList.DATE_FORMAT.format(
-            ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault())
-        )
     }
 
     private fun bytes(value: Long): String = when {

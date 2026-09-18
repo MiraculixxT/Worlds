@@ -1,6 +1,5 @@
 package de.miraculixx.chunkeditor.data
 
-import net.minecraft.client.resources.language.I18n
 import net.minecraft.locale.Language
 import net.minecraft.util.Mth
 import kotlin.math.roundToInt
@@ -53,7 +52,7 @@ enum class ChunkOverlay(
     /** Whatever number a user-given NBT path resolves to */
     PATH("chunkeditor.overlay.path", ChunkMetric.PATH, ValueFormat.NUMBER);
 
-    val label: String get() = I18n.get(labelKey)
+    val label: String get() = Language.getInstance().getOrDefault(labelKey, labelKey)
 
     val needsPath: Boolean get() = this == PATH
     val needsBlock: Boolean get() = this == BLOCK_COUNT
