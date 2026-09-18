@@ -1174,6 +1174,23 @@ internal class ChunkMapScreen(
     private fun mapRight() = width - MARGIN - YBAR_W
     private fun mapBottom() = height - MARGIN - INFO_H
 
+    /**
+     * A markers position taken off its region's snapped origin and width (so they move equal)
+     */
+    private fun markerX(blockX: Double): Int {
+        val rx = floor(blockX / REGION_BLOCKS).toInt()
+        val origin = screenX(rx.toDouble() * REGION_BLOCKS).roundToInt()
+        val width = screenX((rx + 1).toDouble() * REGION_BLOCKS).roundToInt() - origin
+        return origin + ((blockX - rx.toDouble() * REGION_BLOCKS) * width / REGION_BLOCKS).roundToInt()
+    }
+
+    private fun markerY(blockZ: Double): Int {
+        val rz = floor(blockZ / REGION_BLOCKS).toInt()
+        val origin = screenY(rz.toDouble() * REGION_BLOCKS).roundToInt()
+        val height = screenY((rz + 1).toDouble() * REGION_BLOCKS).roundToInt() - origin
+        return origin + ((blockZ - rz.toDouble() * REGION_BLOCKS) * height / REGION_BLOCKS).roundToInt()
+    }
+
     private fun screenX(blockX: Double) = (mapLeft() + mapRight()) / 2.0 + (blockX - centerX) * scale
     private fun screenY(blockZ: Double) = (mapTop() + mapBottom()) / 2.0 + (blockZ - centerZ) * scale
     private fun blockX(screenX: Double) = centerX + (screenX - (mapLeft() + mapRight()) / 2.0) / scale
@@ -1340,8 +1357,8 @@ internal class ChunkMapScreen(
         val here = dimension?.key?.identifier() ?: return
         players?.forEach { marker ->
             if (marker.dimension != here) return@forEach
-            val x = screenX(marker.pos.x).roundToInt() - PLAYER_ICON / 2
-            val y = screenY(marker.pos.z).roundToInt() - PLAYER_ICON / 2
+            val x = markerX(marker.pos.x) - PLAYER_ICON / 2
+            val y = markerY(marker.pos.z) - PLAYER_ICON / 2
             PlayerFaceExtractor.extractRenderState(graphics, skinOf(marker.id), x, y, PLAYER_ICON)
         }
     }
@@ -1364,8 +1381,8 @@ internal class ChunkMapScreen(
             found.forEach { marker ->
                 if (drawn >= MAX_ENTITY_ICONS) return
                 val stack = EntityIcons.stack(marker.type) ?: return@forEach
-                val x = screenX(marker.pos.x) - ENTITY_ICON / 2.0
-                val y = screenY(marker.pos.z) - ENTITY_ICON / 2.0
+                val x = markerX(marker.pos.x) - ENTITY_ICON / 2
+                val y = markerY(marker.pos.z) - ENTITY_ICON / 2
                 if (x + ENTITY_ICON < mapLeft() || x > mapRight() || y + ENTITY_ICON < mapTop() || y > mapBottom()) {
                     return@forEach
                 }
