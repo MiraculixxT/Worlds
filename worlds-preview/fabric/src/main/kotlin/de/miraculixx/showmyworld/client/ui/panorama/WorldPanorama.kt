@@ -17,6 +17,10 @@ import net.minecraft.util.Util
 object WorldPanorama {
     /** Longer than this between draws and the fade is resumed from scratch instead of continued */
     private const val STALE_MS = 1_000L
+
+    /** A capture is written off-thread, these bound the wait for its files */
+    private const val CAPTURE_PROBE_MS = 500L
+    private const val CAPTURE_WAIT_MS = 30_000L
     private val fadeMs: Long get() = PreviewConfig.settings.fade.coerceAtLeast(1)
 
     /**
@@ -49,6 +53,9 @@ object WorldPanorama {
     private var loadGen = 0
     private var lastMs = 0L
     private var cubeMap: WorldCubeMap? = null
+    private var pendingCapture: Path? = null
+    private var pendingUntil = 0L
+    private var lastProbe = 0L
 
     /** A save folder under `saves/` */
     fun select(saveFolder: String?) = selectRoot(saveFolder?.let(PanoramaRoots::world))
@@ -89,16 +96,18 @@ object WorldPanorama {
             defaultDone = true
             return null
         }
+        if (mode != DefaultPanorama.RANDOM) { // only a random pick needs the whole library
+            defaultPick = mode.pick(emptyList())?.takeIf { it !in failed }
+            defaultDone = true
+            return defaultPick
+        }
         val candidates = library ?: run {
             loadLibrary()
             return null
         }
         val available = candidates.filter { it.dir !in failed }
-        defaultPick = when (mode) {
-            DefaultPanorama.RANDOM -> sessionRandom?.takeIf { pick -> available.any { it.dir == pick } }
-                ?: mode.pick(available).also { sessionRandom = it }
-            else -> mode.pick(available)
-        }
+        defaultPick = sessionRandom?.takeIf { pick -> available.any { it.dir == pick } }
+            ?: mode.pick(available).also { sessionRandom = it }
         defaultDone = true
         return defaultPick
     }
@@ -119,11 +128,29 @@ object WorldPanorama {
         }
     }
 
+    /** A capture just started for [root], its files appear later */
+    fun awaitCapture(root: Path) {
+        pendingCapture = root
+        pendingUntil = Util.getMillis() + CAPTURE_WAIT_MS
+    }
+
+    /** Polls for the capture instead of showing the world before it, which would be the one before */
+    private fun probeCapture(now: Long) {
+        val root = pendingCapture ?: return
+        if (now - lastProbe < CAPTURE_PROBE_MS) return
+        lastProbe = now
+        if (WorldPanoramaTexture.resolve(root) != null) {
+            pendingCapture = null
+            invalidate(root)
+        } else if (now > pendingUntil) pendingCapture = null
+    }
+
     /** Called from `GuiRendererMixin`, drew after vanillas */
     fun render(rotXInDegrees: Float, rotYInDegrees: Float) {
+        val now = Util.getMillis()
+        probeCapture(now)
         // Nothing calls select() before the title screen's first frame, so the default resolves here
         if (selectedRoot == null && !defaultDone) refresh()
-        val now = Util.getMillis()
         val elapsed = now - lastMs
         lastMs = now
         // Abort animation that can not be rendered
