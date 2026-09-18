@@ -43,6 +43,8 @@ interface EditorBackend {
 
     suspend fun players(): List<PlayerMarker>
 
+    suspend fun entities(dimension: WorldDimension, rx: Int, rz: Int): List<EntityMarker>
+
     suspend fun biomes(): Registry<Biome>?
 
     val library: ClipLibrary

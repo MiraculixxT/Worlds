@@ -200,6 +200,15 @@ object EditorService {
 
                 C2S.PLAYERS -> reply(player, request, Bodies.writePlayers(backend.players()))
 
+                C2S.ENTITIES -> Bodies.read(body) { buf ->
+                    val dimension = backend.dimension(buf.readUtf()) ?: return@read fail(player, request, DIMENSION_GONE)
+                    val rx = buf.readInt()
+                    val rz = buf.readInt()
+                    onDimension(dimension) {
+                        reply(player, request, Bodies.writeEntities(backend.entities(dimension, rx, rz)))
+                    }
+                }
+
                 C2S.CONFLICTS -> Bodies.read(body) { buf ->
                     val dimension = backend.dimension(buf.readUtf()) ?: return@read fail(player, request, DIMENSION_GONE)
                     val clipOrigin = ChunkPos(buf.readInt(), buf.readInt())

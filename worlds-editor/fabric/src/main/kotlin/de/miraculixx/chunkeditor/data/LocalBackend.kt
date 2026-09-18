@@ -52,6 +52,9 @@ class LocalBackend(
 
     override suspend fun players() = PlayerMarkers.read(access, selfId)
 
+    override suspend fun entities(dimension: WorldDimension, rx: Int, rz: Int) =
+        EntityMarkers.read(dimension, rx, rz)
+
     override suspend fun biomes(): Registry<Biome>? = biomes.invoke()
 
     override val library: ClipLibrary = LocalLibrary

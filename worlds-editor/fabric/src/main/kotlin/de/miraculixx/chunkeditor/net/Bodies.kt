@@ -4,6 +4,8 @@ import de.miraculixx.chunkeditor.data.ChunkMetric
 import de.miraculixx.chunkeditor.data.ClipEntry
 import de.miraculixx.chunkeditor.data.ClipExportResult
 import de.miraculixx.chunkeditor.data.ClipFootprint
+import de.miraculixx.chunkeditor.data.EntityMarker
+import de.miraculixx.chunkeditor.data.MAX_ENTITIES_PER_REGION
 import de.miraculixx.chunkeditor.data.ParsedSelection
 import de.miraculixx.chunkeditor.data.SelectionEntry
 import de.miraculixx.chunkeditor.data.ExistingChunks
@@ -367,6 +369,24 @@ object Bodies {
             val id: UUID = buf.readUUID()
             val pos = Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble())
             PlayerMarker(id, pos, Identifier.parse(buf.readUtf()))
+        }
+    }
+
+    fun writeEntities(markers: List<EntityMarker>): ByteArray = write { buf ->
+        buf.writeVarInt(markers.size)
+        markers.forEach {
+            buf.writeUtf(it.type)
+            buf.writeDouble(it.pos.x)
+            buf.writeDouble(it.pos.y)
+            buf.writeDouble(it.pos.z)
+        }
+    }
+
+    fun readEntities(bytes: ByteArray): List<EntityMarker> = read(bytes) { buf ->
+        val size = buf.readVarInt()
+        require(size in 0..MAX_ENTITIES_PER_REGION) { "Entity marker count of $size" }
+        (0 until size).map {
+            EntityMarker(buf.readUtf(), Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble()))
         }
     }
 

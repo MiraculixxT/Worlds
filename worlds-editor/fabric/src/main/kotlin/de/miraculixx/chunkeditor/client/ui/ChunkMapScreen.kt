@@ -15,6 +15,7 @@ import de.miraculixx.chunkeditor.data.REGION_SIZE
 import de.miraculixx.chunkeditor.data.RegionIndex
 import de.miraculixx.chunkeditor.data.ScanSource
 import de.miraculixx.chunkeditor.data.EditorBackend
+import de.miraculixx.chunkeditor.data.EntityMarker
 import de.miraculixx.chunkeditor.data.OverlayColors
 import de.miraculixx.chunkeditor.data.OverlaySettings
 import de.miraculixx.chunkeditor.data.PlayerMarker
@@ -134,6 +135,8 @@ private const val OVERLAY_CACHE = 512
 
 /** Fixed marker sizes */
 private const val PLAYER_ICON = 12
+private const val ENTITY_ICON = 12
+private const val MAX_ENTITY_ICONS = 3000
 
 /** The gradient strip of the overlay legend in the info bar */
 private const val LEGEND_W = 40
@@ -158,6 +161,7 @@ private val SC_IMPORT = Shortcut(false, GLFW.GLFW_KEY_I, "I")
 private val SC_DELETE = Shortcut(false, GLFW.GLFW_KEY_DELETE, "Del")
 private val SC_REFRESH = Shortcut(true, GLFW.GLFW_KEY_R, "Ctrl+R")
 private val SC_PLAYERS = Shortcut(false, GLFW.GLFW_KEY_P, "Shift+P", shift = true)
+private val SC_ENTITIES = Shortcut(false, GLFW.GLFW_KEY_E, "Shift+E", shift = true)
 private val SC_OVERLAYS = Shortcut(false, GLFW.GLFW_KEY_O, "O")
 private val SC_JOBS = Shortcut(false, GLFW.GLFW_KEY_Q, "Q")
 private val SC_OVERLAY_TOGGLE = Shortcut(false, GLFW.GLFW_KEY_O, "Shift+O", shift = true)
@@ -268,6 +272,11 @@ internal class ChunkMapScreen(
     private var playersLoading = false
     private var showPlayers = false
     private val skins = HashMap<UUID, Supplier<PlayerSkin>>()
+
+    /** Read per region, only for what the map shows */
+    private val entities = HashMap<Long, List<EntityMarker>>()
+    private val entitiesLoading = LongOpenHashSet()
+    private var showEntities = false
 
     private val scan = ChunkScan()
 
@@ -412,6 +421,9 @@ internal class ChunkMapScreen(
         MenuEntry.Item(
             Component.translatable("chunkeditor.map.players"), SC_PLAYERS.label, checked = { showPlayers },
         ) { togglePlayers() },
+        MenuEntry.Item(
+            Component.translatable("chunkeditor.map.entities"), SC_ENTITIES.label, checked = { showEntities },
+        ) { toggleEntities() },
         MenuEntry.Separator,
         MenuEntry.Item(
             Component.translatable("chunkeditor.overlay.toggle"), SC_OVERLAY_TOGGLE.label,
@@ -790,6 +802,8 @@ internal class ChunkMapScreen(
         val generation = ++loadGen
         loading = true
         players = null
+        entities.clear()
+        entitiesLoading.clear()
         cancelScan()
         scan.clear()
         overlayReady = false
@@ -849,6 +863,26 @@ internal class ChunkMapScreen(
             minecraft.execute {
                 playersLoading = false
                 if (generation == loadGen) players = read
+            }
+        }
+    }
+
+    private fun toggleEntities() {
+        showEntities = !showEntities
+        // Bind item stacks, if map is accessed before joining a world
+        if (showEntities && !EntityIcons.bound()) EntityIcons.prepare { ok -> if (!ok) showEntities = false }
+    }
+
+    /** One region at a time, as it scrolls into view */
+    private fun loadEntities(dim: WorldDimension, region: RegionIndex) {
+        val id = key(region.rx, region.rz)
+        if (!entitiesLoading.add(id)) return
+        val generation = loadGen
+        Constants.SCOPE.launch {
+            val read = backend.entities(dim, region.rx, region.rz)
+            minecraft.execute {
+                entitiesLoading.remove(id)
+                if (generation == loadGen) entities[id] = read
             }
         }
     }
@@ -1178,6 +1212,7 @@ internal class ChunkMapScreen(
         pumpCoarse(visible)
         drawGrid(graphics, visible)
         drawPlayers(graphics)
+        drawEntities(graphics, visible)
         drawDragRect(graphics)
         drawPasteGhost(graphics, mouseX, mouseY)
         graphics.disableScissor()
@@ -1306,6 +1341,38 @@ internal class ChunkMapScreen(
             val x = screenX(marker.pos.x).roundToInt() - PLAYER_ICON / 2
             val y = screenY(marker.pos.z).roundToInt() - PLAYER_ICON / 2
             PlayerFaceExtractor.extractRenderState(graphics, skinOf(marker.id), x, y, PLAYER_ICON)
+        }
+    }
+
+    /** Entities drawn as spawn-egg or item */
+    private fun drawEntities(graphics: GuiGraphicsExtractor, visible: List<RegionIndex>) {
+        if (!showEntities || !EntityIcons.bound()) return
+        // The same budget the terrain layer runs on, icons are far heavier than a fill
+        if (scale < TERRAIN_SCALE || visible.size > MAX_LIVE_REGIONS) return
+        val dim = dimension ?: return
+        val pose = graphics.pose()
+        val scaled = ENTITY_ICON / 16f
+        var drawn = 0
+        visible.forEach { region ->
+            val found = entities[key(region.rx, region.rz)]
+            if (found == null) {
+                loadEntities(dim, region)
+                return@forEach
+            }
+            found.forEach { marker ->
+                if (drawn >= MAX_ENTITY_ICONS) return
+                val x = screenX(marker.pos.x) - ENTITY_ICON / 2.0
+                val y = screenY(marker.pos.z) - ENTITY_ICON / 2.0
+                if (x + ENTITY_ICON < mapLeft() || x > mapRight() || y + ENTITY_ICON < mapTop() || y > mapBottom()) {
+                    return@forEach
+                }
+                pose.pushMatrix()
+                pose.translate(x.toFloat(), y.toFloat())
+                pose.scale(scaled, scaled)
+                graphics.item(EntityIcons.stack(marker.type), 0, 0)
+                pose.popMatrix()
+                drawn++
+            }
         }
     }
 
@@ -1928,6 +1995,7 @@ internal class ChunkMapScreen(
             SC_DELETE.matches(event) -> selected.isNotEmpty() && run { confirmDelete(); true }
             SC_REFRESH.matches(event) -> dimension?.let { loadDimension(it); true } ?: false
             SC_PLAYERS.matches(event) -> run { togglePlayers(); true }
+            SC_ENTITIES.matches(event) -> run { toggleEntities(); true }
             SC_OVERLAYS.matches(event) -> run { openOverlays(); true }
             SC_OVERLAY_TOGGLE.matches(event) -> overlaySettings.scannable && run { toggleOverlay(); true }
             SC_JOBS.matches(event) -> backend is RemoteBackend && backend.canWrite && run { openJobs(); true }

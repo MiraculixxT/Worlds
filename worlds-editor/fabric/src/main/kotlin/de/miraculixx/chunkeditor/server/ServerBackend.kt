@@ -15,8 +15,8 @@ import de.miraculixx.chunkeditor.data.ChunkMapRenderer
 import de.miraculixx.chunkeditor.data.ChunkRegions
 import de.miraculixx.chunkeditor.data.ChunkScans
 import de.miraculixx.chunkeditor.data.ClipImportOptions
-import de.miraculixx.chunkeditor.data.ClipInfo
 import de.miraculixx.chunkeditor.data.EditorBackend
+import de.miraculixx.chunkeditor.data.EntityMarkers
 import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.LevelFacts
 import de.miraculixx.chunkeditor.data.PlayerMarkers
@@ -81,6 +81,9 @@ class ServerBackend(private val server: MinecraftServer, private val by: String)
     ) = ChunkScans.scan(dimension, null, regions, source, argument, minY, onProgress)
 
     override suspend fun players() = PlayerMarkers.read(root)
+
+    override suspend fun entities(dimension: WorldDimension, rx: Int, rz: Int) =
+        EntityMarkers.read(dimension, rx, rz)
 
     /** The client holds the registries the server synced on join */
     override suspend fun biomes(): Registry<Biome>? = null

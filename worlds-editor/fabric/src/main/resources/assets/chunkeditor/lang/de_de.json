@@ -4,6 +4,7 @@
   "chunkeditor.dimension.end": "Das Ende",
   "chunkeditor.map.title": "Chunk-Karte",
   "chunkeditor.map.players": "Spieler-Marker",
+  "chunkeditor.map.entities": "Entity-Marker",
   "chunkeditor.overlay.title": "Overlays",
   "chunkeditor.overlay.toggle": "Overlay",
   "chunkeditor.overlay.inhabited": "Verweildauer",

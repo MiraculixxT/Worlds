@@ -6,6 +6,7 @@ import de.miraculixx.chunkeditor.data.ChunkClips
 import de.miraculixx.chunkeditor.data.ClipImportOptions
 import de.miraculixx.chunkeditor.data.ClipInfo
 import de.miraculixx.chunkeditor.data.EditorBackend
+import de.miraculixx.chunkeditor.data.EntityMarker
 import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.LevelFacts
 import de.miraculixx.chunkeditor.data.PlayerMarker
@@ -83,6 +84,9 @@ class RemoteBackend(hello: Hello) : EditorBackend {
 
     override suspend fun players(): List<PlayerMarker> =
         Bodies.readPlayers(ClientNet.request(C2S.PLAYERS, ByteArray(0)))
+
+    override suspend fun entities(dimension: WorldDimension, rx: Int, rz: Int): List<EntityMarker> =
+        Bodies.readEntities(ClientNet.request(C2S.ENTITIES, Bodies.indexRequest(dimension, rx, rz)))
 
     /** The server synced its registries on join, datapack biomes included */
     override suspend fun biomes(): Registry<Biome>? =
