@@ -273,6 +273,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
         if (allEntries.isEmpty()) loadCurrentTab() else applyFilter()
         refreshInstalledIds()
+        ShowMyWorld.releaseJoin()
         ShowMyWorld.select(selected?.installedFolder)
         selected?.let { readmeBlocks = Markdown.parse(readmeFor(it)) }
     }

@@ -49,6 +49,12 @@ public abstract class SelectWorldScreenMixin extends Screen {
         ShowMyWorld.INSTANCE.select(null);
     }
 
+    /** Before the list selects, so its {@code updateButtonStatus} owns the panorama again */
+    @Inject(method = "init", at = @At("HEAD"))
+    private void showmyworld$releaseJoin(CallbackInfo ci) {
+        ShowMyWorld.INSTANCE.releaseJoin();
+    }
+
     @Inject(method = "init", at = @At("TAIL"))
     private void showmyworld$addButton(CallbackInfo ci) {
         showmyworld$button = new IconButton(

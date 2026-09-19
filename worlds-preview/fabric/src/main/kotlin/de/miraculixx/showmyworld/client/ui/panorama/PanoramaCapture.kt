@@ -26,6 +26,7 @@ object PanoramaCapture {
         // Before any rescan: the library scan reads what a leave writes
         if (record != null && (autoCreate || WorldPanoramaTexture.resolve(root!!) != null)) LastPlayed.set(record)
         // Playing a world ends whatever selection led into it
+        WorldPanorama.releaseJoin()
         WorldPanorama.select(null)
         WorldPanorama.invalidateLibrary()
 

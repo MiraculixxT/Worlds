@@ -21,6 +21,9 @@ object WorldPanorama {
     /** A capture is written off-thread, these bound the wait for its files */
     private const val CAPTURE_PROBE_MS = 500L
     private const val CAPTURE_WAIT_MS = 30_000L
+
+    /** File timestamps are not always as exact as the clock */
+    private const val FS_TIME_SLACK_MS = 2_000L
     private val fadeMs: Long get() = PreviewConfig.settings.fade.coerceAtLeast(1)
 
     /**
@@ -31,7 +34,7 @@ object WorldPanorama {
         Identifier.fromNamespaceAndPath(Constants.MOD_ID, "panorama/slot_b"),
     )
 
-    private class Layer(val dir: Path, val textureId: Identifier) {
+    private class Layer(val dir: Path, val revision: Int, val textureId: Identifier) {
         var alpha = 0f
         var ready = false
         var loading = false
@@ -40,6 +43,7 @@ object WorldPanorama {
     }
 
     private var selectedRoot: Path? = null
+    private var joining: Path? = null
     private var sessionRandom: Path? = null
     private var defaultMode: DefaultPanorama? = null
     private var defaultPick: Path? = null
@@ -55,7 +59,11 @@ object WorldPanorama {
     private var cubeMap: WorldCubeMap? = null
     private var pendingCapture: Path? = null
     private var pendingUntil = 0L
+    private var pendingSince = 0L
     private var lastProbe = 0L
+
+    /** Bumped when a folder is rewritten, so a layer on the same path is read again */
+    private var revision = 0
 
     /** A save folder under `saves/` */
     fun select(saveFolder: String?) = selectRoot(saveFolder?.let(PanoramaRoots::world))
@@ -63,7 +71,19 @@ object WorldPanorama {
     /** A server address in the config folder */
     fun selectServer(address: String?) = selectRoot(address?.let(PanoramaRoots::server))
 
+    /** Joining keeps the world up through the loading screens, whatever the leaving screen clears */
+    fun join(root: Path) {
+        joining = root
+        selectRoot(root)
+    }
+
+    /** Back on a screen that owns the selection again */
+    fun releaseJoin() {
+        joining = null
+    }
+
     private fun selectRoot(root: Path?) {
+        if (root == null && joining != null) return
         selectedRoot = root
         refresh()
     }
@@ -132,14 +152,18 @@ object WorldPanorama {
     fun awaitCapture(root: Path) {
         pendingCapture = root
         pendingUntil = Util.getMillis() + CAPTURE_WAIT_MS
+        pendingSince = System.currentTimeMillis() - FS_TIME_SLACK_MS
     }
 
-    /** Polls for the capture instead of showing the world before it, which would be the one before */
+    /**
+     * Polls for the capture. A world that captured before still has the old faces on disk, so the
+     * files have to be newer than the capture, not merely there.
+     */
     private fun probeCapture(now: Long) {
         val root = pendingCapture ?: return
         if (now - lastProbe < CAPTURE_PROBE_MS) return
         lastProbe = now
-        if (WorldPanoramaTexture.resolve(root) != null) {
+        if (WorldPanoramaTexture.isCompleteSince(WorldPanoramaTexture.captureDir(root), pendingSince)) {
             pendingCapture = null
             invalidate(root)
         } else if (now > pendingUntil) pendingCapture = null
@@ -160,13 +184,14 @@ object WorldPanorama {
         // A folder that failed to load counts as none, or the outgoing panorama would stay up.
         val want = target?.takeIf { it !in failed }
 
-        when (want) {
-            null -> {}
-            base?.dir -> dropIncoming() // back to what is already up, mid-switch
-            incoming?.dir -> {}
+        val shows = { layer: Layer? -> layer != null && layer.dir == want && layer.revision == revision }
+        when {
+            want == null -> {}
+            shows(base) -> dropIncoming() // back to what is already up, mid-switch
+            shows(incoming) -> {}
             else -> {
                 dropIncoming()
-                incoming = Layer(want, SLOT_IDS.first { it != base?.textureId })
+                incoming = Layer(want, revision, SLOT_IDS.first { it != base?.textureId })
             }
         }
 
@@ -198,8 +223,10 @@ object WorldPanorama {
     }
 
     fun invalidate(root: Path) {
-        failed.remove(WorldPanoramaTexture.manualDir(root))
-        failed.remove(WorldPanoramaTexture.captureDir(root))
+        val dirs = setOf(WorldPanoramaTexture.manualDir(root), WorldPanoramaTexture.captureDir(root))
+        failed.removeAll(dirs)
+        // A rewritten capture keeps its path, so only the revision tells the layers apart
+        if (dirs.any { it == base?.dir || it == incoming?.dir }) revision++
         invalidateLibrary()
     }
 

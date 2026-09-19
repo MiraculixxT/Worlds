@@ -1,6 +1,7 @@
 package de.miraculixx.showmyworld
 
 import de.miraculixx.showmyworld.client.ui.PreviewSettingsScreen
+import de.miraculixx.showmyworld.client.ui.panorama.PanoramaRoots
 import de.miraculixx.showmyworld.client.ui.panorama.WorldPanorama
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.Screen
@@ -21,6 +22,15 @@ object ShowMyWorld {
      * Show [address]'s panorama, `null` for none
      */
     fun selectServer(address: String?) = WorldPanorama.selectServer(address)
+
+    /** Show [saveFolder] and keep it up while the world loads */
+    fun joinWorld(saveFolder: String) = WorldPanorama.join(PanoramaRoots.world(saveFolder))
+
+    /** [joinWorld] for a server address */
+    fun joinServer(address: String) = WorldPanorama.join(PanoramaRoots.server(address))
+
+    /** Back on a screen that owns the selection, drops what [joinWorld] holds */
+    fun releaseJoin() = WorldPanorama.releaseJoin()
 
     /** The mod's settings screen, returning to [parent] on close */
     fun settingsScreen(parent: Screen): Screen = PreviewSettingsScreen(parent)
