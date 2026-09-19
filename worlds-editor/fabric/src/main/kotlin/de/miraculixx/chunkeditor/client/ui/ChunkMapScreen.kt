@@ -1911,16 +1911,16 @@ internal class ChunkMapScreen(
         if (menus.any { it.mouseClicked(x, y) }) return true
         if (pasteClip != null) {
             clickSound()
-            if (event.button() == 0 && inMap(x, y)) confirmPaste(pasteOrigin(x, y)) else cancelPaste()
+            if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && inMap(x, y)) confirmPaste(pasteOrigin(x, y)) else cancelPaste()
             return true
         }
-        if (event.button() == 0 && inHeightBar(x, y)) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && inHeightBar(x, y)) {
             yDragging = true
             clickSound()
             yCut = yFromScreen(y)
             return true
         }
-        if (event.button() == 0 && inSlider(x, y)) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && inSlider(x, y)) {
             sliderDragging = true
             clickSound()
             zoomFromSlider(x)
@@ -1931,12 +1931,12 @@ internal class ChunkMapScreen(
             pressY = y
             moved = false
             when (event.button()) {
-                0 -> {
+                InputConstants.MOUSE_BUTTON_LEFT -> {
                     panning = true
                     return true
                 }
 
-                1 -> {
+                InputConstants.MOUSE_BUTTON_RIGHT -> {
                     dragRemoves = event.modifiers() and InputConstants.MOD_SHIFT != 0
                     dragFrom = chunkAt(x, y)
                     dragTo = dragFrom

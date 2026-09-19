@@ -1,5 +1,6 @@
 package de.miraculixx.worlds.client.ui
 
+import com.mojang.blaze3d.platform.InputConstants
 import de.miraculixx.common.client.ui.IconButton
 import de.miraculixx.showmyworld.ShowMyWorld
 import de.miraculixx.worlds.Constants
@@ -1107,7 +1108,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         val my = event.y()
         // Before everything else: the handle sits outside the list, but grabbing it must never fall
         // through to a row or the readme.
-        if (event.button() == 0 && overHandle(mx, my)) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && overHandle(mx, my)) {
             if (doubleClick) {
                 splitRatio = DEFAULT_SPLIT
                 applyLayout()
@@ -1119,7 +1120,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
             }
             return true
         }
-        if (event.button() == 0 && selected != null) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && selected != null) {
             // Scrollbar: grab the thumb to drag, or click the track to jump.
             val maxScroll = (readmeContentHeight - readmeViewportH()).coerceAtLeast(0)
             if (maxScroll > 0 && mx >= rightRight - SCROLLBAR_W && mx <= rightRight &&
@@ -1165,7 +1166,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     }
 
     override fun mouseReleased(event: MouseButtonEvent): Boolean {
-        if (event.button() == 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             scrollbarDragging = false
             if (splitDragging) {
                 splitDragging = false

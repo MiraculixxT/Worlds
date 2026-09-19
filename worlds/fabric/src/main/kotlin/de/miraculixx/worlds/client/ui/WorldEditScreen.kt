@@ -1,5 +1,6 @@
 package de.miraculixx.worlds.client.ui
 
+import com.mojang.blaze3d.platform.InputConstants
 import de.miraculixx.chunkeditor.ChunkEditor
 import de.miraculixx.common.client.ui.FIELD_W
 import de.miraculixx.common.client.ui.HOVER_COLOR
@@ -1054,7 +1055,7 @@ class WorldEditScreen(
     //
 
     override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
-        if ((tab == Tab.DATA_PACKS || tab == Tab.RESOURCE_PACKS) && event.button() == 0) {
+        if ((tab == Tab.DATA_PACKS || tab == Tab.RESOURCE_PACKS) && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             if ((event.x() to event.y()) in packHeaderRect()) {
                 clickSound()
                 openFolder(
@@ -1079,7 +1080,7 @@ class WorldEditScreen(
                 }
             }
         }
-        if (tab == Tab.GENERAL && event.button() == 0) {
+        if (tab == Tab.GENERAL && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             val point = event.x() to event.y()
             if (overIcon(event.x(), event.y())) {
                 commitEdit()
