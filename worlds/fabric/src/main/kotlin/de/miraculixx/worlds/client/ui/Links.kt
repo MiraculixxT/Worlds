@@ -1,7 +1,7 @@
 package de.miraculixx.worlds.client.ui
 
 import de.miraculixx.worlds.Constants
-import net.minecraft.util.Util
+import com.mojang.blaze3d.Blaze3D
 import java.net.URI
 import java.net.URISyntaxException
 
@@ -31,6 +31,6 @@ object Links {
 
     /** Open [url] in the system handler, silently dropping anything [parse] rejects. */
     fun open(url: String?) {
-        parse(url)?.let { Util.getPlatform().openUri(it) }
+        parse(url)?.let { Blaze3D.openUri(it) }
     }
 }

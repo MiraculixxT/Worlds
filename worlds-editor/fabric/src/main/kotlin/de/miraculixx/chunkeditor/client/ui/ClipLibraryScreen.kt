@@ -28,7 +28,7 @@ import net.minecraft.client.input.MouseButtonEvent
 import net.minecraft.client.resources.language.I18n
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
-import net.minecraft.util.Util
+import com.mojang.blaze3d.Blaze3D
 import java.nio.file.Files
 import java.time.Instant
 import java.time.ZoneId
@@ -320,7 +320,7 @@ internal class ClipLibraryScreen(
     private fun openFolder() {
         val dir = (if (tab == Tab.CLIPS) library.folder else library.selectionFolder) ?: return
         runCatching { Files.createDirectories(dir) }
-        Util.getPlatform().openPath(dir)
+        Blaze3D.openPath(dir)
     }
 
     override fun extractRenderState(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {

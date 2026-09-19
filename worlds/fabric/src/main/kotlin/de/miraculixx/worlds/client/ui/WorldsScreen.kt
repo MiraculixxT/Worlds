@@ -50,7 +50,7 @@ import net.minecraft.network.chat.FormattedText
 import net.minecraft.network.chat.Style
 import net.minecraft.network.chat.TextColor
 import net.minecraft.resources.Identifier
-import net.minecraft.util.Util
+import com.mojang.blaze3d.Blaze3D
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -253,7 +253,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         )
         addRenderableWidget(
             Button.builder(Component.literal("\uD83D\uDCC2")) {
-                Util.getPlatform().openPath(minecraft.gameDirectory.toPath().resolve("saves"))
+                Blaze3D.openPath(minecraft.gameDirectory.toPath().resolve("saves"))
             }.tooltip(Tooltip.create(Component.translatable("worlds.tooltip.open_saves_folder")))
                 .bounds(leftLeft + 22, height - 26, 20, 20).build()
         )

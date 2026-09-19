@@ -1,20 +1,16 @@
 package de.miraculixx.chunkeditor.client.ui
 
-import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.EditorConfig
 import de.miraculixx.chunkeditor.data.EditorSettings
+import de.miraculixx.common.client.ui.NativeDialogs
 import de.miraculixx.common.client.ui.SettingsCategory
 import de.miraculixx.common.client.ui.SettingsList
-import kotlinx.coroutines.launch
-import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
-import net.minecraft.util.Util
-import org.lwjgl.util.tinyfd.TinyFileDialogs
-import java.nio.file.Path
+import com.mojang.blaze3d.Blaze3D
 
 /**
  * Edits apply immediately, the file is written once in [onClose]
@@ -71,7 +67,7 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
                 pickFolder()
             },
             list.TextRow("Library Folder", "", Component.literal("Open")) {
-                Util.getPlatform().openPath(EditorConfig.libraryDir())
+                Blaze3D.openPath(EditorConfig.libraryDir())
             },
         )
     }
@@ -82,24 +78,18 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
     private fun pickFolder() {
         if (picking) return
         picking = true
-        Constants.SCOPE.launch {
-            val picked = TinyFileDialogs.tinyfd_selectFolderDialog(
-                "Select the clip library folder", EditorConfig.libraryDir().toString(),
-            )
-            val minecraft = Minecraft.getInstance()
-            minecraft.execute {
-                picking = false
-                if (picked == null) return@execute
-                val path = runCatching { Path.of(picked).toAbsolutePath().normalize() }.getOrNull()
-                if (path == null || !EditorConfig.writable(path)) {
-                    warning = "That folder cannot be written to - keeping the old one"
-                    return@execute
-                }
-                warning = null
-                settings.libraryDir = if (path == EditorConfig.defaultLibraryDir.toAbsolutePath().normalize()) "" else path.toString()
-                EditorConfig.save()
-                list.rebuild()
+        NativeDialogs.pickFolder("Select the clip library folder", EditorConfig.libraryDir()) { picked ->
+            picking = false
+            if (picked == null) return@pickFolder
+            val path = runCatching { picked.toAbsolutePath().normalize() }.getOrNull()
+            if (path == null || !EditorConfig.writable(path)) {
+                warning = "That folder cannot be written to - keeping the old one"
+                return@pickFolder
             }
+            warning = null
+            settings.libraryDir = if (path == EditorConfig.defaultLibraryDir.toAbsolutePath().normalize()) "" else path.toString()
+            EditorConfig.save()
+            list.rebuild()
         }
     }
 

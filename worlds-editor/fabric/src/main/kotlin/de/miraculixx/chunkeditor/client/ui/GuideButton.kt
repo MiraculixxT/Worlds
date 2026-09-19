@@ -6,7 +6,7 @@ import net.minecraft.ChatFormatting
 import net.minecraft.client.gui.components.Tooltip
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
-import net.minecraft.util.Util
+import com.mojang.blaze3d.Blaze3D
 import java.net.URI
 
 internal const val GUIDE_SIZE = 16
@@ -19,7 +19,7 @@ private const val GUIDE_LABEL = "Open Guide"
 internal fun guideButton(x: Int, y: Int, anchor: String, tip: String? = null): IconButton {
     val url = "$GUIDE_URL#$anchor"
     val button = IconButton(x, y, GUIDE_SIZE, Component.literal(GUIDE_LABEL), GUIDE_SPRITE) {
-        Util.getPlatform().openUri(URI(url))
+        Blaze3D.openUri(URI(url))
     }
     button.drawBackground = false
     val label = Component.literal("$GUIDE_LABEL ($anchor)")

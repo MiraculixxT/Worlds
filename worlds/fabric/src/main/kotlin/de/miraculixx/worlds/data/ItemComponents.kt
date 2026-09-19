@@ -23,7 +23,7 @@ object ItemComponents {
         }
         Constants.SCOPE.launch {
             val pending = try {
-                BuiltInRegistries.DATA_COMPONENT_INITIALIZERS.build(VanillaRegistries.createLookup())
+                BuiltInRegistries.DATA_COMPONENT_INITIALIZERS.build(VanillaRegistries.createWorldLookup())
             } catch (e: Exception) {
                 Constants.LOG.error("Could not build item data components", e)
                 Minecraft.getInstance().execute { onDone(false) }

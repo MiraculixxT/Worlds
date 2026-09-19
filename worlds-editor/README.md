@@ -32,7 +32,7 @@ Cross-compatible with standalone MCA-Selector tool<br>
 
 ### Importing
 All exports can be important in any world & any dimension (import may get cropped at Y).
-The importer allows **every** version to be important, as long as it's lower than the target (e.g. 1.18→26.2) and chunks get auto upgraded.<br>
+The importer allows **every** version to be important, as long as it's lower than the target (e.g. 1.18→26.3) and chunks get auto upgraded.<br>
 ❗ **1 Section** = **16 Blocks**
 
 |   **Option**    |                                     **???**                                      |

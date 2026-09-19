@@ -1,15 +1,15 @@
 package de.miraculixx.showmyworld.client.ui.panorama
 
-import com.mojang.blaze3d.PrimitiveTopology
 import com.mojang.blaze3d.ProjectionType
-import com.mojang.blaze3d.buffers.GpuBuffer
-import com.mojang.blaze3d.pipeline.BlendFunction
-import com.mojang.blaze3d.pipeline.ColorTargetState
-import com.mojang.blaze3d.pipeline.RenderPipeline
 import com.mojang.blaze3d.systems.RenderSystem
 import com.mojang.blaze3d.vertex.BufferBuilder
 import com.mojang.blaze3d.vertex.ByteBufferBuilder
 import com.mojang.blaze3d.vertex.DefaultVertexFormat
+import com.mojang.renderpearl.api.buffers.GpuBuffer
+import com.mojang.renderpearl.api.pipeline.BlendFunction
+import com.mojang.renderpearl.api.pipeline.ColorTargetState
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology
+import com.mojang.renderpearl.api.pipeline.RenderPipeline
 import de.miraculixx.showmyworld.Constants
 import java.util.Optional
 import java.util.OptionalDouble
@@ -58,12 +58,12 @@ class WorldCubeMap : AutoCloseable {
             encoder.createRenderPass(label, colorTexture, Optional.empty())
         }
         pass.use { renderPass ->
-            renderPass.setPipeline(PIPELINE)
+            renderPass.setPipeline(RenderSystem.getCompiledPipeline(PIPELINE))
             RenderSystem.bindDefaultUniforms(renderPass)
             renderPass.setVertexBuffer(0, vertexBuffer.slice())
             renderPass.setIndexBuffer(indexBuffer, indices.type())
             renderPass.setUniform("DynamicTransforms", dynamicTransforms)
-            renderPass.bindTexture("Sampler0", texture.textureView, texture.sampler)
+            renderPass.setUniform("Sampler0", texture.textureView, texture.sampler)
             renderPass.drawIndexed(36, 1, 0, 0, 0)
         }
     }
@@ -78,7 +78,8 @@ class WorldCubeMap : AutoCloseable {
 
         val PIPELINE: RenderPipeline = RenderPipeline.builder()
             .withBindGroupLayout(BindGroupLayouts.GLOBALS)
-            .withBindGroupLayout(BindGroupLayouts.MATRICES_PROJECTION)
+            .withBindGroupLayout(BindGroupLayouts.PROJECTION)
+            .withBindGroupLayout(BindGroupLayouts.DYNAMIC_TRANSFORMS)
             .withBindGroupLayout(BindGroupLayouts.SAMPLER0)
             .withLocation(Identifier.fromNamespaceAndPath(Constants.MOD_ID, "pipeline/world_panorama"))
             .withVertexShader(Identifier.fromNamespaceAndPath(Constants.MOD_ID, "core/world_panorama"))

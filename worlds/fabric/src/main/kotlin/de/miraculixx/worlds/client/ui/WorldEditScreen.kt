@@ -11,6 +11,7 @@ import de.miraculixx.common.client.ui.WIDGET_W
 import de.miraculixx.common.client.ui.clickSound
 import de.miraculixx.common.client.ui.drawBox
 import de.miraculixx.showmyworld.ShowMyWorld
+import de.miraculixx.common.client.ui.NativeDialogs
 import de.miraculixx.worlds.Constants
 import de.miraculixx.worlds.data.InstalledMap
 import de.miraculixx.worlds.data.ItemComponents
@@ -50,13 +51,11 @@ import net.minecraft.client.renderer.RenderPipelines
 import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 import net.minecraft.util.FileUtil
-import net.minecraft.util.Util
+import com.mojang.blaze3d.Blaze3D
 import net.minecraft.world.Difficulty
 import net.minecraft.world.level.GameType
 import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
-import org.lwjgl.system.MemoryStack
-import org.lwjgl.util.tinyfd.TinyFileDialogs
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.function.Consumer
@@ -502,24 +501,21 @@ class WorldEditScreen(
      * Native file picker, edit block before picker closes
      */
     private fun pickIcon() {
-        Constants.SCOPE.launch {
-            val picked = MemoryStack.stackPush().use { stack ->
-                val filters = stack.mallocPointer(1)
-                filters.put(stack.UTF8("*.png"))
-                filters.flip()
-                TinyFileDialogs.tinyfd_openFileDialog(
-                    I18n.get("worlds.edit.icon_dialog"), null, filters, I18n.get("worlds.edit.icon_filter"), false,
-                )
-            } ?: return@launch
-            val bytes = try {
-                Files.readAllBytes(Path.of(picked))
-            } catch (e: Exception) {
-                Constants.LOG.warn("Could not read {}: {}", picked, e.message)
-                return@launch
-            }
-            val key = iconFile.toString()
-            if (WorldEditor.writeIcon(iconFile, bytes)) {
-                Minecraft.getInstance().execute { MapTextures.invalidate(key) }
+        NativeDialogs.pickFile(
+            I18n.get("worlds.edit.icon_dialog"), null, I18n.get("worlds.edit.icon_filter"), "png",
+        ) { picked ->
+            if (picked == null) return@pickFile
+            Constants.SCOPE.launch {
+                val bytes = try {
+                    Files.readAllBytes(picked)
+                } catch (e: Exception) {
+                    Constants.LOG.warn("Could not read {}: {}", picked, e.message)
+                    return@launch
+                }
+                val key = iconFile.toString()
+                if (WorldEditor.writeIcon(iconFile, bytes)) {
+                    Minecraft.getInstance().execute { MapTextures.invalidate(key) }
+                }
             }
         }
     }
@@ -541,12 +537,12 @@ class WorldEditScreen(
             Constants.LOG.error("Could not create folder {}", path, e)
             return
         }
-        Util.getPlatform().openPath(path)
+        Blaze3D.openPath(path)
     }
 
     private fun openBackupFolder() = openFolder(minecraft.levelSource.backupPath)
 
-    private fun openWorldFolder() = Util.getPlatform().openPath(saveDir)
+    private fun openWorldFolder() = Blaze3D.openPath(saveDir)
 
     /**
      * Vanilla's world "optimizing".

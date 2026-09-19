@@ -201,7 +201,7 @@ object MapInstaller {
             { context ->
                 WorldLoader.DataLoadOutput(
                     WorldGenSettings(
-                        WorldOptions.defaultWithRandomSeed(), WorldPresets.createNormalWorldDimensions(context.datapackWorldgen())
+                        WorldOptions.defaultWithRandomSeed(), WorldPresets.createNormalWorldDimensions(context.datapackWorldRegistries())
                     ),
                     context.datapackDimensions()
                 )

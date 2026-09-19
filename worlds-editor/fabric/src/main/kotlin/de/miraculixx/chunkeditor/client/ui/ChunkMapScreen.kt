@@ -60,7 +60,7 @@ import net.minecraft.network.chat.TextColor
 import net.minecraft.resources.Identifier
 import net.minecraft.world.entity.player.PlayerSkin
 import net.minecraft.world.level.ChunkPos
-import org.lwjgl.glfw.GLFW
+import com.mojang.blaze3d.platform.InputConstants
 import java.util.UUID
 import java.util.function.Supplier
 import kotlin.io.path.nameWithoutExtension
@@ -148,24 +148,24 @@ private const val SELECTED_COLOR = 0x9033B5E5.toInt()
 private const val GRID_COLOR = 0x30FFFFFF
 private const val REGION_LINE_COLOR = 0x80FFFFFF.toInt()
 
-private class Shortcut(private val ctrl: Boolean, private val glfwKey: Int, val label: String, private val shift: Boolean = false) {
+private class Shortcut(private val ctrl: Boolean, private val keyCode: Int, val label: String, private val shift: Boolean = false) {
     fun matches(event: KeyEvent) =
-        event.key() == glfwKey && event.hasControlDownWithQuirk() == ctrl && event.hasShiftDown() == shift
+        event.key() == keyCode && event.hasControlDownWithQuirk() == ctrl && event.hasShiftDown() == shift
 }
 
-private val SC_SELECT_ALL = Shortcut(true, GLFW.GLFW_KEY_A, "Ctrl+A")
-private val SC_INVERT = Shortcut(true, GLFW.GLFW_KEY_I, "Ctrl+I")
-private val SC_CLEAR = Shortcut(false, GLFW.GLFW_KEY_BACKSPACE, "Backspace")
-private val SC_TRIM = Shortcut(false, GLFW.GLFW_KEY_T, "T")
-private val SC_EXPORT = Shortcut(false, GLFW.GLFW_KEY_E, "E")
-private val SC_IMPORT = Shortcut(false, GLFW.GLFW_KEY_I, "I")
-private val SC_DELETE = Shortcut(false, GLFW.GLFW_KEY_DELETE, "Del")
-private val SC_REFRESH = Shortcut(true, GLFW.GLFW_KEY_R, "Ctrl+R")
-private val SC_PLAYERS = Shortcut(false, GLFW.GLFW_KEY_P, "Shift+P", shift = true)
-private val SC_ENTITIES = Shortcut(false, GLFW.GLFW_KEY_E, "Shift+E", shift = true)
-private val SC_OVERLAYS = Shortcut(false, GLFW.GLFW_KEY_O, "O")
-private val SC_JOBS = Shortcut(false, GLFW.GLFW_KEY_Q, "Q")
-private val SC_OVERLAY_TOGGLE = Shortcut(false, GLFW.GLFW_KEY_O, "Shift+O", shift = true)
+private val SC_SELECT_ALL = Shortcut(true, InputConstants.KEY_A, "Ctrl+A")
+private val SC_INVERT = Shortcut(true, InputConstants.KEY_I, "Ctrl+I")
+private val SC_CLEAR = Shortcut(false, InputConstants.KEY_BACKSPACE, "Backspace")
+private val SC_TRIM = Shortcut(false, InputConstants.KEY_T, "T")
+private val SC_EXPORT = Shortcut(false, InputConstants.KEY_E, "E")
+private val SC_IMPORT = Shortcut(false, InputConstants.KEY_I, "I")
+private val SC_DELETE = Shortcut(false, InputConstants.KEY_DELETE, "Del")
+private val SC_REFRESH = Shortcut(true, InputConstants.KEY_R, "Ctrl+R")
+private val SC_PLAYERS = Shortcut(false, InputConstants.KEY_P, "Shift+P", shift = true)
+private val SC_ENTITIES = Shortcut(false, InputConstants.KEY_E, "Shift+E", shift = true)
+private val SC_OVERLAYS = Shortcut(false, InputConstants.KEY_O, "O")
+private val SC_JOBS = Shortcut(false, InputConstants.KEY_Q, "Q")
+private val SC_OVERLAY_TOGGLE = Shortcut(false, InputConstants.KEY_O, "Shift+O", shift = true)
 
 private val DELETE_ACTION: Component get() = Component.translatable("selectWorld.delete")
 private val PASTE_ACTION: Component get() = Component.translatable("chunkeditor.clip.import")
@@ -1937,7 +1937,7 @@ internal class ChunkMapScreen(
                 }
 
                 1 -> {
-                    dragRemoves = event.modifiers() and GLFW.GLFW_MOD_SHIFT != 0
+                    dragRemoves = event.modifiers() and InputConstants.MOD_SHIFT != 0
                     dragFrom = chunkAt(x, y)
                     dragTo = dragFrom
                     return true
