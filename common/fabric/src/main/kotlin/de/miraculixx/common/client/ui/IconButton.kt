@@ -23,12 +23,15 @@ class IconButton(
     constructor(x: Int, y: Int, size: Int, message: Component, sprite: Identifier, onPress: Runnable) :
             this(x, y, size, size, message, { sprite }, onPress)
 
+    /** Only the sprite icon */
+    var drawBackground = true
+
     override fun onPress(input: InputWithModifiers) = onPress.run()
 
     override fun updateWidgetNarration(output: NarrationElementOutput) = defaultButtonNarrationText(output)
 
     override fun renderContents(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
-        renderDefaultSprite(graphics)
+        if (drawBackground) renderDefaultSprite(graphics)
         graphics.blitSprite(
             RenderPipelines.GUI_TEXTURED, sprite(),
             x + (width - ICON) / 2, y + (height - ICON) / 2, ICON, ICON,

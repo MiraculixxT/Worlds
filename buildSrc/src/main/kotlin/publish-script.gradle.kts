@@ -9,6 +9,7 @@ plugins {
 
 val publish = extensions.create<ModPublishExtension>("modPublish")
 publish.loader.convention(if (project.name.endsWith("-neoforge")) "neoforge" else "fabric")
+publish.environments.convention(setOf("Client"))
 
 // On Mojang mappings loom produces no `remapJar`, so `jar` is the production artifact
 val modJar = tasks.named(if (tasks.names.contains("remapJar")) "remapJar" else "jar")
@@ -65,7 +66,7 @@ val publishCurseforge = tasks.register<TaskPublishCurseForge>("publishCurseforge
     mainFile.releaseType = Constants.RELEASE_TYPE_RELEASE
     mainFile.changelogType = Constants.CHANGELOG_MARKDOWN
     mainFile.changelog = publish.changelog.get()
-    mainFile.addEnvironment("Client")
+    mainFile.addEnvironment(*publish.environments.get().toTypedArray())
     mainFile.addGameVersion(*outlet.curseforgeMcVersions().toTypedArray())
 
     if (isFabric.get()) {

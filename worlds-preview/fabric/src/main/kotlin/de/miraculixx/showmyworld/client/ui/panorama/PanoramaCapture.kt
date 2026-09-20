@@ -20,14 +20,21 @@ object PanoramaCapture {
      * Called by `MinecraftMixin`
      */
     fun onLeaveWorld(minecraft: Minecraft) {
+        val record = if (minecraft.player != null && minecraft.level != null) recordOf(minecraft) else null
+        val root = record?.root
+        val autoCreate = PreviewConfig.settings.autoCreate
+        // Before any rescan: the library scan reads what a leave writes
+        if (record != null && (autoCreate || WorldPanoramaTexture.resolve(root!!) != null)) LastPlayed.set(record)
         // Playing a world ends whatever selection led into it
+        WorldPanorama.releaseJoin()
         WorldPanorama.select(null)
-        // A leave rewrites LastPlayed, so the default-panorama pick order is stale either way
         WorldPanorama.invalidateLibrary()
-        if (!PreviewConfig.settings.autoCreate) return
-        if (minecraft.player == null || minecraft.level == null) return
 
-        val root = rootOf(minecraft) ?: return
+        if (root == null || !autoCreate) return
+        capture(minecraft, root)
+    }
+
+    private fun capture(minecraft: Minecraft, root: Path) {
         val dir = WorldPanoramaTexture.manualDir(root)
         if (WorldPanoramaTexture.isComplete(dir)) return // manual present, skip
 
@@ -39,15 +46,18 @@ object PanoramaCapture {
             return
         }
         val result = minecraft.grabPanoramixScreenshot(dir.toFile())
-        WorldPanorama.invalidate(root)
+        // The PNGs are written async, so the folder is not readable yet
+        WorldPanorama.awaitCapture(root)
         Constants.LOG.info("Panorama for {}: {}", root.fileName, result.string)
     }
 
-    private fun rootOf(minecraft: Minecraft): Path? {
+    private fun recordOf(minecraft: Minecraft): LastPlayedRecord? {
         val server = minecraft.singleplayerServer
         if (server != null) {
             return try {
-                server.getWorldPath(LevelResource.ROOT).normalize() // strip "/." (why is it there bruh)
+                // getWorldPath ends in "/." (why is it there bruh)
+                val folder = server.getWorldPath(LevelResource.ROOT).normalize().fileName.toString()
+                LastPlayedRecord(LastPlayedKind.WORLD, folder)
             } catch (e: Exception) {
                 Constants.LOG.warn("Could not locate the save folder for a panorama: {}", e.message)
                 null
@@ -56,6 +66,6 @@ object PanoramaCapture {
         // A LAN address is session-lived, so it would key a folder that is never previewed again
         val data = minecraft.currentServer?.takeUnless { it.isLan } ?: return null
         val address = data.ip.takeIf { it.isNotBlank() } ?: return null
-        return PanoramaRoots.server(address)
+        return LastPlayedRecord(LastPlayedKind.SERVER, PanoramaRoots.server(address).fileName.toString())
     }
 }

@@ -1,5 +1,6 @@
 package de.miraculixx.worlds.client.ui
 
+import com.mojang.blaze3d.platform.InputConstants
 import de.miraculixx.common.client.ui.IconButton
 import de.miraculixx.showmyworld.ShowMyWorld
 import de.miraculixx.worlds.Constants
@@ -50,13 +51,13 @@ import net.minecraft.network.chat.Component
 import net.minecraft.network.chat.FormattedText
 import net.minecraft.network.chat.Style
 import net.minecraft.resources.Identifier
-import net.minecraft.util.Util
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.Optional
 import java.util.function.Consumer
 import kotlin.math.abs
+import net.minecraft.util.Util
 
 /** The in-game map browser: Installed / Browse tabs, list on the left, detail panel on the right. */
 class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable("worlds.menu.worlds")) {
@@ -274,6 +275,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
         if (allEntries.isEmpty()) loadCurrentTab() else applyFilter()
         refreshInstalledIds()
+        ShowMyWorld.releaseJoin()
         ShowMyWorld.select(selected?.installedFolder)
         selected?.let { readmeBlocks = Markdown.parse(readmeFor(it)) }
     }
@@ -314,7 +316,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     private val updateButtonWidth: Int get() = ORB_SIZE + 8 + font.width(UPDATE_LABEL) + 6
 
     private fun syncUpdateTooltip() {
-        val latest = ModUpdate.latestVersion ?: return
+        val latest = ModUpdate.latestDisplay ?: return
         updateButton.setTooltip(
             Tooltip.create(
                 Component.translatable(
@@ -1107,7 +1109,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
         val my = event.y()
         // Before everything else: the handle sits outside the list, but grabbing it must never fall
         // through to a row or the readme.
-        if (event.button() == 0 && overHandle(mx, my)) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && overHandle(mx, my)) {
             if (doubleClick) {
                 splitRatio = DEFAULT_SPLIT
                 applyLayout()
@@ -1119,7 +1121,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
             }
             return true
         }
-        if (event.button() == 0 && selected != null) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && selected != null) {
             // Scrollbar: grab the thumb to drag, or click the track to jump.
             val maxScroll = (readmeContentHeight - readmeViewportH()).coerceAtLeast(0)
             if (maxScroll > 0 && mx >= rightRight - SCROLLBAR_W && mx <= rightRight &&
@@ -1165,7 +1167,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     }
 
     override fun mouseReleased(event: MouseButtonEvent): Boolean {
-        if (event.button() == 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             scrollbarDragging = false
             if (splitDragging) {
                 splitDragging = false

@@ -15,6 +15,7 @@ dependencies {
 }
 
 modPublish {
+    environments.set(setOf("Client", "Server"))
     loader.set("neoforge")
     modrinthId.set(property("chunkEditorModrinthId") as String)
     curseforgeId.set(property("chunkEditorCurseforgeId") as String)

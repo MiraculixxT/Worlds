@@ -5,12 +5,15 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [],
   "client": [
+    "ConnectScreenMixin",
     "EditWorldScreenMixin",
     "JoinMultiplayerScreenMixin",
+    "LocalPlayerMixin",
     "ManageServerScreenMixin",
     "MinecraftMixin",
     "PanoramaRendererMixin",
-    "SelectWorldScreenMixin"
+    "SelectWorldScreenMixin",
+    "WorldOpenFlowsMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -18,10 +18,7 @@ config = "chunkeditor.mixins.json"
 modId = "minecraft"
 versionRange = "[${minecraft_version},)"
 ordering = "NONE"
-side = "CLIENT"
-
 
 [[dependencies.chunkeditor]]
 modId = "worldscommon"
 ordering = "NONE"
-side = "CLIENT"

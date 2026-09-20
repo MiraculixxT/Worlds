@@ -13,8 +13,11 @@
   },
   "license": "All-Rights-Reserved",
   "icon": "assets/chunkeditor/icon.png",
-  "environment": "client",
+  "environment": "*",
   "entrypoints": {
+    "main": [
+      "de.miraculixx.chunkeditor.ChunkEditorMod"
+    ],
     "client": [
       "de.miraculixx.chunkeditor.client.ChunkEditorClient"
     ]
@@ -26,6 +29,8 @@
     "fabricloader": "*",
     "fabric-language-kotlin": "*",
     "fabric-resource-loader-v1": "*",
+    "fabric-networking-api-v1": "*",
+    "fabric-lifecycle-events-v1": "*",
     "worldscommon": "*",
     "minecraft": "${minecraft_version}"
   }
