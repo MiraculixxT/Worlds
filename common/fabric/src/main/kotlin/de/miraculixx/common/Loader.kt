@@ -1,3 +1,5 @@
+@file:Suppress("SameParameterValue")
+
 package de.miraculixx.common
 
 import net.fabricmc.loader.api.FabricLoader
@@ -12,6 +14,7 @@ object Loader {
     }
 
     private interface Impl {
+        val gameDir: Path
         val configDir: Path
         fun isModLoaded(id: String): Boolean
         fun modVersion(id: String): String?
@@ -20,6 +23,8 @@ object Loader {
     val kind: Kind = if (present("net.fabricmc.loader.api.FabricLoader")) Kind.FABRIC else Kind.NEOFORGE
 
     private val impl: Impl = if (kind == Kind.FABRIC) FabricImpl() else NeoForgeImpl()
+
+    val gameDir: Path get() = impl.gameDir
 
     /** `<gamedir>/config`. */
     val configDir: Path get() = impl.configDir
@@ -33,6 +38,7 @@ object Loader {
         runCatching { Class.forName(name, false, Loader::class.java.classLoader) }.isSuccess
 
     private class FabricImpl : Impl {
+        override val gameDir: Path get() = FabricLoader.getInstance().gameDir
         override val configDir: Path get() = FabricLoader.getInstance().configDir
         override fun isModLoaded(id: String) = FabricLoader.getInstance().isModLoaded(id)
         override fun modVersion(id: String): String? = FabricLoader.getInstance().getModContainer(id)
@@ -40,6 +46,7 @@ object Loader {
     }
 
     private class NeoForgeImpl : Impl {
+        override val gameDir: Path get() = FMLPaths.GAMEDIR.get()
         override val configDir: Path get() = FMLPaths.CONFIGDIR.get()
         override fun isModLoaded(id: String) = ModList.get().isLoaded(id)
         override fun modVersion(id: String): String? = ModList.get().getModContainerById(id)

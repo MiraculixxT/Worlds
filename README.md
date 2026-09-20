@@ -28,7 +28,7 @@ Task shortcuts for easier testing.
 ```shell
 ./gradlew :worlds:worlds-fabric:build :worlds:worlds-neoforge:build
 ./gradlew :worlds-editor:worlds-editor-fabric:build :worlds-editor:worlds-editor-neoforge:build
-./gradlew :worlds-viewer:worlds-viewer-fabric:build :worlds-viewer:worlds-viewer-neoforge:build
+./gradlew :worlds-preview:worlds-preview-fabric:build :worlds-preview:worlds-preview-neoforge:build
 ```
 
 ### Publishing

@@ -6,12 +6,15 @@
   "mixins": [
   ],
   "client": [
+    "ConnectScreenMixin",
     "EditWorldScreenMixin",
     "GuiRendererMixin",
     "JoinMultiplayerScreenMixin",
+    "LocalPlayerMixin",
     "ManageServerScreenMixin",
     "MinecraftMixin",
-    "SelectWorldScreenMixin"
+    "SelectWorldScreenMixin",
+    "WorldOpenFlowsMixin"
   ],
   "injectors": {
     "defaultRequire": 1

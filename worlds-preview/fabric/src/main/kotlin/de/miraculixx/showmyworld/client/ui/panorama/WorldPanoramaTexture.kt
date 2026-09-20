@@ -41,6 +41,12 @@ class WorldPanoramaTexture(id: Identifier, private val dir: Path) : CubeMapTextu
         fun isComplete(dir: Path): Boolean =
             Files.isDirectory(dir) && (0..5).all { Files.isRegularFile(facePath(dir, it)) }
 
+        /** [isComplete] and every face written at or after [since] */
+        fun isCompleteSince(dir: Path, since: Long): Boolean =
+            isComplete(dir) && (0..5).all {
+                runCatching { Files.getLastModifiedTime(facePath(dir, it)).toMillis() >= since }.getOrDefault(false)
+            }
+
         /** "panorama/" > "panorama/screenshots" > null */
         fun resolve(saveDir: Path): Path? {
             val manual = manualDir(saveDir)

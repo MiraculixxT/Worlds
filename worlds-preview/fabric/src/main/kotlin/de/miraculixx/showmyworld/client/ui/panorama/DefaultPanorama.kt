@@ -5,12 +5,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import net.minecraft.client.Minecraft
 import net.minecraft.client.resources.language.I18n
-import net.minecraft.nbt.NbtAccounter
-import net.minecraft.nbt.NbtIo
 
-class PanoramaCandidate(val dir: Path, val lastPlayed: Long)
+class PanoramaCandidate(val dir: Path)
 
 /**
  * What [WorldPanorama] shows while no world is selected
@@ -25,35 +22,29 @@ enum class DefaultPanorama {
 
     fun pick(candidates: List<PanoramaCandidate>): Path? = when (this) {
         VANILLA -> null
-        LAST_PLAYED -> candidates.maxByOrNull { it.lastPlayed }?.dir
+        LAST_PLAYED -> lastPlayed()
         RANDOM -> candidates.randomOrNull()?.dir
     }
 
+    private fun lastPlayed(): Path? = LastPlayed.get()?.let { WorldPanoramaTexture.resolve(it.root) }
+
     companion object {
         /**
-         * Every save that ships or captured a panorama (blocking)
+         * Every save and server that ships or captured a panorama (blocking), only [RANDOM] needs it
          */
-        fun scan(): List<PanoramaCandidate> {
-            val saves = Minecraft.getInstance().gameDirectory.toPath().resolve("saves")
-            if (!Files.isDirectory(saves)) return emptyList()
+        fun scan(): List<PanoramaCandidate> = scanDir(PanoramaRoots.saves()) + scanDir(PanoramaRoots.servers())
+
+        private fun scanDir(parent: Path): List<PanoramaCandidate> {
+            if (!Files.isDirectory(parent)) return emptyList()
             return try {
-                Files.newDirectoryStream(saves).use { stream ->
+                Files.newDirectoryStream(parent).use { stream ->
                     stream.filter { Files.isDirectory(it) }
-                        .mapNotNull { save ->
-                            WorldPanoramaTexture.resolve(save)?.let { PanoramaCandidate(it, lastPlayed(save)) }
-                        }
+                        .mapNotNull { root -> WorldPanoramaTexture.resolve(root)?.let(::PanoramaCandidate) }
                 }
             } catch (e: Exception) {
-                Constants.LOG.warn("Could not scan saves/ for panoramas: {}", e.message)
+                Constants.LOG.warn("Could not scan {} for panoramas: {}", parent, e.message)
                 emptyList()
             }
-        }
-
-        private fun lastPlayed(saveDir: Path): Long = try {
-            NbtIo.readCompressed(saveDir.resolve("level.dat"), NbtAccounter.unlimitedHeap())
-                .getCompoundOrEmpty("Data").getLongOr("LastPlayed", 0L)
-        } catch (_: Exception) {
-            0L
         }
     }
 }
