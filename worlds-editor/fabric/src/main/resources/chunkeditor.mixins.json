@@ -4,9 +4,12 @@
   "package": "de.miraculixx.chunkeditor.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "MinecraftServerMixin"
   ],
   "client": [
-    "EditWorldScreenMixin"
+    "EditWorldScreenMixin",
+    "PauseScreenMixin",
+    "SelectWorldScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -11,7 +11,7 @@
     "sources": "https://github.com/miraculixx/Worlds"
   },
   "license": "All-Rights-Reserved",
-  "environment": "client",
+  "environment": "*",
   "entrypoints": {},
   "depends": {
     "fabricloader": "*",

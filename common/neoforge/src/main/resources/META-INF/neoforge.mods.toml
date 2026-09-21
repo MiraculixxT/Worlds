@@ -14,5 +14,4 @@ authors = "Miraculixx"
 modId = "minecraft"
 versionRange = "[${minecraft_version},)"
 ordering = "NONE"
-side = "CLIENT"
 

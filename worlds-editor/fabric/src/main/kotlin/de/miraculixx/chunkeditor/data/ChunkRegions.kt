@@ -1,21 +1,20 @@
+@file:Suppress("UnusedExpression")
+
 package de.miraculixx.chunkeditor.data
 
 import de.miraculixx.chunkeditor.Constants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import net.minecraft.client.resources.language.I18n
 import net.minecraft.core.registries.Registries
 import net.minecraft.nbt.CompoundTag
-import net.minecraft.nbt.LongTag
 import net.minecraft.nbt.NbtAccounter
 import net.minecraft.nbt.NbtIo
 import net.minecraft.nbt.StreamTagVisitor
-import net.minecraft.nbt.visitors.CollectFields
-import net.minecraft.nbt.visitors.FieldSelector
 import net.minecraft.resources.ResourceLocation
 import net.minecraft.resources.ResourceKey
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.Level
+import net.minecraft.world.level.dimension.DimensionType
 import net.minecraft.world.level.chunk.storage.RegionFile
 import net.minecraft.world.level.chunk.storage.RegionStorageInfo
 import net.minecraft.world.level.storage.LevelResource
@@ -28,8 +27,11 @@ import java.nio.file.StandardOpenOption
 import java.util.BitSet
 import kotlin.io.path.name
 
-/** One of the save's dimension folders */
-data class WorldDimension(val key: ResourceKey<Level>, val label: String, val dir: Path) {
+/**
+ * One of the save's dimension folders
+ * @param labelKey a translation key for the vanilla three, the dimension id itself for a custom one
+ */
+data class WorldDimension(val key: ResourceKey<Level>, val labelKey: String, val dir: Path) {
     val regionDir: Path get() = dir.resolve(SUB_REGION)
 }
 
@@ -41,13 +43,12 @@ class RegionIndex(val rx: Int, val rz: Int, val present: BitSet, val bytes: Long
         present[pos.regionLocalZ * REGION_SIZE + pos.regionLocalX]
 }
 
-/** The two per-chunk longs the trim criteria compare against. */
-data class ChunkFacts(val inhabitedTime: Long, val lastUpdate: Long)
-
 const val REGION_SIZE = 32
-private const val SUB_REGION = "region"
-private const val SUB_ENTITIES = "entities"
-private const val SUB_POI = "poi"
+const val SUB_REGION = "region"
+const val SUB_ENTITIES = "entities"
+const val SUB_POI = "poi"
+
+val CHUNK_SUBS = listOf(SUB_REGION, SUB_ENTITIES, SUB_POI)
 private const val HEADER_BYTES = 4096
 
 private val REGION_NAME = Regex("""r\.(-?\d+)\.(-?\d+)\.mca""")
@@ -61,20 +62,26 @@ object ChunkRegions {
      * Overworld / Nether / End plus every datapack dimension with a region folder.
      * Vanilla ones are short names, custom ones named `<ns>:<key>`
      */
-    fun dimensions(access: LevelStorageSource.LevelStorageAccess): List<WorldDimension> {
+    fun dimensions(access: LevelStorageSource.LevelStorageAccess): List<WorldDimension> =
+        dimensions(access.getLevelPath(LevelResource.ROOT))
+
+    /**
+     * The same scan off the save root alone
+     */
+    fun dimensions(root: Path): List<WorldDimension> {
         val found = LinkedHashMap<Path, WorldDimension>()
-        fun offer(key: ResourceKey<Level>, label: String, dir: Path) {
+        fun offer(key: ResourceKey<Level>, labelKey: String, dir: Path) {
             val normalized = dir.normalize()
             if (Files.isDirectory(normalized.resolve(SUB_REGION))) {
-                found.putIfAbsent(normalized, WorldDimension(key, label, normalized))
+                found.putIfAbsent(normalized, WorldDimension(key, labelKey, normalized))
             }
         }
         listOf(
             Level.OVERWORLD to "chunkeditor.dimension.overworld",
             Level.NETHER to "chunkeditor.dimension.nether",
             Level.END to "chunkeditor.dimension.end",
-        ).forEach { (key, label) -> offer(key, I18n.get(label), access.getDimensionPath(key)) }
-        val custom = access.getLevelPath(LevelResource.ROOT).resolve("dimensions")
+        ).forEach { (key, labelKey) -> offer(key, labelKey, DimensionType.getStorageFolder(key, root)) }
+        val custom = root.resolve("dimensions")
         if (Files.isDirectory(custom)) {
             Files.newDirectoryStream(custom).use { namespaces ->
                 namespaces.filter { Files.isDirectory(it) }.forEach { ns ->
@@ -91,8 +98,9 @@ object ChunkRegions {
     }
 
     /** Every `r.<x>.<z>.mca` in the dimension, as region coordinates. */
-    fun listRegions(dimension: WorldDimension): List<Pair<Int, Int>> {
-        val dir = dimension.regionDir
+    fun listRegions(dimension: WorldDimension): List<Pair<Int, Int>> = listRegions(dimension.regionDir)
+
+    fun listRegions(dir: Path): List<Pair<Int, Int>> {
         if (!Files.isDirectory(dir)) return emptyList()
         return Files.newDirectoryStream(dir).use { stream ->
             stream.mapNotNull { file ->
@@ -104,8 +112,11 @@ object ChunkRegions {
     /**
      * The region's chunk bitmap. Only the first 4 KiB are read
      */
-    fun readIndex(dimension: WorldDimension, rx: Int, rz: Int): RegionIndex? {
-        val file = regionFile(dimension.regionDir, rx, rz)
+    fun readIndex(dimension: WorldDimension, rx: Int, rz: Int): RegionIndex? =
+        readIndex(dimension.regionDir, rx, rz)
+
+    fun readIndex(dir: Path, rx: Int, rz: Int): RegionIndex? {
+        val file = regionFile(dir, rx, rz)
         if (!Files.isRegularFile(file)) return null
         return try {
             val header = ByteBuffer.allocate(HEADER_BYTES)
@@ -133,36 +144,42 @@ object ChunkRegions {
     }
 
     /**
-     * Reads `InhabitedTime` / `LastUpdate` of every generated chunk in [regions]
+     * Read a chunks max & min world height
      */
-    suspend fun scanFields(
-        dimension: WorldDimension,
-        regions: Collection<RegionIndex>,
-        onProgress: (done: Int, total: Int) -> Unit,
-    ): Map<Long, ChunkFacts> = withContext(Dispatchers.IO) {
-        val facts = HashMap<Long, ChunkFacts>()
-        storage(dimension, SUB_REGION)?.use { store ->
-            regions.forEachIndexed { done, region ->
-                forEachChunk(region) { pos ->
-                    val collector = CollectFields(
-                        FieldSelector(LongTag.TYPE, "InhabitedTime"),
-                        FieldSelector(LongTag.TYPE, "LastUpdate"),
-                    )
-                    try {
-                        store.scanChunk(pos, collector)
-                        val tag = collector.result as? CompoundTag ?: return@forEachChunk
-                        facts[pos.toLong()] = ChunkFacts(
-                            tag.getLong("InhabitedTime"),
-                            tag.getLong("LastUpdate"),
-                        )
-                    } catch (e: Exception) {
-                        Constants.LOG.warn("Failed to scan chunk {}: {}", pos, e.message)
-                    }
-                }
-                onProgress(done + 1, regions.size)
-            }
+    suspend fun heightBounds(dimension: WorldDimension, pos: ChunkPos): IntRange? = withContext(Dispatchers.IO) {
+        val store = storage(dimension, SUB_REGION) ?: return@withContext null
+        try {
+            val tag = store.read(pos) ?: return@withContext null
+            val sections = tag.getListOrEmpty("sections")
+                .mapNotNull { (it as? CompoundTag)?.takeIf { tag -> tag.contains("Y") }?.getByte("Y")?.toInt() }
+            if (sections.isEmpty()) return@withContext null
+            sections.min() * 16..sections.max() * 16 + 15
+        } catch (e: Exception) {
+            Constants.LOG.warn("Failed to read height bounds of {}: {}", pos, e.message)
+            null
+        } finally {
+            runCatching { store.close() }
         }
-        facts
+    }
+
+    /**
+     * Quick scan timestamps of each chunk via header
+     */
+    fun readTimestamps(dir: Path, rx: Int, rz: Int): IntArray? {
+        val file = regionFile(dir, rx, rz)
+        if (!Files.isRegularFile(file)) return null
+        return try {
+            val header = ByteBuffer.allocate(HEADER_BYTES * 2)
+            FileChannel.open(file, StandardOpenOption.READ).use { channel ->
+                while (header.hasRemaining() && channel.read(header) > 0) Unit
+            }
+            if (header.position() < HEADER_BYTES * 2) return null
+            header.flip().position(HEADER_BYTES)
+            IntArray(REGION_SIZE * REGION_SIZE) { header.int }
+        } catch (e: Exception) {
+            Constants.LOG.warn("Failed to read region timestamps {}: {}", file, e.message)
+            null
+        }
     }
 
     /**
@@ -170,8 +187,9 @@ object ChunkRegions {
      */
     fun deleteChunks(dimension: WorldDimension, chunks: Collection<ChunkPos>): Int {
         if (chunks.isEmpty()) return 0
+        val started = System.nanoTime()
         var deleted = 0
-        listOf(SUB_REGION, SUB_ENTITIES, SUB_POI).forEach { sub ->
+        CHUNK_SUBS.forEach { sub ->
             storage(dimension, sub)?.use { store ->
                 chunks.forEach { pos ->
                     try {
@@ -185,12 +203,16 @@ object ChunkRegions {
         }
         // RegionFile.clear leaves the (now header-only) file behind; drop the empty ones.
         chunks.map { it.regionX to it.regionZ }.distinct().forEach { (rx, rz) ->
-            listOf(SUB_REGION, SUB_ENTITIES, SUB_POI).forEach { sub ->
+            CHUNK_SUBS.forEach { sub ->
                 val file = regionFile(dimension.dir.resolve(sub), rx, rz)
                 val index = readIndexAt(file) ?: return@forEach
                 if (index.isEmpty) runCatching { Files.deleteIfExists(file) }
             }
         }
+        Constants.LOG.info(
+            "delete {}: {} of {} chunks in {} ms",
+            dimension.dir.fileName, deleted, chunks.size, Constants.ms(started),
+        )
         return deleted
     }
 
@@ -207,11 +229,18 @@ object ChunkRegions {
     /**
      * A storage over one of the dimension's three chunk folders, or null when it does not exist
      */
-    internal fun storage(dimension: WorldDimension, sub: String): RegionStore? {
-        val dir = dimension.dir.resolve(sub)
-        if (!Files.isDirectory(dir)) return null
+    internal fun storage(dimension: WorldDimension, sub: String): RegionStore? =
+        storage(dimension.dir.resolve(sub), dimension.dir.name, dimension.key, sub, false)
+
+    /**
+     * A store over one of the three chunk folders (save or clip)
+     */
+    internal fun storage(
+        dir: Path, level: String, key: ResourceKey<Level>, sub: String, create: Boolean,
+    ): RegionStore? {
+        if (create) Files.createDirectories(dir) else if (!Files.isDirectory(dir)) return null
         val type = if (sub == SUB_REGION) "chunk" else sub
-        return RegionStore(RegionStorageInfo(dimension.dir.name, dimension.key, type), dir)
+        return RegionStore(RegionStorageInfo(level, key, type), dir)
     }
 
     private fun readIndexAt(file: Path): BitSet? {
@@ -229,7 +258,7 @@ object ChunkRegions {
                 i++
             }
             present
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
@@ -248,16 +277,23 @@ internal class RegionStore(private val info: RegionStorageInfo, private val fold
         regionFile(pos)?.getChunkDataInputStream(pos)?.use { NbtIo.parse(it, visitor, NbtAccounter.unlimitedHeap()) }
     }
 
+    /** [net.minecraft.world.level.chunk.storage.RegionFileStorage.write] - a null [tag] drops the chunk */
+    fun write(pos: ChunkPos, tag: CompoundTag?) {
+        val file = regionFile(pos, tag != null) ?: return
+        if (tag == null) file.clear(pos)
+        else file.getChunkDataOutputStream(pos).use { NbtIo.write(tag, it) }
+    }
+
     /** Drops the chunk and its external `.mcc`, leaving the region file itself in place */
     fun clear(pos: ChunkPos) {
         regionFile(pos)?.clear(pos)
     }
 
-    private fun regionFile(pos: ChunkPos): RegionFile? {
+    private fun regionFile(pos: ChunkPos, create: Boolean = false): RegionFile? {
         val key = ChunkPos.asLong(pos.regionX, pos.regionZ)
         cache[key]?.let { return it }
         val path = ChunkRegions.regionFile(folder, pos.regionX, pos.regionZ)
-        if (!Files.isRegularFile(path)) return null
+        if (!create && !Files.isRegularFile(path)) return null
         if (cache.size >= MAX_CACHE_SIZE) cache.remove(cache.keys.first())?.let { evicted ->
             runCatching { evicted.close() }.onFailure { Constants.LOG.warn("Failed to close region file: {}", it.message) }
         }

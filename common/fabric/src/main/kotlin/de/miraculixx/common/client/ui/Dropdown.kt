@@ -68,14 +68,16 @@ class Dropdown<T>(
     fun renderOverlay(graphics: GuiGraphics, font: Font, mouseX: Int, mouseY: Int) {
         if (!open) return
         val top = y + BUTTON_H
-        drawBox(graphics, x, top, x + width, top + height())
-        entries.forEachIndexed { index, entry ->
-            val rowTop = top + 1 + index * ROW_H
-            if (mouseX >= x && mouseX < x + width && mouseY >= rowTop && mouseY < rowTop + ROW_H) {
-                graphics.fill(x + 1, rowTop, x + width - 1, rowTop + ROW_H, HOVER_COLOR)
+        overlay(graphics) {
+            drawBox(graphics, x, top, x + width, top + height())
+            entries.forEachIndexed { index, entry ->
+                val rowTop = top + 1 + index * ROW_H
+                if (mouseX >= x && mouseX < x + width && mouseY >= rowTop && mouseY < rowTop + ROW_H) {
+                    graphics.fill(x + 1, rowTop, x + width - 1, rowTop + ROW_H, HOVER_COLOR)
+                }
+                val color = if (entry == selected) -1 else SUBTEXT_COLOR
+                graphics.drawString(font, label(entry), x + 6, rowTop + (ROW_H - font.lineHeight) / 2 + 1, color)
             }
-            val color = if (entry == selected) -1 else SUBTEXT_COLOR
-            graphics.drawString(font, label(entry), x + 6, rowTop + (ROW_H - font.lineHeight) / 2 + 1, color)
         }
     }
 

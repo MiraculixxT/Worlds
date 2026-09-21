@@ -18,6 +18,13 @@ dependencies {
     implementation(project(path = ":common:common-fabric", configuration = "namedElements"))
     include(project(":common:common-fabric"))
 
+    // `namedElements` exports nothing, so the JiJ'd chunkeditor's fabric-api modules must be named here
+    // as well or a dev run fails its `depends`
+    val fabricApi = project.extensions.getByType<net.fabricmc.loom.api.fabricapi.FabricApiExtension>()
+    val fapiVersion = extra["fapiVersion"] as String
+    "modRuntimeOnly"(fabricApi.module("fabric-networking-api-v1", fapiVersion))
+    "modRuntimeOnly"(fabricApi.module("fabric-lifecycle-events-v1", fapiVersion))
+
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.+")
 
     // Pure-Java WebP decoder (TwelveMonkeys ImageIO)

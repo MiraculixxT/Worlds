@@ -277,6 +277,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
         if (allEntries.isEmpty()) loadCurrentTab() else applyFilter()
         refreshInstalledIds()
+        ShowMyWorld.releaseJoin()
         ShowMyWorld.select(selected?.installedFolder)
         selected?.let { readmeBlocks = Markdown.parse(readmeFor(it)) }
     }
@@ -317,7 +318,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
     private val updateButtonWidth: Int get() = ORB_SIZE + 8 + font.width(UPDATE_LABEL) + 6
 
     private fun syncUpdateTooltip() {
-        val latest = ModUpdate.latestVersion ?: return
+        val latest = ModUpdate.latestDisplay ?: return
         updateButton.setTooltip(
             Tooltip.create(
                 Component.translatable(
@@ -1081,7 +1082,7 @@ class WorldsScreen(private val parent: Screen?) : Screen(Component.translatable(
 
     /**
      * Draw a word-wrapped [text] at (x,y), preserving inline styles, and record hit-boxes for any
-     * spans carrying an [ClickEvent.OpenUrl] so [mouseClicked] can open them. Returns height used.
+     * spans carrying an [ClickEvent] of `OPEN_URL` so [mouseClicked] can open them. Returns height used.
      */
     private fun drawWrappedWithLinks(
         graphics: GuiGraphics, text: Component, x: Int, y: Int, width: Int, color: Int,

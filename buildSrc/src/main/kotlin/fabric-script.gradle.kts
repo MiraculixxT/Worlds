@@ -33,6 +33,8 @@ dependencies {
     "mappings"(loom.officialMojangMappings())
     println("Game Version: $gameVersion\nSupported Versions: ${outlet.mcVersionRange}")
     println("FabricLoader: ${outlet.loaderVersion()}\nFabricAPI: ${outlet.fapiVersion()}")
+    // fabric-api is pulled module by module here, so a module script can add its own
+    extra["fapiVersion"] = outlet.fapiVersion()
     "modImplementation"("net.fabricmc:fabric-loader:${outlet.loaderVersion()}")
     // Required for `assets/<modid>/` to be seen at all: fabric-loader ships no resource-pack
     // integration, `ModResourcePackCreator` lives in fabric-api's `fabric-resource-loader-v0`.
@@ -62,6 +64,14 @@ loom {
 
     runs {
         configureEach { runDir("../../run-legacy") }
+
+        named("server") {
+            runDir("../../run-legacy/server")
+            if (providers.gradleProperty("mixinAudit").isPresent) {
+                property("mixin.debug.verbose", "true")
+                property("mixin.debug.countInjections", "true")
+            }
+        }
 
         named("client") {
             programArgs("--username", "Notch")
@@ -98,4 +108,13 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.withType<KotlinCompile>().configureEach {
     compilerOptions.jvmTarget.set(JvmTarget.fromTarget(TARGET_JAVA_VERSION.toString()))
+}
+
+tasks.matching { it.name == "runServer" }.configureEach {
+    doFirst {
+        val dir = rootProject.layout.projectDirectory.dir("run-legacy/server").asFile
+        dir.mkdirs()
+        val eula = File(dir, "eula.txt")
+        if (!eula.exists()) eula.writeText("eula=true\n")
+    }
 }

@@ -272,7 +272,7 @@ class SettingsList(
         }
 
         override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
-            if (CommonInputs.selected(keyCode) && focused != null) {
+            if (isEnter(keyCode) && focused != null) {
                 commit()
                 return true
             }

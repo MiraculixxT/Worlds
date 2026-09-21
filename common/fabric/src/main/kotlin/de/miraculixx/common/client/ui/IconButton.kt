@@ -22,6 +22,9 @@ class IconButton(
     constructor(x: Int, y: Int, size: Int, message: Component, sprite: ResourceLocation, onPress: Runnable) :
             this(x, y, size, size, message, { sprite }, onPress)
 
+    /** Only the sprite icon */
+    var drawBackground = true
+
     override fun onPress() = onPress.run()
 
     override fun updateWidgetNarration(output: NarrationElementOutput) = defaultButtonNarrationText(output)
@@ -30,7 +33,7 @@ class IconButton(
     override fun renderString(graphics: GuiGraphics, font: Font, color: Int) = Unit
 
     override fun renderWidget(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
-        super.renderWidget(graphics, mouseX, mouseY, partialTick)
+        if (drawBackground) super.renderWidget(graphics, mouseX, mouseY, partialTick)
         graphics.blitSprite(sprite(), x + (width - ICON) / 2, y + (height - ICON) / 2, ICON, ICON)
     }
 }

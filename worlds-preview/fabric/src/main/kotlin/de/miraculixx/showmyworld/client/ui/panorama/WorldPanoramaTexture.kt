@@ -1,8 +1,12 @@
 package de.miraculixx.showmyworld.client.ui.panorama
 
 import com.mojang.blaze3d.platform.NativeImage
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -33,8 +37,43 @@ object WorldPanoramaTexture {
 
     fun facePath(dir: Path, face: Int): Path = dir.resolve("panorama_$face.png")
 
+    private val PNG_SIGNATURE = byteArrayOf(-119, 80, 78, 71, 13, 10, 26, 10)
+    private val PNG_END = byteArrayOf(0, 0, 0, 0, 73, 69, 78, 68, -82, 66, 96, -126)
+
+    /**
+     * A capture is written straight to its final path, so a half written file is visible and
+     * would fail to decode ("PNG header missing"). Signature plus `IEND` is the whole file.
+     */
+    private fun isWholePng(file: Path): Boolean = try {
+        FileChannel.open(file, StandardOpenOption.READ).use { channel ->
+            val size = channel.size()
+            if (size < PNG_SIGNATURE.size + PNG_END.size) false
+            else read(channel, 0).contentEquals(PNG_SIGNATURE) &&
+                read(channel, size - PNG_END.size, PNG_END.size).contentEquals(PNG_END)
+        }
+    } catch (e: IOException) {
+        false
+    }
+
+    private fun read(channel: FileChannel, at: Long, length: Int = PNG_SIGNATURE.size): ByteArray {
+        val buffer = ByteBuffer.allocate(length)
+        var position = at
+        while (buffer.hasRemaining()) {
+            val read = channel.read(buffer, position)
+            if (read <= 0) return ByteArray(0)
+            position += read
+        }
+        return buffer.array()
+    }
+
     fun isComplete(dir: Path): Boolean =
-        Files.isDirectory(dir) && (0 until FACES).all { Files.isRegularFile(facePath(dir, it)) }
+        Files.isDirectory(dir) && (0 until FACES).all { isWholePng(facePath(dir, it)) }
+
+    /** [isComplete] and every face written at or after [since] */
+    fun isCompleteSince(dir: Path, since: Long): Boolean =
+        isComplete(dir) && (0 until FACES).all {
+            runCatching { Files.getLastModifiedTime(facePath(dir, it)).toMillis() >= since }.getOrDefault(false)
+        }
 
     /** "panorama/" > "panorama/screenshots" > null */
     fun resolve(saveDir: Path): Path? {

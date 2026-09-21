@@ -54,6 +54,12 @@ public abstract class SelectWorldScreenMixin extends Screen {
         ShowMyWorld.INSTANCE.select(null);
     }
 
+    /** Before the list selects, so its {@code updateButtonStatus} owns the panorama again */
+    @Inject(method = "init", at = @At("HEAD"))
+    private void showmyworld$releaseJoin(CallbackInfo ci) {
+        ShowMyWorld.INSTANCE.releaseJoin();
+    }
+
     /**
      * 1.21's has no {@code repositionElements}, so a resize is managed by Screens default
      */

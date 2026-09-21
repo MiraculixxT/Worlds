@@ -18,6 +18,8 @@ object ModUpdate {
 
     val available: Boolean get() = latestVersion != null
 
+    val latestDisplay: String? get() = latestVersion?.base()
+
     val url: String?
         get() = latestVersion?.let { "https://modrinth.com/mod/${Constants.WORLDS_MODRINTH_ID}/version/$it" }
 
@@ -30,7 +32,7 @@ object ModUpdate {
             when {
                 latest == null -> Constants.LOG.warn("No {} release published for {} {}", Constants.MOD_ID, LOADER, mc)
                 installed == null -> Constants.LOG.warn("Own mod version unknown, skipping update check")
-                latest.versionNumber == installed -> Constants.LOG.info("{} is up to date ({})", Constants.MOD_ID, installed)
+                latest.versionNumber.base() == installed.base() -> Constants.LOG.info("{} is up to date ({})", Constants.MOD_ID, installed)
                 else -> {
                     latestVersion = latest.versionNumber
                     Constants.LOG.warn(
@@ -41,4 +43,6 @@ object ModUpdate {
             }
         }
     }
+
+    private fun String.base() = substringBefore('+')
 }

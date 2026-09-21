@@ -9,12 +9,16 @@ object PanoramaRoots {
     private const val SERVERS = "servers"
 
     /** `<gamedir>/saves/<folder>` */
-    fun world(saveFolder: String): Path =
-        Minecraft.getInstance().gameDirectory.toPath().resolve("saves").resolve(saveFolder)
+    fun world(saveFolder: String): Path = saves().resolve(saveFolder)
+
+    /** `<gamedir>/saves` */
+    fun saves(): Path = Minecraft.getInstance().gameDirectory.toPath().resolve("saves")
+
+    /** `<config>/showmyworld/servers` */
+    fun servers(): Path = Loader.configDir.resolve(Constants.MOD_ID).resolve(SERVERS)
 
     /** `<config>/showmyworld/servers/<address>` */
-    fun server(address: String): Path =
-        Loader.configDir.resolve(Constants.MOD_ID).resolve(SERVERS).resolve(sanitize(address))
+    fun server(address: String): Path = servers().resolve(sanitize(address))
 
     /**
      * Sanitize IP, primarily for windows because the file system sucks

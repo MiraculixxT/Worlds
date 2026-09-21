@@ -30,6 +30,7 @@ public abstract class JoinMultiplayerScreenMixin {
      */
     @Inject(method = "init", at = @At("TAIL"))
     private void showmyworld$initSelect(CallbackInfo ci) {
+        ShowMyWorld.INSTANCE.releaseJoin();
         showmyworld$push();
     }
 
