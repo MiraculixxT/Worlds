@@ -98,6 +98,7 @@
   "chunkeditor.menu.view": "View",
   "chunkeditor.map.selected": "Selected",
   "chunkeditor.open": "Chunk Editor",
+  "chunkeditor.open.invalid": "That folder is no world",
   "chunkeditor.remote.open": "Chunk Map",
   "chunkeditor.remote.saving": "Asking the server to save…",
   "chunkeditor.remote.queued_delete": "Queued %s chunk(s) to delete when the server stops",

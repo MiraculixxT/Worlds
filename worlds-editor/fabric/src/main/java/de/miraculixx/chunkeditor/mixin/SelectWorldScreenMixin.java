@@ -48,7 +48,6 @@ public abstract class SelectWorldScreenMixin extends Screen {
                 .sprite(CHUNKEDITOR_SPRITE, 16, 16)
                 .withTootip()
                 .build();
-        button.active = this.editButton != null && this.editButton.active;
         addRenderableWidget(button);
         chunkeditor$button = button;
         chunkeditor$place();
@@ -57,11 +56,6 @@ public abstract class SelectWorldScreenMixin extends Screen {
     @Inject(method = "repositionElements", at = @At("TAIL"))
     private void chunkeditor$reposition(CallbackInfo ci) {
         chunkeditor$place();
-    }
-
-    @Inject(method = "updateButtonStatus", at = @At("TAIL"))
-    private void chunkeditor$updateStatus(CallbackInfo ci) {
-        if (chunkeditor$button != null && this.editButton != null) chunkeditor$button.active = this.editButton.active;
     }
 
     @Unique
@@ -75,7 +69,13 @@ public abstract class SelectWorldScreenMixin extends Screen {
 
     @Unique
     private void chunkeditor$open() {
-        if (this.list == null) return;
-        this.list.getSelectedOpt().ifPresent(entry -> ChunkEditor.INSTANCE.openOwned(this, entry.getLevelSummary().getLevelId()));
+        if (this.list == null) {
+            ChunkEditor.INSTANCE.openPicked(this);
+            return;
+        }
+        this.list.getSelectedOpt().ifPresentOrElse(
+                entry -> ChunkEditor.INSTANCE.openOwned(this, entry.getLevelSummary().getLevelId()),
+                () -> ChunkEditor.INSTANCE.openPicked(this)
+        );
     }
 }

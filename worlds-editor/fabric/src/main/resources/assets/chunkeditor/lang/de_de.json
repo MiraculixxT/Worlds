@@ -98,6 +98,7 @@
   "chunkeditor.menu.view": "Ansicht",
   "chunkeditor.map.selected": "Ausgewählt",
   "chunkeditor.open": "Chunk-Editor",
+  "chunkeditor.open.invalid": "Dieser Ordner ist keine Welt",
   "chunkeditor.remote.open": "Chunk-Karte",
   "chunkeditor.remote.saving": "Server wird um Speichern gebeten…",
   "chunkeditor.remote.queued_delete": "%s Chunk(s) zum Löschen beim Serverstopp eingereiht",
