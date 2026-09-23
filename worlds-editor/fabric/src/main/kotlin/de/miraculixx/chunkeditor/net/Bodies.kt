@@ -1,5 +1,6 @@
 package de.miraculixx.chunkeditor.net
 
+import de.miraculixx.chunkeditor.data.ChunkFact
 import de.miraculixx.chunkeditor.data.ChunkInfo
 import de.miraculixx.chunkeditor.data.ChunkMetric
 import de.miraculixx.chunkeditor.data.ClipEntry
@@ -34,6 +35,7 @@ import java.util.BitSet
 import java.util.UUID
 import java.util.zip.Deflater
 import java.util.zip.Inflater
+import java.util.EnumMap
 
 /** What the server tells a joining client about itself, before any screen exists. */
 class Hello(
@@ -159,6 +161,19 @@ object Bodies {
         buf.writeInt(pos.z)
     }
 
+    fun chunkInfoRequest(
+        dimension: WorldDimension, pos: ChunkPos, facts: Set<ChunkFact>, minY: Int,
+    ): ByteArray = write { buf ->
+        buf.writeUtf(dimensionId(dimension))
+        buf.writeInt(pos.x)
+        buf.writeInt(pos.z)
+        buf.writeInt(minY)
+        buf.writeVarInt(facts.fold(0) { mask, fact -> mask or (1 shl fact.ordinal) })
+    }
+
+    fun readFacts(mask: Int): Set<ChunkFact> =
+        ChunkFact.entries.filterTo(LinkedHashSet()) { mask and (1 shl it.ordinal) != 0 }
+
     fun renderRequest(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?): ByteArray = write { buf ->
         buf.writeUtf(dimensionId(dimension))
         buf.writeInt(rx)
@@ -250,22 +265,25 @@ object Bodies {
     }
 
     fun writeChunkInfo(info: ChunkInfo): ByteArray = write { buf ->
-        writeOptional(buf, info.inhabitedTicks)
-        writeOptional(buf, info.lastWritten)
-        writeOptional(buf, info.entities?.toLong())
+        buf.writeVarInt(info.numbers.size)
+        info.numbers.forEach { (fact, value) ->
+            buf.writeByte(fact.ordinal)
+            buf.writeLong(value)
+        }
+        buf.writeBoolean(info.biome != null)
+        info.biome?.let { buf.writeUtf(it) }
     }
 
-    /** @param pos what was asked for, the answer only carries the numbers */
+    /** @param pos what was asked for, the answer only carries the values */
     fun readChunkInfo(bytes: ByteArray, pos: ChunkPos): ChunkInfo = read(bytes) { buf ->
-        ChunkInfo(pos, readOptional(buf), readOptional(buf), readOptional(buf)?.toInt())
+        val numbers = EnumMap<ChunkFact, Long>(ChunkFact::class.java)
+        repeat(buf.readVarInt().coerceAtMost(ChunkFact.entries.size)) {
+            val fact = ChunkFact.entries.getOrNull(buf.readByte().toInt())
+            val value = buf.readLong()
+            if (fact != null) numbers[fact] = value
+        }
+        ChunkInfo(pos, numbers, if (buf.readBoolean()) buf.readUtf() else null)
     }
-
-    private fun writeOptional(buf: FriendlyByteBuf, value: Long?) {
-        buf.writeBoolean(value != null)
-        if (value != null) buf.writeLong(value)
-    }
-
-    private fun readOptional(buf: FriendlyByteBuf): Long? = if (buf.readBoolean()) buf.readLong() else null
 
     fun writeRange(range: IntRange?): ByteArray = write { buf ->
         buf.writeBoolean(range != null)

@@ -4,8 +4,10 @@ import com.mojang.blaze3d.platform.NativeImage
 import net.minecraft.core.Registry
 import net.minecraft.world.level.biome.Biome
 import de.miraculixx.chunkeditor.Constants
+import de.miraculixx.chunkeditor.data.ChunkFact
 import de.miraculixx.chunkeditor.data.ChunkInfo
 import de.miraculixx.chunkeditor.data.ChunkMetric
+import de.miraculixx.chunkeditor.data.EditorConfig
 import de.miraculixx.chunkeditor.data.ChunkOverlay
 import de.miraculixx.chunkeditor.data.ChunkScan
 import de.miraculixx.chunkeditor.data.ChunkRegions
@@ -72,6 +74,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import java.util.EnumMap
 
 private const val HEADER_H = 32
 private const val MARGIN = 8
@@ -226,6 +229,7 @@ internal class ChunkMapScreen(
     private var infoChunk: ChunkPos? = null
     private var infoX = 0
     private var infoY = 0
+    private var infoFacts = EditorConfig.chunkFacts()
     private val chunkInfos = HashMap<Long, ChunkInfo>()
     private val infoLoading = LongOpenHashSet()
 
@@ -1631,19 +1635,9 @@ internal class ChunkMapScreen(
         val now = System.currentTimeMillis() / 1000
         val header = "${I18n.get("chunkeditor.map.chunk")} ${pos.x}, ${pos.z} " +
                 "(${pos.regionX}, ${pos.regionZ})"
-        val rows = listOf(
-            ChunkOverlay.INHABITED_TIME.label to infoValue(info) {
-                it.inhabitedTicks?.let { ticks -> ChunkOverlay.INHABITED_TIME.format(ticks) }
-            },
-            ChunkOverlay.LAST_MODIFIED.label to infoValue(info) {
-                it.lastWritten?.let { stamp ->
-                    ChunkOverlay.LAST_MODIFIED.format(ChunkOverlay.LAST_MODIFIED.value(stamp, worldTime, now))
-                }
-            },
-            ChunkOverlay.ENTITIES.label to infoValue(info) { it.entities?.toString() },
-        )
-        val labelW = rows.maxOf { font.width("${it.first}:") }
-        val valueW = rows.maxOf { font.width(it.second) }
+        val rows = infoFacts.map { fact -> fact.label to infoValue(info) { factValue(fact, it, now) } }
+        val labelW = rows.maxOfOrNull { font.width("${it.first}:") } ?: 0
+        val valueW = rows.maxOfOrNull { font.width(it.second) } ?: 0
         val lines = rows.size + 1
         val boxW = CHUNK_BOX_PAD * 2 + max(font.width(header), labelW + 6 + valueW)
         val boxH = CHUNK_BOX_PAD * 2 + lines * font.lineHeight + (lines - 1) * CHUNK_BOX_ROW_GAP
@@ -1669,6 +1663,10 @@ internal class ChunkMapScreen(
     private fun infoValue(info: ChunkInfo?, pick: (ChunkInfo) -> String?): String =
         if (info == null) "…" else pick(info) ?: "–"
 
+    private fun factValue(fact: ChunkFact, info: ChunkInfo, now: Long): String? =
+        if (fact == ChunkFact.BIOME) info.biome?.let { OverlayColors.categoryName(it) }
+        else info.numbers[fact]?.let { fact.overlay.format(fact.overlay.value(it, worldTime, now)) }
+
     private fun openChunkInfo(pos: ChunkPos, x: Double, y: Double) {
         if (!exists(pos)) {
             infoChunk = null
@@ -1677,9 +1675,16 @@ internal class ChunkMapScreen(
         infoChunk = pos
         infoX = x.roundToInt()
         infoY = y.roundToInt()
+        // Whatever was cached answered another question once the settings changed
+        val facts = EditorConfig.chunkFacts()
+        if (facts != infoFacts) {
+            infoFacts = facts
+            chunkInfos.clear()
+            infoLoading.clear()
+        }
         val packed = pos.pack()
         if (chunkInfos.containsKey(packed)) return
-        fromScan(pos)?.let {
+        fromScan(pos, facts)?.let {
             chunkInfos[packed] = it
             return
         }
@@ -1687,26 +1692,27 @@ internal class ChunkMapScreen(
         if (!infoLoading.add(packed)) return
         val generation = loadGen
         Constants.SCOPE.launch {
-            val read = runCatching { backend.chunkInfo(dim, pos) }
+            val read = runCatching { backend.chunkInfo(dim, pos, facts, yMin) }
                 .onFailure { Constants.LOG.warn("Failed to read chunk {}: {}", pos, it.message) }
                 .getOrNull()
             minecraft.execute {
                 infoLoading.remove(packed)
-                if (generation == loadGen && read != null) chunkInfos[packed] = read
+                if (generation == loadGen && facts == infoFacts && read != null) chunkInfos[packed] = read
             }
         }
     }
 
-    /** A pass over the whole dimension already holds every number the box wants */
-    private fun fromScan(pos: ChunkPos): ChunkInfo? {
-        if (!scan.has(ScanSource.FIELDS) || !scan.has(ScanSource.HEADER) || !scan.has(ScanSource.ENTITIES)) return null
+    /** A pass over the whole dimension already holds every value the box wants */
+    private fun fromScan(pos: ChunkPos, facts: Set<ChunkFact>): ChunkInfo? {
+        if (facts.any { !scan.has(it.metric.source) }) return null
         val packed = pos.pack()
-        return ChunkInfo(
-            pos,
-            scan.value(ChunkMetric.INHABITED_TIME, packed),
-            scan.value(ChunkMetric.TIMESTAMP, packed),
-            (scan.value(ChunkMetric.ENTITY_COUNT, packed) ?: 0L).toInt(),
-        )
+        val numbers = EnumMap<ChunkFact, Long>(ChunkFact::class.java)
+        var biome: String? = null
+        facts.forEach { fact ->
+            val value = scan.value(fact.metric, packed) ?: return@forEach
+            if (fact == ChunkFact.BIOME) biome = scan.labels.getOrNull(value.toInt()) else numbers[fact] = value
+        }
+        return ChunkInfo(pos, numbers, biome)
     }
 
     private fun clearChunkInfo() {

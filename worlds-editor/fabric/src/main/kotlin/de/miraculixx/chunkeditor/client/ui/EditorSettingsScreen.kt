@@ -1,5 +1,6 @@
 package de.miraculixx.chunkeditor.client.ui
 
+import de.miraculixx.chunkeditor.data.ChunkFact
 import de.miraculixx.chunkeditor.data.EditorConfig
 import de.miraculixx.chunkeditor.data.EditorSettings
 import de.miraculixx.common.client.ui.NativeDialogs
@@ -21,8 +22,9 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
 
     private val general = SettingsCategory("General").apply { expanded = true }
     private val library = SettingsCategory("Clip Library").apply { expanded = true }
+    private val chunkInfo = SettingsCategory("Chunk Info")
 
-    private val categories = listOf(general, library)
+    private val categories = listOf(general, chunkInfo, library)
 
     private lateinit var list: SettingsList
 
@@ -54,6 +56,7 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
         val defaults = EditorSettings()
         settings.libraryDir = defaults.libraryDir
         settings.skipOpenWarning = defaults.skipOpenWarning
+        settings.chunkInfo = defaults.chunkInfo
         list.rebuild()
     }
 
@@ -61,6 +64,12 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
         general -> listOf(
             list.ToggleRow("Skip Opening Warnings", settings.skipOpenWarning) { settings.skipOpenWarning = it },
         )
+
+        chunkInfo -> ChunkFact.entries.map { fact ->
+            list.CheckRow(fact.title, fact.name in settings.chunkInfo) { shown ->
+                settings.chunkInfo = if (shown) settings.chunkInfo + fact.name else settings.chunkInfo - fact.name
+            }
+        }
 
         else -> listOf(
             list.TextRow("Change Folder", shorten(EditorConfig.libraryDir().toString()), Component.literal("Select")) {

@@ -4,6 +4,7 @@ import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.CLIP_FILE
 import de.miraculixx.chunkeditor.data.ChunkClips
 import de.miraculixx.chunkeditor.data.ClipImportOptions
+import de.miraculixx.chunkeditor.data.ChunkFact
 import de.miraculixx.chunkeditor.data.ChunkInfo
 import de.miraculixx.chunkeditor.data.ClipInfo
 import de.miraculixx.chunkeditor.data.EditorBackend
@@ -69,8 +70,10 @@ class RemoteBackend(hello: Hello) : EditorBackend {
     override suspend fun heightBounds(dimension: WorldDimension, pos: ChunkPos): IntRange? =
         Bodies.readRange(ClientNet.request(C2S.HEIGHT_BOUNDS, Bodies.chunkRequest(dimension, pos)))
 
-    override suspend fun chunkInfo(dimension: WorldDimension, pos: ChunkPos): ChunkInfo =
-        Bodies.readChunkInfo(ClientNet.request(C2S.CHUNK_INFO, Bodies.chunkRequest(dimension, pos)), pos)
+    override suspend fun chunkInfo(dimension: WorldDimension, pos: ChunkPos, facts: Set<ChunkFact>, minY: Int): ChunkInfo =
+        Bodies.readChunkInfo(
+            ClientNet.request(C2S.CHUNK_INFO, Bodies.chunkInfoRequest(dimension, pos, facts, minY)), pos,
+        )
 
     override suspend fun render(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?): RegionPixels? =
         Bodies.readPixels(ClientNet.request(C2S.RENDER, Bodies.renderRequest(dimension, rx, rz, step, maxY)))

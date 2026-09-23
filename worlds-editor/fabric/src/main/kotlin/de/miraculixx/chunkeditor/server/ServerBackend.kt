@@ -2,6 +2,8 @@ package de.miraculixx.chunkeditor.server
 
 import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.ChunkClipExport
+import de.miraculixx.chunkeditor.data.ChunkFact
+import de.miraculixx.chunkeditor.data.ChunkInfo
 import de.miraculixx.chunkeditor.data.ChunkClipImport
 import de.miraculixx.chunkeditor.data.ClipExportResult
 import de.miraculixx.chunkeditor.data.ClipFootprint
@@ -69,7 +71,8 @@ class ServerBackend(private val server: MinecraftServer, private val by: String)
     override suspend fun heightBounds(dimension: WorldDimension, pos: ChunkPos) =
         ChunkRegions.heightBounds(dimension, pos)
 
-    override suspend fun chunkInfo(dimension: WorldDimension, pos: ChunkPos) = ChunkFacts.read(dimension, pos)
+    override suspend fun chunkInfo(dimension: WorldDimension, pos: ChunkPos, facts: Set<ChunkFact>, minY: Int): ChunkInfo =
+        ChunkFacts.read(dimension, pos, facts, minY)
 
     override suspend fun render(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?) =
         ChunkMapRenderer.renderRegion(dimension, rx, rz, step, maxY)

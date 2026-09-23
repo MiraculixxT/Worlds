@@ -212,8 +212,10 @@ object EditorService {
                 C2S.CHUNK_INFO -> Bodies.read(body) { buf ->
                     val dimension = backend.dimension(buf.readUtf()) ?: return@read fail(player, request, DIMENSION_GONE)
                     val pos = ChunkPos(buf.readInt(), buf.readInt())
+                    val minY = buf.readInt()
+                    val facts = Bodies.readFacts(buf.readVarInt())
                     onDimension(dimension) {
-                        reply(player, request, Bodies.writeChunkInfo(backend.chunkInfo(dimension, pos)))
+                        reply(player, request, Bodies.writeChunkInfo(backend.chunkInfo(dimension, pos, facts, minY)))
                     }
                 }
 

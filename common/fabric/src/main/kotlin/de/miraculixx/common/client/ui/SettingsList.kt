@@ -6,6 +6,7 @@ import net.minecraft.client.gui.Font
 import net.minecraft.client.gui.GuiGraphicsExtractor
 import net.minecraft.client.gui.components.AbstractWidget
 import net.minecraft.client.gui.components.Button
+import net.minecraft.client.gui.components.Checkbox
 import net.minecraft.client.gui.components.ContainerObjectSelectionList
 import net.minecraft.client.gui.components.CycleButton
 import net.minecraft.client.gui.components.EditBox
@@ -206,6 +207,26 @@ class SettingsList(
             drawLabel(graphics)
             button.x = contentRight - button.width
             button.y = widgetY()
+            extractWidgets(graphics, mouseX, mouseY, partialTick)
+        }
+    }
+
+    inner class CheckRow(
+        label: String,
+        initial: Boolean,
+        onSet: (Boolean) -> Unit,
+    ) : Row(label, INDENT) {
+        private val box = Checkbox.builder(Component.empty(), minecraft.font)
+            .selected(initial).onValueChange { _, value -> onSet(value) }.build()
+
+        override fun widgets(): List<AbstractWidget> = listOf(box)
+
+        override fun extractContent(
+            graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, hovered: Boolean, partialTick: Float,
+        ) {
+            drawLabel(graphics)
+            box.x = contentRight - box.width
+            box.y = contentY + (contentHeight - box.height) / 2
             extractWidgets(graphics, mouseX, mouseY, partialTick)
         }
     }
