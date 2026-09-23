@@ -1564,7 +1564,7 @@ internal class ChunkMapScreen(
         }
     }
 
-    /** `<overlay>: <min> gradient <max>` right aligned */
+    /** `<overlay>: <min> gradient <max> (<hovered chunk>)` right aligned */
     private fun drawOverlayLegend(
         graphics: GuiGraphicsExtractor, right: Int, y: Int, minX: Int, hovered: Long?,
     ): Boolean {
@@ -1574,7 +1574,9 @@ internal class ChunkMapScreen(
         val name = "${mode.label}:"
         val low = mode.format(overlayMin)
         val high = mode.format(overlayMax)
-        var x = right - (font.width(name) + font.width(low) + font.width(high) + LEGEND_W + 12)
+        val current = hovered?.let { scan.value(mode.metric, it) }
+            ?.let { "(${mode.format(mode.value(it, worldTime, overlayNow))})" } ?: "(–)"
+        var x = right - (font.width(name) + font.width(low) + font.width(high) + font.width(current) + LEGEND_W + 16)
         if (x < minX) return false
         graphics.text(font, name, x, y, SUBTEXT_COLOR)
         x += font.width(name) + 4
@@ -1586,6 +1588,7 @@ internal class ChunkMapScreen(
         }
         x += LEGEND_W + 4
         graphics.text(font, high, x, y, -1)
+        graphics.text(font, current, x + font.width(high) + 4, y, SUBTEXT_COLOR)
         return true
     }
 
