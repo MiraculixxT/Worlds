@@ -11,6 +11,7 @@ import de.miraculixx.chunkeditor.data.LocalLibrary
 import de.miraculixx.chunkeditor.data.SelectionCsv
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import de.miraculixx.chunkeditor.data.ChunkFacts
 import de.miraculixx.chunkeditor.data.ChunkMapRenderer
 import de.miraculixx.chunkeditor.data.ChunkRegions
 import de.miraculixx.chunkeditor.data.ChunkScans
@@ -67,6 +68,8 @@ class ServerBackend(private val server: MinecraftServer, private val by: String)
 
     override suspend fun heightBounds(dimension: WorldDimension, pos: ChunkPos) =
         ChunkRegions.heightBounds(dimension, pos)
+
+    override suspend fun chunkInfo(dimension: WorldDimension, pos: ChunkPos) = ChunkFacts.read(dimension, pos)
 
     override suspend fun render(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?) =
         ChunkMapRenderer.renderRegion(dimension, rx, rz, step, maxY)

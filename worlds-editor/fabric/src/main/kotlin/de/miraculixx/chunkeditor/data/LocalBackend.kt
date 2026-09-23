@@ -38,6 +38,8 @@ class LocalBackend(
     override suspend fun heightBounds(dimension: WorldDimension, pos: ChunkPos) =
         ChunkRegions.heightBounds(dimension, pos)
 
+    override suspend fun chunkInfo(dimension: WorldDimension, pos: ChunkPos) = ChunkFacts.read(dimension, pos)
+
     override suspend fun render(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?) =
         ChunkMapRenderer.renderRegion(dimension, rx, rz, step, maxY)
 

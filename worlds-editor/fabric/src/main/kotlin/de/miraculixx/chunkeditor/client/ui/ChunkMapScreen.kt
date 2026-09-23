@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.NativeImage
 import net.minecraft.core.Registry
 import net.minecraft.world.level.biome.Biome
 import de.miraculixx.chunkeditor.Constants
+import de.miraculixx.chunkeditor.data.ChunkInfo
 import de.miraculixx.chunkeditor.data.ChunkMetric
 import de.miraculixx.chunkeditor.data.ChunkOverlay
 import de.miraculixx.chunkeditor.data.ChunkScan
@@ -82,6 +83,11 @@ private val SETTINGS_SPRITE = Identifier.fromNamespaceAndPath(Constants.MOD_ID, 
 /** The two-row info bar under the map: coordinates + zoom, then the world summary */
 private const val INFO_H = 30
 private const val INFO_ROW_H = 13
+
+/** The box one clicked chunk gets */
+private const val CHUNK_BOX_PAD = 6
+private const val CHUNK_BOX_GAP = 8
+private const val CHUNK_BOX_ROW_GAP = 2
 
 /** Widest value each coordinate field can ever hold, the last step of [COORD_TIERS] */
 private const val BLOCK_EXTREME = "-30000000"
@@ -215,6 +221,13 @@ internal class ChunkMapScreen(
 
     private val selected = LongOpenHashSet()
     private val unreadable = LongOpenHashSet()
+
+    /** Chunk box */
+    private var infoChunk: ChunkPos? = null
+    private var infoX = 0
+    private var infoY = 0
+    private val chunkInfos = HashMap<Long, ChunkInfo>()
+    private val infoLoading = LongOpenHashSet()
 
     /** Renders that landed before the biome colors */
     private val pendingTerrain = HashMap<Long, RegionPixels>()
@@ -814,6 +827,7 @@ internal class ChunkMapScreen(
         yCut = DEFAULT_Y_MAX
         indices.clear()
         unreadable.clear()
+        clearChunkInfo()
         rendering.clear()
         coarseRendering.clear()
         dropTextures()
@@ -1066,6 +1080,7 @@ internal class ChunkMapScreen(
     private fun invalidateScan() {
         cancelScan()
         scan.clear()
+        clearChunkInfo()
         overlayReady = false
         overlayTextures.releaseAll()
         if (overlayVisible) ensureOverlay()
@@ -1238,6 +1253,7 @@ internal class ChunkMapScreen(
 
         drawHeightBar(graphics, mouseX, mouseY)
         drawInfo(graphics, mouseX, mouseY)
+        drawChunkInfo(graphics)
 
         dimensionPicker.renderOverlay(graphics, font, mouseX, mouseY)
         menus.forEach { it.renderOverlay(graphics, font, mouseX, mouseY) }
@@ -1608,6 +1624,97 @@ internal class ChunkMapScreen(
         return true
     }
 
+    /** What a clicked chunk holds, pinned beside the click on whichever side has room */
+    private fun drawChunkInfo(graphics: GuiGraphicsExtractor) {
+        val pos = infoChunk ?: return
+        val info = chunkInfos[pos.pack()]
+        val now = System.currentTimeMillis() / 1000
+        val header = "${I18n.get("chunkeditor.map.chunk")} ${pos.x}, ${pos.z} " +
+                "(${pos.regionX}, ${pos.regionZ})"
+        val rows = listOf(
+            ChunkOverlay.INHABITED_TIME.label to infoValue(info) {
+                it.inhabitedTicks?.let { ticks -> ChunkOverlay.INHABITED_TIME.format(ticks) }
+            },
+            ChunkOverlay.LAST_MODIFIED.label to infoValue(info) {
+                it.lastWritten?.let { stamp ->
+                    ChunkOverlay.LAST_MODIFIED.format(ChunkOverlay.LAST_MODIFIED.value(stamp, worldTime, now))
+                }
+            },
+            ChunkOverlay.ENTITIES.label to infoValue(info) { it.entities?.toString() },
+        )
+        val labelW = rows.maxOf { font.width("${it.first}:") }
+        val valueW = rows.maxOf { font.width(it.second) }
+        val lines = rows.size + 1
+        val boxW = CHUNK_BOX_PAD * 2 + max(font.width(header), labelW + 6 + valueW)
+        val boxH = CHUNK_BOX_PAD * 2 + lines * font.lineHeight + (lines - 1) * CHUNK_BOX_ROW_GAP
+        val left = place(infoX, boxW, mapLeft() + 1, mapRight() - 1)
+        val top = place(infoY, boxH, mapTop() + 1, mapBottom() - 1)
+        drawBox(graphics, left, top, left + boxW, top + boxH)
+        var y = top + CHUNK_BOX_PAD
+        graphics.text(font, header, left + CHUNK_BOX_PAD, y, -1)
+        y += font.lineHeight + CHUNK_BOX_ROW_GAP
+        rows.forEach { (label, value) ->
+            graphics.text(font, "$label:", left + CHUNK_BOX_PAD, y, SUBTEXT_COLOR)
+            graphics.text(font, value, left + CHUNK_BOX_PAD + labelW + 6, y, -1)
+            y += font.lineHeight + CHUNK_BOX_ROW_GAP
+        }
+    }
+
+    private fun place(anchor: Int, size: Int, from: Int, to: Int): Int {
+        val behind = anchor + CHUNK_BOX_GAP
+        val start = if (behind + size <= to) behind else anchor - CHUNK_BOX_GAP - size
+        return start.coerceIn(from, (to - size).coerceAtLeast(from))
+    }
+
+    private fun infoValue(info: ChunkInfo?, pick: (ChunkInfo) -> String?): String =
+        if (info == null) "…" else pick(info) ?: "–"
+
+    private fun openChunkInfo(pos: ChunkPos, x: Double, y: Double) {
+        if (!exists(pos)) {
+            infoChunk = null
+            return
+        }
+        infoChunk = pos
+        infoX = x.roundToInt()
+        infoY = y.roundToInt()
+        val packed = pos.pack()
+        if (chunkInfos.containsKey(packed)) return
+        fromScan(pos)?.let {
+            chunkInfos[packed] = it
+            return
+        }
+        val dim = dimension ?: return
+        if (!infoLoading.add(packed)) return
+        val generation = loadGen
+        Constants.SCOPE.launch {
+            val read = runCatching { backend.chunkInfo(dim, pos) }
+                .onFailure { Constants.LOG.warn("Failed to read chunk {}: {}", pos, it.message) }
+                .getOrNull()
+            minecraft.execute {
+                infoLoading.remove(packed)
+                if (generation == loadGen && read != null) chunkInfos[packed] = read
+            }
+        }
+    }
+
+    /** A pass over the whole dimension already holds every number the box wants */
+    private fun fromScan(pos: ChunkPos): ChunkInfo? {
+        if (!scan.has(ScanSource.FIELDS) || !scan.has(ScanSource.HEADER) || !scan.has(ScanSource.ENTITIES)) return null
+        val packed = pos.pack()
+        return ChunkInfo(
+            pos,
+            scan.value(ChunkMetric.INHABITED_TIME, packed),
+            scan.value(ChunkMetric.TIMESTAMP, packed),
+            (scan.value(ChunkMetric.ENTITY_COUNT, packed) ?: 0L).toInt(),
+        )
+    }
+
+    private fun clearChunkInfo() {
+        infoChunk = null
+        chunkInfos.clear()
+        infoLoading.clear()
+    }
+
     private fun drawZoomSlider(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int) {
         val trackY = sliderY - SLIDER_TRACK_H / 2
         graphics.fill(sliderX1, trackY, sliderX2, trackY + SLIDER_TRACK_H, TRACK_COLOR)
@@ -1910,6 +2017,7 @@ internal class ChunkMapScreen(
     override fun mouseClicked(event: MouseButtonEvent, doubleClick: Boolean): Boolean {
         val x = event.x()
         val y = event.y()
+        infoChunk = null
         if (dimensionPicker.mouseClicked(x, y)) return true
         if (menus.any { it.mouseClicked(x, y) }) return true
         if (pasteClip != null) {
@@ -1986,7 +2094,9 @@ internal class ChunkMapScreen(
         if (panning) {
             panning = false
             // A press that never moved is a click on one chunk, not a pan.
-            if (!moved && inMap(event.x(), event.y())) toggle(chunkAt(event.x(), event.y()))
+            if (!moved && inMap(event.x(), event.y())) {
+                openChunkInfo(chunkAt(event.x(), event.y()), event.x(), event.y())
+            }
             return true
         }
         val from = dragFrom
@@ -2005,6 +2115,10 @@ internal class ChunkMapScreen(
         if (menus.any { it.keyPressed(event) }) return true
         if (pasteClip != null && event.isEscape) {
             cancelPaste()
+            return true
+        }
+        if (infoChunk != null && event.isEscape) {
+            infoChunk = null
             return true
         }
         // Same guards the menu items carry
@@ -2039,6 +2153,7 @@ internal class ChunkMapScreen(
             return true
         }
         if (!inMap(mouseX, mouseY)) return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY)
+        infoChunk = null
         val anchorX = blockX(mouseX)
         val anchorZ = blockZ(mouseY)
         scale = zoom(scale, scrollY)

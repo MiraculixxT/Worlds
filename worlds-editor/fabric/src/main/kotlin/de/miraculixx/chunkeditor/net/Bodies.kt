@@ -1,5 +1,6 @@
 package de.miraculixx.chunkeditor.net
 
+import de.miraculixx.chunkeditor.data.ChunkInfo
 import de.miraculixx.chunkeditor.data.ChunkMetric
 import de.miraculixx.chunkeditor.data.ClipEntry
 import de.miraculixx.chunkeditor.data.ClipExportResult
@@ -152,7 +153,7 @@ object Bodies {
         buf.writeInt(rz)
     }
 
-    fun heightRequest(dimension: WorldDimension, pos: ChunkPos): ByteArray = write { buf ->
+    fun chunkRequest(dimension: WorldDimension, pos: ChunkPos): ByteArray = write { buf ->
         buf.writeUtf(dimensionId(dimension))
         buf.writeInt(pos.x)
         buf.writeInt(pos.z)
@@ -247,6 +248,24 @@ object Bodies {
         val size = buf.readLong()
         RegionIndex(rx, rz, BitSet.valueOf(buf.readLongArray()), size)
     }
+
+    fun writeChunkInfo(info: ChunkInfo): ByteArray = write { buf ->
+        writeOptional(buf, info.inhabitedTicks)
+        writeOptional(buf, info.lastWritten)
+        writeOptional(buf, info.entities?.toLong())
+    }
+
+    /** @param pos what was asked for, the answer only carries the numbers */
+    fun readChunkInfo(bytes: ByteArray, pos: ChunkPos): ChunkInfo = read(bytes) { buf ->
+        ChunkInfo(pos, readOptional(buf), readOptional(buf), readOptional(buf)?.toInt())
+    }
+
+    private fun writeOptional(buf: FriendlyByteBuf, value: Long?) {
+        buf.writeBoolean(value != null)
+        if (value != null) buf.writeLong(value)
+    }
+
+    private fun readOptional(buf: FriendlyByteBuf): Long? = if (buf.readBoolean()) buf.readLong() else null
 
     fun writeRange(range: IntRange?): ByteArray = write { buf ->
         buf.writeBoolean(range != null)

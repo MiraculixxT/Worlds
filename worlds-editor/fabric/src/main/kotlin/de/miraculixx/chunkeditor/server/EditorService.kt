@@ -209,6 +209,14 @@ object EditorService {
                     }
                 }
 
+                C2S.CHUNK_INFO -> Bodies.read(body) { buf ->
+                    val dimension = backend.dimension(buf.readUtf()) ?: return@read fail(player, request, DIMENSION_GONE)
+                    val pos = ChunkPos(buf.readInt(), buf.readInt())
+                    onDimension(dimension) {
+                        reply(player, request, Bodies.writeChunkInfo(backend.chunkInfo(dimension, pos)))
+                    }
+                }
+
                 C2S.CONFLICTS -> Bodies.read(body) { buf ->
                     val dimension = backend.dimension(buf.readUtf()) ?: return@read fail(player, request, DIMENSION_GONE)
                     val clipOrigin = ChunkPos(buf.readInt(), buf.readInt())

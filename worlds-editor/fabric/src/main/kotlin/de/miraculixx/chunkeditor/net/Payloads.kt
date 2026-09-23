@@ -6,7 +6,7 @@ import net.minecraft.network.codec.StreamCodec
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload
 import net.minecraft.resources.Identifier
 
-const val PROTOCOL_VERSION = 8
+const val PROTOCOL_VERSION = 9
 
 /**
  * The one packet handling all communication to avoid having 100 registered packets
@@ -104,6 +104,7 @@ object C2S {
     const val CLIP_FILES = 27
     const val CLIP_DOWNLOAD = 28
     const val ENTITIES = 29
+    const val CHUNK_INFO = 30
 }
 
 /** Clientbound kinds */

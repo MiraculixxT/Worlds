@@ -30,6 +30,9 @@ interface EditorBackend {
 
     suspend fun heightBounds(dimension: WorldDimension, pos: ChunkPos): IntRange?
 
+    /** Everything one clicked chunk holds */
+    suspend fun chunkInfo(dimension: WorldDimension, pos: ChunkPos): ChunkInfo
+
     suspend fun render(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?): RegionPixels?
 
     suspend fun scan(
