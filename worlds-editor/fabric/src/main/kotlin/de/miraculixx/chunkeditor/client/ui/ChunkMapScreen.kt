@@ -155,6 +155,8 @@ private const val LEGEND_W = 40
 private const val PRESENT_COLOR = 0x70A8B4C8
 private const val UNREADABLE_COLOR = 0xB0C05050.toInt()
 private const val SELECTED_COLOR = 0x9033B5E5.toInt()
+private const val GHOST_SELECTED_COLOR = 0x5033B5E5
+private const val MAX_GHOST_SELECT = 500_000
 private const val GRID_COLOR = 0x30FFFFFF
 private const val REGION_LINE_COLOR = 0x80FFFFFF.toInt()
 
@@ -224,6 +226,10 @@ internal class ChunkMapScreen(
     private var loadGen = 0
 
     private val selected = LongOpenHashSet()
+
+    /** Selected chunks that are not generated */
+    private val ghost = LongOpenHashSet()
+    private var includeUngenerated = false
     private val unreadable = LongOpenHashSet()
 
     /** Chunk box */
@@ -380,6 +386,11 @@ internal class ChunkMapScreen(
         MenuEntry.Item(Component.translatable("chunkeditor.map.clear"), SC_CLEAR.label) { clearSelection() },
         MenuEntry.Separator,
         MenuEntry.Item(Component.translatable("chunkeditor.map.trim"), SC_TRIM.label) { openTrim() },
+        MenuEntry.Separator,
+        MenuEntry.Item(
+            Component.translatable("chunkeditor.map.include_ungenerated"),
+            checked = { includeUngenerated },
+        ) { toggleUngenerated() },
     )
 
     /** Things to edit selected chunks */
@@ -644,6 +655,7 @@ internal class ChunkMapScreen(
                     return@execute
                 }
                 selected.clear()
+                ghost.clear()
                 indices.values.forEach { region ->
                     ChunkRegions.forEachChunk(region) { pos ->
                         val listed = parsed.chunks.contains(pos.pack())
@@ -788,6 +800,7 @@ internal class ChunkMapScreen(
                 totalChunks = indices.values.sumOf { it.count }
                 totalBytes = indices.values.sumOf { it.bytes }
                 selected.clear()
+                ghost.clear()
                 if (result is ImportResult.Success) {
                     footprint.chunks.forEach {
                         selected.add(
@@ -811,6 +824,7 @@ internal class ChunkMapScreen(
     private fun switchDimension(value: WorldDimension) {
         dimension = value
         selected.clear()
+        ghost.clear()
         centerX = 0.0
         centerZ = 0.0
         loadDimension(value)
@@ -924,6 +938,7 @@ internal class ChunkMapScreen(
 
     private fun selectAll() {
         indices.values.forEach { ChunkRegions.forEachChunk(it) { pos -> selected.add(pos.pack()) } }
+        fillGhost { true }
         onSelectionChanged()
     }
 
@@ -936,12 +951,60 @@ internal class ChunkMapScreen(
         }
         selected.clear()
         selected.addAll(inverted)
+        val wasGhost = if (ghost.isEmpty()) null else LongOpenHashSet(ghost)
+        ghost.clear()
+        fillGhost { wasGhost?.contains(it.pack()) != true }
         onSelectionChanged()
     }
 
     private fun clearSelection() {
         selected.clear()
+        ghost.clear()
         onSelectionChanged()
+    }
+
+    private fun toggleUngenerated() {
+        includeUngenerated = !includeUngenerated
+        if (includeUngenerated || ghost.isEmpty()) return
+        ghost.clear()
+        onSelectionChanged()
+    }
+
+    /** Every chunk in [bounds] that [matches] but doesnt exist */
+    private fun fillGhost(bounds: ChunkBounds? = null, matches: (ChunkPos) -> Boolean) {
+        if (!includeUngenerated) return
+        val box = bounds ?: generatedBounds() ?: return
+        var capped = false
+        rows@ for (z in box.minZ..box.maxZ) {
+            for (x in box.minX..box.maxX) {
+                val pos = ChunkPos(x, z)
+                if (exists(pos) || !matches(pos)) continue
+                if (ghost.size >= MAX_GHOST_SELECT) {
+                    capped = true
+                    break@rows
+                }
+                ghost.add(pos.pack())
+            }
+        }
+        if (capped) clipMessage = I18n.get("chunkeditor.map.ungenerated_capped", MAX_GHOST_SELECT)
+    }
+
+    /** The generated chunks bounding box, what an op with no reach of its own is held to */
+    private fun generatedBounds(): ChunkBounds? {
+        if (indices.isEmpty()) return null
+        var minX = Int.MAX_VALUE
+        var minZ = Int.MAX_VALUE
+        var maxX = Int.MIN_VALUE
+        var maxZ = Int.MIN_VALUE
+        indices.values.forEach { region ->
+            ChunkRegions.forEachChunk(region) { pos ->
+                minX = min(minX, pos.x)
+                minZ = min(minZ, pos.z)
+                maxX = max(maxX, pos.x)
+                maxZ = max(maxZ, pos.z)
+            }
+        }
+        return if (minX > maxX) null else ChunkBounds(minX, minZ, maxX, maxZ)
     }
 
     /** Refresh from disk, or ask the server to save before refreshing */
@@ -1095,16 +1158,23 @@ internal class ChunkMapScreen(
         val spawnChunk = ChunkPos(spawn.x shr 4, spawn.z shr 4)
         indices.values.forEach { region ->
             ChunkRegions.forEachChunk(region) { pos ->
-                val packed = pos.pack()
-                val hit = (criteria.spawnDistance?.contains(pos, spawnChunk) != false) &&
-                    (criteria.maxInhabitedTicks == null ||
-                        (scan.value(ChunkMetric.INHABITED_TIME, packed) ?: 0L) < criteria.maxInhabitedTicks) &&
-                    (criteria.olderThanTicks == null ||
-                        worldTime - (scan.value(ChunkMetric.LAST_UPDATE, packed) ?: 0L) > criteria.olderThanTicks)
-                if (hit) selected.add(packed)
+                if (matches(criteria, pos, spawnChunk)) selected.add(pos.pack())
             }
         }
+        // A closed range carries its own reach, so it fills past the last real chunk
+        fillGhost(criteria.spawnDistance?.max?.let { around(spawnChunk, it) }) {
+            matches(criteria, it, spawnChunk)
+        }
         onSelectionChanged()
+    }
+
+    private fun matches(criteria: TrimCriteria, pos: ChunkPos, spawnChunk: ChunkPos): Boolean {
+        val packed = pos.pack()
+        return (criteria.spawnDistance?.contains(pos, spawnChunk) != false) &&
+            (criteria.maxInhabitedTicks == null ||
+                (scan.value(ChunkMetric.INHABITED_TIME, packed) ?: 0L) < criteria.maxInhabitedTicks) &&
+            (criteria.olderThanTicks == null ||
+                worldTime - (scan.value(ChunkMetric.LAST_UPDATE, packed) ?: 0L) > criteria.olderThanTicks)
     }
 
     private fun onSelectionChanged() {
@@ -1175,6 +1245,7 @@ internal class ChunkMapScreen(
                 totalChunks = indices.values.sumOf { it.count }
                 totalBytes = indices.values.sumOf { it.bytes }
                 selected.clear()
+                ghost.clear()
                 unreadable.clear()
                 dropTextures()
                 // A render started before the delete would land with the deleted chunks still on it.
@@ -1247,6 +1318,7 @@ internal class ChunkMapScreen(
         // every frame would rebuild the evicted ones
         val perChunk = visible.size <= OVERLAY_CACHE
         visible.forEach { region -> drawRegion(graphics, region, withTerrain, perChunk) }
+        if (perChunk) drawGhostRegions(graphics)
         pumpCoarse(visible)
         drawGrid(graphics, visible)
         drawPlayers(graphics)
@@ -1263,14 +1335,34 @@ internal class ChunkMapScreen(
         menus.forEach { it.renderOverlay(graphics, font, mouseX, mouseY) }
     }
 
-    private fun visibleRegions(): List<RegionIndex> {
-        if (indices.isEmpty()) return emptyList()
+    /**
+     * Ungenerated chunks can sit in regions with no file at all, which [drawRegion] never reaches
+     */
+    private fun drawGhostRegions(graphics: GuiGraphicsExtractor) {
+        if (ghost.isEmpty()) return
+        forEachVisibleRegion { rx, rz ->
+            if (indices.containsKey(key(rx, rz))) return@forEachVisibleRegion
+            val id = selectionTexture(rx, rz) ?: return@forEachVisibleRegion
+            val x = screenX(rx.toDouble() * REGION_BLOCKS).roundToInt()
+            val y = screenY(rz.toDouble() * REGION_BLOCKS).roundToInt()
+            val w = screenX((rx + 1).toDouble() * REGION_BLOCKS).roundToInt() - x
+            val h = screenY((rz + 1).toDouble() * REGION_BLOCKS).roundToInt() - y
+            if (w > 0 && h > 0) blit(graphics, id, x, y, w, h, REGION_SIZE)
+        }
+    }
+
+    private inline fun forEachVisibleRegion(action: (Int, Int) -> Unit) {
         val minRx = floor(blockX(mapLeft().toDouble()) / REGION_BLOCKS).toInt()
         val maxRx = floor(blockX(mapRight().toDouble()) / REGION_BLOCKS).toInt()
         val minRz = floor(blockZ(mapTop().toDouble()) / REGION_BLOCKS).toInt()
         val maxRz = floor(blockZ(mapBottom().toDouble()) / REGION_BLOCKS).toInt()
+        for (rz in minRz..maxRz) for (rx in minRx..maxRx) action(rx, rz)
+    }
+
+    private fun visibleRegions(): List<RegionIndex> {
+        if (indices.isEmpty()) return emptyList()
         val found = ArrayList<RegionIndex>()
-        for (rz in minRz..maxRz) for (rx in minRx..maxRx) indices[key(rx, rz)]?.let { found.add(it) }
+        forEachVisibleRegion { rx, rz -> indices[key(rx, rz)]?.let { found.add(it) } }
         return found
     }
 
@@ -1306,7 +1398,7 @@ internal class ChunkMapScreen(
         }
         if (perChunk) {
             if (overlayVisible) overlayTexture(region)?.let { blit(graphics, it, x, y, w, h, REGION_SIZE) }
-            selectionTexture(region)?.let { blit(graphics, it, x, y, w, h, REGION_SIZE) }
+            selectionTexture(region.rx, region.rz)?.let { blit(graphics, it, x, y, w, h, REGION_SIZE) }
         }
     }
 
@@ -1554,8 +1646,9 @@ internal class ChunkMapScreen(
         val selectedLabel = "${I18n.get("chunkeditor.map.selected")}:"
         graphics.text(font, selectedLabel, MARGIN + 6, secondY, SUBTEXT_COLOR)
         val countX = MARGIN + 6 + font.width(selectedLabel) + 4
-        graphics.text(font, selected.size.toString(), countX, secondY, -1)
-        val summaryX = countX + font.width(reservedCount(selected.size)) + 14
+        val count = if (ghost.isEmpty()) selected.size.toString() else "${selected.size} (+${ghost.size})"
+        graphics.text(font, count, countX, secondY, -1)
+        val summaryX = countX + max(font.width(reservedCount(selected.size)), font.width(count)) + 14
 
         val summary = when {
             dimension == null -> I18n.get("chunkeditor.map.no_regions")
@@ -1792,25 +1885,29 @@ internal class ChunkMapScreen(
     }
 
     /** Null when nothing in the region is selected, so the common case costs no blit at all. */
-    private fun selectionTexture(region: RegionIndex): Identifier? {
-        if (selected.isEmpty()) return null
-        val regionKey = key(region.rx, region.rz)
+    private fun selectionTexture(rx: Int, rz: Int): Identifier? {
+        if (selected.isEmpty() && ghost.isEmpty()) return null
+        val regionKey = key(rx, rz)
         selection[regionKey]?.let { return it }
         var any = false
         val image = NativeImage(NativeImage.Format.RGBA, REGION_SIZE, REGION_SIZE, false)
         for (z in 0 until REGION_SIZE) {
             for (x in 0 until REGION_SIZE) {
-                val pos = ChunkPos(region.rx * REGION_SIZE + x, region.rz * REGION_SIZE + z)
-                val on = selected.contains(pos.pack())
-                if (on) any = true
-                image.setPixelABGR(x, z, if (on) abgr(SELECTED_COLOR) else 0)
+                val packed = ChunkPos.pack(rx * REGION_SIZE + x, rz * REGION_SIZE + z)
+                val color = when {
+                    selected.contains(packed) -> SELECTED_COLOR
+                    ghost.contains(packed) -> GHOST_SELECTED_COLOR
+                    else -> 0
+                }
+                if (color != 0) any = true
+                image.setPixelABGR(x, z, abgr(color))
             }
         }
         if (!any) {
             image.close()
             return null
         }
-        return register("chunkmap/selection/${region.rx}_${region.rz}", image).also { selection[regionKey] = it }
+        return register("chunkmap/selection/${rx}_${rz}", image).also { selection[regionKey] = it }
     }
 
     /** The heatmap of a region, a pixel per chunk. Null until the scan and its range are in */
@@ -2170,8 +2267,8 @@ internal class ChunkMapScreen(
     }
 
     private fun toggle(pos: ChunkPos) {
-        if (!exists(pos)) return
-        if (!selected.remove(pos.pack())) selected.add(pos.pack())
+        val set = setFor(pos) ?: return
+        if (!set.remove(pos.pack())) set.add(pos.pack())
         onSelectionChanged()
     }
 
@@ -2179,11 +2276,18 @@ internal class ChunkMapScreen(
         for (z in min(from.z, to.z)..max(from.z, to.z)) {
             for (x in min(from.x, to.x)..max(from.x, to.x)) {
                 val pos = ChunkPos(x, z)
-                if (!exists(pos)) continue
-                if (dragRemoves) selected.remove(pos.pack()) else selected.add(pos.pack())
+                val set = setFor(pos) ?: continue
+                if (dragRemoves) set.remove(pos.pack()) else set.add(pos.pack())
             }
         }
         onSelectionChanged()
+    }
+
+    /** Which of the two sets a clicked chunk belongs in, null when it may not be selected at all */
+    private fun setFor(pos: ChunkPos): LongOpenHashSet? = when {
+        exists(pos) -> selected
+        includeUngenerated -> ghost
+        else -> null
     }
 
     private fun exists(pos: ChunkPos) = indices[key(pos.regionX, pos.regionZ)]?.contains(pos) == true
@@ -2245,6 +2349,17 @@ internal class ChunkMapScreen(
         }
     }
 }
+
+/** A chunk rectangle, both corners in it */
+class ChunkBounds(val minX: Int, val minZ: Int, val maxX: Int, val maxZ: Int)
+
+/** The box [radius] chunks around [center], clamped so the corners stay in Int */
+fun around(center: ChunkPos, radius: Int) = ChunkBounds(
+    (center.x.toLong() - radius).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt(),
+    (center.z.toLong() - radius).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt(),
+    (center.x.toLong() + radius).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+    (center.z.toLong() + radius).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+)
 
 data class TrimCriteria(
     val maxInhabitedTicks: Long?,
