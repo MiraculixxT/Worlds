@@ -49,6 +49,7 @@ import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.PlayerFaceExtractor
 import net.minecraft.client.gui.components.Checkbox
 import net.minecraft.client.gui.components.EditBox
+import net.minecraft.client.gui.components.Tooltip
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.client.input.KeyEvent
@@ -1095,8 +1096,7 @@ internal class ChunkMapScreen(
         indices.values.forEach { region ->
             ChunkRegions.forEachChunk(region) { pos ->
                 val packed = pos.pack()
-                val hit = (criteria.minSpawnDistance == null ||
-                    pos.getChessboardDistance(spawnChunk) > criteria.minSpawnDistance) &&
+                val hit = (criteria.spawnDistance?.contains(pos, spawnChunk) != false) &&
                     (criteria.maxInhabitedTicks == null ||
                         (scan.value(ChunkMetric.INHABITED_TIME, packed) ?: 0L) < criteria.maxInhabitedTicks) &&
                     (criteria.olderThanTicks == null ||
@@ -2249,11 +2249,52 @@ internal class ChunkMapScreen(
 data class TrimCriteria(
     val maxInhabitedTicks: Long?,
     val olderThanTicks: Long?,
-    val minSpawnDistance: Int?,
+    val spawnDistance: SpawnRange?,
 ) {
-    val isEmpty get() = maxInhabitedTicks == null && olderThanTicks == null && minSpawnDistance == null
+    val isEmpty get() = maxInhabitedTicks == null && olderThanTicks == null && spawnDistance == null
     val needsScan get() = maxInhabitedTicks != null || olderThanTicks != null
 }
+
+enum class DistanceShape { SQUARE, CIRCULAR }
+
+/**
+ * Parsed from `min`, `min:max` or `min:` / `min:inf` / `min:*`, a blank min being 0.
+ */
+data class SpawnRange(val min: Int, val max: Int?, val shape: DistanceShape) {
+
+    fun contains(pos: ChunkPos, spawn: ChunkPos): Boolean = when (shape) {
+        DistanceShape.SQUARE -> {
+            val distance = pos.getChessboardDistance(spawn)
+            distance >= min && (max == null || distance <= max)
+        }
+
+        DistanceShape.CIRCULAR -> {
+            val dx = (pos.x - spawn.x).toLong()
+            val dz = (pos.z - spawn.z).toLong()
+            val squared = dx * dx + dz * dz
+            squared >= min.toLong() * min && (max == null || squared <= max.toLong() * max)
+        }
+    }
+
+    companion object {
+        private val OPEN = setOf("", "inf", "infinity", "*")
+
+        fun parse(input: String, shape: DistanceShape): SpawnRange? {
+            val parts = input.trim().split(':')
+            if (parts.size > 2) return null
+            val min = parts[0].trim().let { if (it.isEmpty()) 0 else it.toIntOrNull() ?: return null }
+            val raw = parts.getOrNull(1)?.trim()?.lowercase()
+            val max = if (raw == null || raw in OPEN) null else raw.toIntOrNull() ?: return null
+            if (min < 0 || (max != null && max < min)) return null
+            return SpawnRange(min, max, shape)
+        }
+    }
+}
+
+private val SHAPE_SPRITES = mapOf(
+    DistanceShape.SQUARE to Identifier.fromNamespaceAndPath(Constants.MOD_ID, "form/square"),
+    DistanceShape.CIRCULAR to Identifier.fromNamespaceAndPath(Constants.MOD_ID, "form/circle"),
+)
 
 /**
  * The criteria popup. Each row is a checkbox plus a number
@@ -2273,6 +2314,8 @@ internal class ChunkTrimScreen(
     private lateinit var staleValue: EditBox
     private lateinit var distanceBox: Checkbox
     private lateinit var distanceValue: EditBox
+    private lateinit var shapeButton: IconButton
+    private var shape = DistanceShape.SQUARE
 
     override fun init() {
         val left = width / 2 - panelW / 2 + 10
@@ -2297,9 +2340,14 @@ internal class ChunkTrimScreen(
         val stale = row("chunkeditor.trim.stale", "60") {}
         staleBox = stale.first
         staleValue = stale.second
+        val distanceY = y
         val distance = row("chunkeditor.trim.distance", "32") {}
         distanceBox = distance.first
         distanceValue = distance.second
+        shapeButton = addRenderableWidget(
+            IconButton(fieldX - 24, distanceY, 20, 20, shapeName(), { SHAPE_SPRITES.getValue(shape) }) { cycleShape() }
+        )
+        applyShapeTooltip()
 
         panelBottom = y + 40
         addRenderableWidget(
@@ -2317,12 +2365,26 @@ internal class ChunkTrimScreen(
             TrimCriteria(
                 if (inhabitedBox.selected()) minutes(inhabitedValue) else null,
                 if (staleBox.selected()) minutes(staleValue) else null,
-                if (distanceBox.selected()) distanceValue.value.trim().toIntOrNull() else null,
+                if (distanceBox.selected()) SpawnRange.parse(distanceValue.value, shape) else null,
             )
         )
     }
 
     private fun minutes(field: EditBox): Long? = field.value.trim().toLongOrNull()?.times(TICKS_PER_MINUTE)
+
+    private fun cycleShape() {
+        shape = DistanceShape.entries[(shape.ordinal + 1) % DistanceShape.entries.size]
+        shapeButton.message = shapeName()
+        applyShapeTooltip()
+    }
+
+    private fun shapeName() = Component.translatable("chunkeditor.trim.shape.${shape.name.lowercase()}")
+
+    private fun applyShapeTooltip() = shapeButton.setTooltip(
+        Tooltip.create(shapeName().copy().append(CommonComponents.NEW_LINE).append(
+            Component.translatable("chunkeditor.trim.range.hint").withColor(SUBTEXT_COLOR)
+        ))
+    )
 
     override fun extractBackground(graphics: GuiGraphicsExtractor, mouseX: Int, mouseY: Int, partialTick: Float) {
         super.extractBackground(graphics, mouseX, mouseY, partialTick)
