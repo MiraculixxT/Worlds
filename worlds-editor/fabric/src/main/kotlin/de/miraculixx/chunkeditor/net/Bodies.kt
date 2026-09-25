@@ -3,6 +3,9 @@ package de.miraculixx.chunkeditor.net
 import de.miraculixx.chunkeditor.data.ChunkFact
 import de.miraculixx.chunkeditor.data.ChunkInfo
 import de.miraculixx.chunkeditor.data.ChunkMetric
+import de.miraculixx.chunkeditor.data.ChunkyTask
+import de.miraculixx.chunkeditor.data.FitShape
+import de.miraculixx.chunkeditor.data.GenerateOutcome
 import de.miraculixx.chunkeditor.data.ClipEntry
 import de.miraculixx.chunkeditor.data.ClipExportResult
 import de.miraculixx.chunkeditor.data.ClipFootprint
@@ -46,6 +49,7 @@ class Hello(
     val dimensions: List<WorldDimension>,
     val facts: LevelFacts,
     val pendingJobs: Int,
+    val chunky: Boolean,
 )
 
 /** A queued [de.miraculixx.chunkeditor.server.Job] without its chunk list */
@@ -106,6 +110,7 @@ object Bodies {
         }
         writeFacts(buf, hello.facts)
         buf.writeVarInt(hello.pendingJobs)
+        buf.writeBoolean(hello.chunky)
     }
 
     fun readHello(bytes: ByteArray): Hello = read(bytes) { buf ->
@@ -118,7 +123,7 @@ object Bodies {
             val labelKey = buf.readUtf()
             remoteDimension(id, labelKey)
         }
-        Hello(protocol, canRead, canWrite, world, dimensions, readFacts(buf), buf.readVarInt())
+        Hello(protocol, canRead, canWrite, world, dimensions, readFacts(buf), buf.readVarInt(), buf.readBoolean())
     }
 
     /**
@@ -230,6 +235,57 @@ object Bodies {
             buf.writeVarInt(chunks.size)
             chunks.forEach { buf.writeLong(it.pack()) }
         }
+
+    /** @param chunks the exact list for a csv run, `null` lets the shape itself pick the chunks */
+    fun generateRequest(dimension: WorldDimension, task: ChunkyTask, chunks: Collection<ChunkPos>?): ByteArray =
+        write { buf ->
+            buf.writeUtf(dimensionId(dimension))
+            buf.writeVarInt(task.shape.ordinal)
+            buf.writeInt(task.centerChunkX)
+            buf.writeInt(task.centerChunkZ)
+            buf.writeVarInt(task.radiusChunksX)
+            buf.writeVarInt(task.radiusChunksZ)
+            buf.writeBoolean(chunks != null)
+            chunks?.let {
+                buf.writeVarInt(it.size)
+                it.forEach { pos -> buf.writeLong(pos.pack()) }
+            }
+        }
+
+    /** Capped before task starts */
+    fun readGenerateTask(buf: FriendlyByteBuf): ChunkyTask {
+        val shape = FitShape.entries[buf.readVarInt().coerceIn(0, FitShape.entries.lastIndex)]
+        val centerX = buf.readInt()
+        val centerZ = buf.readInt()
+        val radiusX = buf.readVarInt().coerceIn(0, MAX_RADIUS_CHUNKS)
+        val radiusZ = buf.readVarInt().coerceIn(0, MAX_RADIUS_CHUNKS)
+        return ChunkyTask(shape, centerX, centerZ, radiusX, radiusZ)
+    }
+
+    fun readGenerateChunks(buf: FriendlyByteBuf): List<ChunkPos>? {
+        if (!buf.readBoolean()) return null
+        val count = buf.readVarInt()
+        require(count in 0..MAX_GENERATE_CHUNKS) { "Pre-generation list of $count chunks" }
+        return (0 until count).map { ChunkPos.unpack(buf.readLong()) }
+    }
+
+    fun writeGenerate(outcome: GenerateOutcome): ByteArray = write { buf ->
+        when (outcome) {
+            is GenerateOutcome.Started -> {
+                buf.writeBoolean(true)
+                buf.writeVarLong(outcome.chunks)
+            }
+
+            is GenerateOutcome.Failed -> {
+                buf.writeBoolean(false)
+                buf.writeUtf(outcome.key)
+            }
+        }
+    }
+
+    fun readGenerate(bytes: ByteArray): GenerateOutcome = read(bytes) { buf ->
+        if (buf.readBoolean()) GenerateOutcome.Started(buf.readVarLong()) else GenerateOutcome.Failed(buf.readUtf())
+    }
 
     //
     // Results

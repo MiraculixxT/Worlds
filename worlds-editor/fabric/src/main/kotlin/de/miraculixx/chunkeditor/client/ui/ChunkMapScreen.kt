@@ -10,6 +10,9 @@ import de.miraculixx.chunkeditor.data.ChunkMetric
 import de.miraculixx.chunkeditor.data.EditorConfig
 import de.miraculixx.chunkeditor.data.ChunkOverlay
 import de.miraculixx.chunkeditor.data.ChunkScan
+import de.miraculixx.chunkeditor.data.ChunkyFit
+import de.miraculixx.chunkeditor.data.ChunkyTask
+import de.miraculixx.chunkeditor.data.GenerateOutcome
 import de.miraculixx.chunkeditor.data.ChunkRegions
 import de.miraculixx.chunkeditor.data.ClipImportOptions
 import de.miraculixx.chunkeditor.data.ExistingChunks
@@ -431,10 +434,79 @@ internal class ChunkMapScreen(
                 enabled = { selected.isNotEmpty() },
             ) { confirmDelete() },
         )
+        add(
+            MenuEntry.Item(
+                Component.translatable("chunkeditor.pregen.title"),
+                enabled = { selected.isNotEmpty() || ghost.isNotEmpty() },
+            ) { openPregen() },
+        )
 
         if (backend is RemoteBackend) {
             add(MenuEntry.Separator)
             add(MenuEntry.Item(Component.translatable("chunkeditor.jobs.title"), SC_JOBS.label) { openJobs() })
+        }
+    }
+
+    //
+    // Pre-generation
+    //
+
+    /** Chunky runs on a live server, so a local save can only ever look at what it would cost */
+    private fun openPregen() {
+        val dim = dimension ?: return
+        val remote = backend as? RemoteBackend
+        val union = LongOpenHashSet(selected)
+        union.addAll(ghost)
+        val fit = ChunkyFit.best(union) ?: return
+        // Only the ungenerated chunks go in a csv
+        val exactTask = ChunkyFit.boundingSquare(ghost) ?: fit
+        val plan = PregenPlan(
+            dim.name, union.size, ghost.size.toLong(), exactTask, fit,
+            fit.covered - existingInside(fit), fit.covered - union.size,
+            when {
+                remote == null -> "chunkeditor.pregen.error.local"
+                !remote.chunkyAvailable -> "chunkeditor.pregen.error.missing"
+                else -> null
+            },
+        )
+        minecraft.gui.setScreen(
+            PregenScreen(this, plan, ::applyFit) { task, exact ->
+                remote?.let { runGenerate(dim, it, task, exact) }
+            },
+        )
+    }
+
+    private fun existingInside(task: ChunkyTask): Long {
+        var count = 0L
+        indices.values.forEach { index ->
+            ChunkRegions.forEachChunk(index) { pos -> if (task.covers(pos.x, pos.z)) count++ }
+        }
+        return count
+    }
+
+    private fun applyFit(task: ChunkyTask) {
+        minecraft.gui.setScreen(this)
+        includeUngenerated = true
+        selected.clear()
+        ghost.clear()
+        task.forEachChunk { x, z ->
+            val pos = ChunkPos(x, z)
+            if (exists(pos)) selected.add(pos.pack()) else ghost.add(pos.pack())
+        }
+        onSelectionChanged()
+    }
+
+    private fun runGenerate(dim: WorldDimension, remote: RemoteBackend, task: ChunkyTask, exact: Boolean) {
+        minecraft.gui.setScreen(this)
+        val chunks = if (exact) ghost.toLongArray().map { ChunkPos.unpack(it) } else null
+        Constants.SCOPE.launch {
+            val outcome = remote.generate(dim, task, chunks)
+            minecraft.execute {
+                clipMessage = when (outcome) {
+                    is GenerateOutcome.Started -> I18n.get("chunkeditor.pregen.started", outcome.chunks)
+                    is GenerateOutcome.Failed -> I18n.get(outcome.key)
+                }
+            }
         }
     }
 

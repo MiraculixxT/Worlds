@@ -20,6 +20,8 @@ import de.miraculixx.chunkeditor.data.WorldDimension
 import de.miraculixx.chunkeditor.data.ClipExportResult
 import de.miraculixx.chunkeditor.data.ClipFootprint
 import de.miraculixx.chunkeditor.data.ClipLibrary
+import de.miraculixx.chunkeditor.data.ChunkyTask
+import de.miraculixx.chunkeditor.data.GenerateOutcome
 import de.miraculixx.chunkeditor.net.Bodies
 import de.miraculixx.chunkeditor.net.LibraryBodies
 import de.miraculixx.chunkeditor.net.C2S
@@ -60,6 +62,8 @@ class RemoteBackend(hello: Hello) : EditorBackend {
     override val writesAreQueued = true
 
     val worldName: String = hello.worldName
+
+    val chunkyAvailable: Boolean = hello.chunky
 
     override suspend fun regionList(dimension: WorldDimension): List<Pair<Int, Int>> =
         Bodies.readRegionList(ClientNet.request(C2S.REGION_LIST, Bodies.dimensionRequest(dimension)))
@@ -144,6 +148,15 @@ class RemoteBackend(hello: Hello) : EditorBackend {
         )
         return ImportResult.Success(queued, 0, 0)
     }
+
+    /** @param chunks the exact list for a csv run, `null` runs [task] as the shape it is */
+    suspend fun generate(
+        dimension: WorldDimension,
+        task: ChunkyTask,
+        chunks: Collection<ChunkPos>?,
+    ): GenerateOutcome = Bodies.readGenerate(
+        ClientNet.request(C2S.GENERATE, Bodies.generateRequest(dimension, task, chunks)),
+    )
 
     suspend fun jobs(): JobQueue = Bodies.readJobQueue(ClientNet.request(C2S.JOB_LIST, ByteArray(0)))
 

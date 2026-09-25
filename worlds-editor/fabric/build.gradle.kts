@@ -8,12 +8,18 @@ version = property("chunkEditorVersion") as String
 base.archivesName = "chunk-editor-fabric"
 
 
+repositories {
+    maven("https://repo.codemc.io/repository/maven-public/") { name = "CodeMC" }
+}
+
 dependencies {
     implementation(project(":common:common-fabric"))
     include(project(":common:common-fabric"))
 
     // Runtime comes from fabric-language-kotlin / KotlinLangForge, so this is not JiJ'd.
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.+")
+
+    compileOnly("org.popcraft:chunky-common:$CHUNKY_VERSION")
 }
 
 modPublish {
