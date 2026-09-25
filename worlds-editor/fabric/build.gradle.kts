@@ -35,5 +35,6 @@ modPublish {
 modrinth {
     dependencies {
         optional.project(property("worldsModrinthId") as String)
+        optional.project("chunky")
     }
 }
