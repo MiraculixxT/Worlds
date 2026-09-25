@@ -8,7 +8,8 @@ Adds a **Chunk Editor** button to Minecraft's world edit screen (`World Menu -> 
 View the whole map & select chunks by hand or by criteria (playtime, staleness, distance from spawn), and delete them so
 the game regenerates them on the next visit.
 
-<iframe width="560" height="315" src="https://www.youtube-nocookie.com/embed/50ZBXUq0quk" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+[![YouTube Video](https://i.ytimg.com/vi_webp/50ZBXUq0quk/maxresdefault.webp)](https://www.youtube.com/watch?v=50ZBXUq0quk)
+**click to play video*
 
 ---
 
