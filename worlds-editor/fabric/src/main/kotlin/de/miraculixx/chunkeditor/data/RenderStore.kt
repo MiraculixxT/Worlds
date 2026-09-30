@@ -68,7 +68,7 @@ class RenderStore(val root: Path) {
         private const val FORMAT = 1
 
         /** Server caches in `worlds/<save folder>`, clients in `servers/<address>/<world>` */
-        val ROOT: Path get() = Loader.gameDir.resolve("${Constants.MOD_ID}/cache")
+        val ROOT: Path get() = Loader.configDir.resolve("${Constants.MOD_ID}/cache")
 
         fun world(folder: String) = RenderStore(ROOT.resolve("worlds").resolve(safe(folder)))
 
