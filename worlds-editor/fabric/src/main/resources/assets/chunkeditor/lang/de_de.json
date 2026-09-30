@@ -38,6 +38,7 @@
   "chunkeditor.map.no_regions": "Keine Regionsdateien – altes Weltformat?",
   "chunkeditor.map.reading": "Regionen werden gelesen…",
   "chunkeditor.map.reading_progress": "Regionen werden gelesen… %s / %s",
+  "chunkeditor.map.waiting_save": "Warte auf das Speichern der Welt…",
   "chunkeditor.map.summary": "%s Regionen · %s Chunks · %s",
   "chunkeditor.map.region": "Region",
   "chunkeditor.map.chunk": "Chunk",

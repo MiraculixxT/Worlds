@@ -9,7 +9,6 @@ import net.minecraft.nbt.LongTag
 import net.minecraft.nbt.visitors.CollectFields
 import net.minecraft.nbt.visitors.FieldSelector
 import net.minecraft.world.level.ChunkPos
-import net.minecraft.world.level.chunk.storage.RegionFileStorage
 import java.util.EnumMap
 
 /**
@@ -57,9 +56,7 @@ object ChunkFacts {
         if (ChunkFact.LAST_MODIFIED in facts) written(dimension, pos)?.let { numbers[ChunkFact.LAST_MODIFIED] = it }
         if (ChunkFact.ENTITIES in facts) entities(dimension, pos)?.let { numbers[ChunkFact.ENTITIES] = it }
         val biome = region(dimension, pos, facts, minY, numbers)
-        Constants.LOG.info(
-            "chunk info {} {},{} in {} ms", dimension.dir.fileName, pos.x, pos.z, Constants.ms(started),
-        )
+        Constants.LOG.info("chunk info {} {},{} in {} ms", dimension.dir.fileName, pos.x, pos.z, Constants.ms(started))
         ChunkInfo(pos, numbers, biome)
     }
 
@@ -73,7 +70,7 @@ object ChunkFacts {
     ): String? = try {
         val whole = facts.any { it.metric.source == ScanSource.CHUNK }
         val streamed = facts.any { it.metric.source == ScanSource.FIELDS }
-        if (!whole && !streamed) null else ChunkRegions.storage(dimension, SUB_REGION)?.use { store ->
+        if (!whole && !streamed) null else ChunkRegions.reader(dimension, SUB_REGION)?.use { store ->
             val tag = (if (whole) store.read(pos) else fields(store, pos, facts)) ?: return null
             if (ChunkFact.INHABITED_TIME in facts) tag.getLong("InhabitedTime").ifPresent { into[ChunkFact.INHABITED_TIME] = it }
             if (ChunkFact.LAST_SAVE in facts) tag.getLong("LastUpdate").ifPresent { into[ChunkFact.LAST_SAVE] = it }
@@ -89,13 +86,13 @@ object ChunkFacts {
     }
 
     /** Field selectors (avoid unpacking) */
-    private fun fields(store: RegionFileStorage, pos: ChunkPos, facts: Set<ChunkFact>): CompoundTag? {
+    private fun fields(store: RegionReader, pos: ChunkPos, facts: Set<ChunkFact>): CompoundTag? {
         val selectors = ArrayList<FieldSelector>(3)
         if (ChunkFact.INHABITED_TIME in facts) selectors += FieldSelector(LongTag.TYPE, "InhabitedTime")
         if (ChunkFact.LAST_SAVE in facts) selectors += FieldSelector(LongTag.TYPE, "LastUpdate")
         if (ChunkFact.DATA_VERSION in facts) selectors += FieldSelector(IntTag.TYPE, "DataVersion")
         val collector = CollectFields(*selectors.toTypedArray())
-        store.scanChunk(pos, collector)
+        store.scan(pos, collector)
         return collector.result as? CompoundTag
     }
 
@@ -106,7 +103,7 @@ object ChunkFacts {
             ?.toLong()
 
     private fun entities(dimension: WorldDimension, pos: ChunkPos): Long? = try {
-        ChunkRegions.storage(dimension, SUB_ENTITIES)?.use { store ->
+        ChunkRegions.reader(dimension, SUB_ENTITIES)?.use { store ->
             store.read(pos)?.getListOrEmpty("Entities")?.size?.toLong()
         }
     } catch (e: Exception) {

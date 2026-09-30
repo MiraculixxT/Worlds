@@ -166,7 +166,7 @@ object ChunkRegions {
      * Read a chunks max & min world height
      */
     suspend fun heightBounds(dimension: WorldDimension, pos: ChunkPos): IntRange? = withContext(Dispatchers.IO) {
-        val store = storage(dimension, SUB_REGION) ?: return@withContext null
+        val store = reader(dimension, SUB_REGION) ?: return@withContext null
         try {
             val tag = store.read(pos) ?: return@withContext null
             val sections = tag.getListOrEmpty("sections")
@@ -245,9 +245,12 @@ object ChunkRegions {
         }
     }
 
-    /**
-     * A storage over one of the dimension's three chunk folders, or null when it does not exist
-     */
+    /** Read-only access to one of the saves chunk folders */
+    internal fun reader(dimension: WorldDimension, sub: String): RegionReader? {
+        val dir = dimension.dir.resolve(sub)
+        return if (Files.isDirectory(dir)) RegionReader(dir, "${dimension.key.identifier()}/$sub") else null
+    }
+
     internal fun storage(dimension: WorldDimension, sub: String): RegionFileStorage? =
         storage(dimension.dir.resolve(sub), dimension.dir.name, dimension.key, sub, false)
 

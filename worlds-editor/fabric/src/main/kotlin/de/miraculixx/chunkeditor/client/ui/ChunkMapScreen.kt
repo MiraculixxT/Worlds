@@ -1727,8 +1727,14 @@ internal class ChunkMapScreen(
 
         val summary = when {
             dimension == null -> I18n.get("chunkeditor.map.no_regions")
-            loading -> loadProgress?.let { (done, total) -> I18n.get("chunkeditor.map.reading_progress", done, total) }
-                ?: I18n.get("chunkeditor.map.reading")
+            loading -> {
+                val progress = loadProgress
+                when {
+                    progress == null -> I18n.get("chunkeditor.map.reading")
+                    progress.second == 0 -> I18n.get("chunkeditor.map.waiting_save")
+                    else -> I18n.get("chunkeditor.map.reading_progress", progress.first, progress.second)
+                }
+            }
             else -> I18n.get("chunkeditor.map.summary", indices.size, totalChunks, bytes(totalBytes))
         }
         graphics.text(font, summary, summaryX, secondY, -1)

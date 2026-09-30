@@ -13,7 +13,6 @@ import net.minecraft.nbt.Tag
 import net.minecraft.nbt.visitors.CollectFields
 import net.minecraft.nbt.visitors.FieldSelector
 import net.minecraft.world.level.ChunkPos
-import net.minecraft.world.level.chunk.storage.RegionFileStorage
 import net.minecraft.world.level.storage.LevelStorageSource
 import java.util.EnumMap
 import java.util.EnumSet
@@ -172,7 +171,7 @@ object ChunkScans {
                 FieldSelector(LongTag.TYPE, "LastUpdate"),
                 FieldSelector(IntTag.TYPE, "DataVersion"),
             )
-            store.scanChunk(pos, collector)
+            store.scan(pos, collector)
             val tag = collector.result as? CompoundTag ?: return@eachChunk
             val packed = pos.pack()
             tag.getLong("InhabitedTime").ifPresent { inhabited[packed] = it }
@@ -281,9 +280,9 @@ object ChunkScans {
 
     private inline fun eachChunk(
         dimension: WorldDimension, sub: String, regions: Collection<RegionIndex>,
-        onProgress: (Int, Int) -> Unit, action: (RegionFileStorage, ChunkPos) -> Unit,
+        onProgress: (Int, Int) -> Unit, action: (RegionReader, ChunkPos) -> Unit,
     ) {
-        ChunkRegions.storage(dimension, sub)?.use { store ->
+        ChunkRegions.reader(dimension, sub)?.use { store ->
             regions.forEachIndexed { done, region ->
                 ChunkRegions.forEachChunk(region) { pos ->
                     try {

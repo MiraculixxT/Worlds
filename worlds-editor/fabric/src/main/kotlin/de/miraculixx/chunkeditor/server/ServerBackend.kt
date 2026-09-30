@@ -28,12 +28,22 @@ import de.miraculixx.chunkeditor.data.RenderStore
 import de.miraculixx.chunkeditor.data.ScanSource
 import de.miraculixx.chunkeditor.data.WorldDimension
 import net.minecraft.core.Registry
+import de.miraculixx.chunkeditor.mixin.EntitySectionManagerAccess
+import de.miraculixx.chunkeditor.mixin.EntityStorageAccess
+import de.miraculixx.chunkeditor.mixin.SectionStorageAccess
+import de.miraculixx.chunkeditor.mixin.ServerLevelAccess
+import kotlinx.coroutines.future.await
+import kotlinx.coroutines.withTimeoutOrNull
 import net.minecraft.server.MinecraftServer
+import java.util.concurrent.CompletableFuture
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.biome.Biome
 import net.minecraft.world.level.storage.LevelResource
 import net.minecraft.world.level.storage.LevelStorageSource
 import java.nio.file.Path
+import kotlin.time.Duration.Companion.milliseconds
+
+private val WRITE_WAIT_MS = 30_000.milliseconds
 
 /**
  * The same `data/` reads a client makes but against a live server world.
@@ -173,11 +183,29 @@ class ServerBackend(private val server: MinecraftServer, private val by: String)
         return ImportResult.Success(found.chunks.size, 0, 0)
     }
 
-    fun forceSave(by: String) {
-        server.executeIfPossible {
-            val started = System.nanoTime()
-            server.saveEverything(true, false, false)
-            Constants.LOG.info("world save forced by {} (editor refresh) in {} ms", by, Constants.ms(started))
-        }
+    /** Saves and waits until the save is on disk */
+    suspend fun forceSave(by: String) {
+        val started = System.nanoTime()
+        val saved = withTimeoutOrNull(WRITE_WAIT_MS) { server.submit { server.saveEverything(true, false, false) }.await(); true }
+        if (saved == null) Constants.LOG.warn("world save forced by {} did not run within {}", by, WRITE_WAIT_MS)
+        else Constants.LOG.info("world save forced by {} (editor refresh) in {} ms", by, Constants.ms(started))
+        awaitWrites()
+    }
+
+    /** Waits for every chunk, entity and POI write the game has queued to reach the region files */
+    suspend fun awaitWrites() {
+        val started = System.nanoTime()
+        val pending = server.allLevels.flatMap { level ->
+            val entities = ((level as ServerLevelAccess).chunkeditorEntityManager() as EntitySectionManagerAccess)
+                .chunkeditorPermanentStorage() as? EntityStorageAccess
+            listOfNotNull(
+                level.chunkSource.chunkMap,
+                (level.chunkSource.poiManager as SectionStorageAccess).chunkeditorRegionStorage(),
+                entities?.chunkeditorRegionStorage(),
+            )
+        }.map { it.synchronize(false) }
+        val done = withTimeoutOrNull(WRITE_WAIT_MS) { CompletableFuture.allOf(*pending.toTypedArray()).await(); true }
+        if (done == null) Constants.LOG.warn("pending world writes not done within {}, reading anyway", WRITE_WAIT_MS)
+        else Constants.LOG.info("pending world writes done in {} ms", Constants.ms(started))
     }
 }

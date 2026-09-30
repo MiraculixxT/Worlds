@@ -146,6 +146,9 @@ object EditorService {
             when (kind) {
                 C2S.INDEXES -> {
                     val dimension = dimension(backend, body) ?: return fail(player, request, DIMENSION_GONE)
+                    // Progress 0/0 means "waiting for the save"
+                    Net.toClient(player, request, S2C.PROGRESS, Bodies.writeProgress(0, 0))
+                    backend.awaitWrites()
                     val started = System.nanoTime()
                     val read = backend.indexes(dimension) { done, total ->
                         Net.toClient(player, request, S2C.PROGRESS, Bodies.writeProgress(done, total))
@@ -200,7 +203,10 @@ object EditorService {
                                 val pixels = backend.render(dimension, rx, rz, step, maxY)
                                 Bodies.deflate(Bodies.writePixels(pixels)).also {
                                     renderCache.put(key, stamp, it)
-                                    if (pixels != null && maxY == null && stamp != 0L) backend.renders.write(dimension, rx, rz, step, stamp, it)
+                                    // A chunk that failed may just have been mid-write
+                                    if (pixels != null && pixels.unreadable.isEmpty() && maxY == null && stamp != 0L) {
+                                        backend.renders.write(dimension, rx, rz, step, stamp, it)
+                                    }
                                 }
                             }
                             reply(player, request, Bodies.writeRender(stamp, packed))

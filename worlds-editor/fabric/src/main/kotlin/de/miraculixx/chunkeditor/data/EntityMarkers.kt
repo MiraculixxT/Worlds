@@ -26,7 +26,7 @@ object EntityMarkers {
             val index = ChunkRegions.readIndex(dir, rx, rz) ?: return@withContext emptyList()
             val found = ArrayList<EntityMarker>()
             try {
-                ChunkRegions.storage(dimension, SUB_ENTITIES)?.use { store ->
+                ChunkRegions.reader(dimension, SUB_ENTITIES)?.use { store ->
                     ChunkRegions.forEachChunk(index) { pos ->
                         if (found.size >= MAX_ENTITIES_PER_REGION) return@forEachChunk
                         val tag = try {

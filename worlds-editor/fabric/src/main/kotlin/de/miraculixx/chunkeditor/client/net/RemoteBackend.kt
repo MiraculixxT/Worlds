@@ -94,7 +94,9 @@ class RemoteBackend(hello: Hello, private val renders: RenderStore?) : EditorBac
             )
             if (packed == null) return@withContext held?.second
             val pixels = Bodies.readPixels(Bodies.inflate(packed))
-            if (store != null && pixels != null && stamp != 0L) store.write(dimension, rx, rz, step, stamp, packed)
+            if (store != null && pixels != null && pixels.unreadable.isEmpty() && stamp != 0L) {
+                store.write(dimension, rx, rz, step, stamp, packed)
+            }
             pixels
         }
 

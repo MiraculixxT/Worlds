@@ -108,8 +108,13 @@ object ChunkEditor {
         )
     }
 
+    @Volatile
+    private var opening = false
+
     /** Asks the server for a fresh [Hello] (dimensions/facts) and opens the map */
     private fun openConfirmed(parent: Screen, hello: Hello, local: Boolean) {
+        if (opening) return
+        opening = true
         val minecraft = Minecraft.getInstance()
         val where = if (local) "integrated server" else minecraft.currentServer?.ip ?: "server"
         Constants.LOG.info(
@@ -123,7 +128,10 @@ object ChunkEditor {
             // The integrated server keeps its own cache on this disk already
             val renders = if (local) null else RenderStore.server(where, fresh.worldName)
             renders?.let { runCatching { it.prune(fresh.dimensions) } }
-            minecraft.execute { minecraft.gui.setScreen(ChunkMapScreen(parent, RemoteBackend(fresh, renders))) }
+            minecraft.execute {
+                opening = false
+                minecraft.gui.setScreen(ChunkMapScreen(parent, RemoteBackend(fresh, renders)))
+            }
         }
     }
 
