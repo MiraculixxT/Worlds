@@ -1,7 +1,9 @@
 package de.miraculixx.chunkeditor.data
 
 import de.miraculixx.chunkeditor.Constants
+import de.miraculixx.chunkeditor.net.Bodies
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.minecraft.core.Registry
 import net.minecraft.world.level.ChunkPos
@@ -42,8 +44,24 @@ class LocalBackend(
     override suspend fun chunkInfo(dimension: WorldDimension, pos: ChunkPos, facts: Set<ChunkFact>, minY: Int): ChunkInfo =
         ChunkFacts.read(dimension, pos, facts, minY)
 
-    override suspend fun render(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?) =
-        ChunkMapRenderer.renderRegion(dimension, rx, rz, step, maxY)
+    /** Same store the integrated server fills for this save */
+    private val renders = RenderStore.world(access.levelId).also { store ->
+        Constants.SCOPE.launch { runCatching { store.prune(dimensions) } }
+    }
+
+    override suspend fun render(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?): RegionPixels? {
+        val stamp = if (maxY == null) RenderStore.stamp(dimension, rx, rz) else 0L
+        if (stamp == 0L) return ChunkMapRenderer.renderRegion(dimension, rx, rz, step, maxY)
+        return withContext(Dispatchers.IO) {
+            renders.read(dimension, rx, rz, step)?.takeIf { it.first == stamp }
+                ?.let { (_, packed) -> runCatching { Bodies.readPixels(Bodies.inflate(packed)) }.getOrNull() }
+                ?.let { return@withContext it }
+            ChunkMapRenderer.renderRegion(dimension, rx, rz, step, null)?.also { pixels ->
+                // A chunk that failed may just have been mid-write
+                if (pixels.unreadable.isEmpty()) renders.write(dimension, rx, rz, step, stamp, Bodies.deflate(Bodies.writePixels(pixels)))
+            }
+        }
+    }
 
     override suspend fun scan(
         dimension: WorldDimension,

@@ -11,6 +11,7 @@ import de.miraculixx.chunkeditor.data.ScanSource
 import de.miraculixx.chunkeditor.data.WorldDimension
 import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.LocalLibrary
+import de.miraculixx.chunkeditor.data.RenderStore
 import de.miraculixx.chunkeditor.net.Bodies
 import de.miraculixx.chunkeditor.net.LibraryBodies
 import de.miraculixx.chunkeditor.net.C2S
@@ -165,7 +166,7 @@ object EditorService {
                     val rx = buf.readInt()
                     val rz = buf.readInt()
                     val key = "${Bodies.dimensionId(dimension)}|$rx|$rz"
-                    val stamp = stampOf(dimension, rx, rz)
+                    val stamp = RenderStore.stamp(dimension, rx, rz)
                     indexCache[key, stamp]?.let { return@read reply(player, request, it) }
                     onDimension(dimension) {
                         val encoded = Bodies.writeIndex(backend.index(dimension, rx, rz))
@@ -190,7 +191,7 @@ object EditorService {
                     val maxY = if (buf.readBoolean()) buf.readInt() else null
                     val known = buf.readLong()
                     val key = "${Bodies.dimensionId(dimension)}|$rx|$rz|$step|$maxY"
-                    val stamp = stampOf(dimension, rx, rz)
+                    val stamp = RenderStore.stamp(dimension, rx, rz)
                     if (stamp != 0L && known == stamp) return@read reply(player, request, Bodies.writeRender(stamp, null))
                     fun cached(): ByteArray? = renderCache[key, stamp] ?: if (maxY != null || stamp == 0L) null else
                         backend.renders.read(dimension, rx, rz, step)?.takeIf { it.first == stamp }?.second
@@ -426,7 +427,7 @@ object EditorService {
     ) {
         val regions = wanted.mapNotNull { (rx, rz) -> backend.index(dimension, rx, rz) }
         val key = "${Bodies.dimensionId(dimension)}|${source.ordinal}|$argument|$minY|${wanted.size}|${wanted.hashCode()}"
-        val stamp = regions.sumOf { stampOf(dimension, it.rx, it.rz) }
+        val stamp = regions.sumOf { RenderStore.stamp(dimension, it.rx, it.rz) }
         scanCache[key, stamp]?.let { return reply(player, request, it) }
         onDimension(dimension) {
             val result = backend.scan(dimension, regions, source, argument, minY) { done, total ->
@@ -469,14 +470,6 @@ object EditorService {
         renderCache.clear()
         indexCache.clear()
         scanCache.clear()
-    }
-
-    private fun stampOf(dimension: WorldDimension, rx: Int, rz: Int): Long = try {
-        val file = dimension.regionDir.resolve("r.$rx.$rz.mca")
-        val attributes = Files.readAttributes(file, java.nio.file.attribute.BasicFileAttributes::class.java)
-        attributes.lastModifiedTime().toMillis() * 31 + attributes.size()
-    } catch (_: Exception) {
-        0L
     }
 
     private fun queue(): JobQueue {

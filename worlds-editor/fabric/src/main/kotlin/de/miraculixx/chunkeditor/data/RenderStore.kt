@@ -7,6 +7,7 @@ import java.io.DataOutputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.BasicFileAttributes
 import kotlin.io.path.createDirectories
 import kotlin.io.path.name
 
@@ -67,8 +68,16 @@ class RenderStore(val root: Path) {
     companion object {
         private const val FORMAT = 1
 
-        /** Server caches in `worlds/<save folder>`, clients in `servers/<address>/<world>` */
+        /** Server & local cache in `worlds/<save folder>`, remote clients in `servers/<address>/<world>` */
         val ROOT: Path get() = Loader.configDir.resolve("${Constants.MOD_ID}/cache")
+
+        /** Region file `(lastModified, size)`, `0` when it can't be read (never cached) */
+        fun stamp(dimension: WorldDimension, rx: Int, rz: Int): Long = try {
+            val attributes = Files.readAttributes(dimension.regionDir.resolve("r.$rx.$rz.mca"), BasicFileAttributes::class.java)
+            attributes.lastModifiedTime().toMillis() * 31 + attributes.size()
+        } catch (_: Exception) {
+            0L
+        }
 
         fun world(folder: String) = RenderStore(ROOT.resolve("worlds").resolve(safe(folder)))
 
