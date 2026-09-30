@@ -6,7 +6,7 @@ import net.minecraft.network.codec.StreamCodec
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload
 import net.minecraft.resources.Identifier
 
-const val PROTOCOL_VERSION = 11
+const val PROTOCOL_VERSION = 12
 
 /**
  * The one packet handling all communication to avoid having 100 registered packets
@@ -71,7 +71,8 @@ class EditorPacket(
 
 /** Serverbound kinds */
 object C2S {
-    const val REGION_LIST = 1
+    /** Every region header of one dimension, with progress */
+    const val INDEXES = 1
     const val INDEX = 2
     const val HEIGHT_BOUNDS = 3
     const val RENDER = 4

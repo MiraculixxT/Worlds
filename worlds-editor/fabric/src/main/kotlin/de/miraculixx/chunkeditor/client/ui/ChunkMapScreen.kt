@@ -226,6 +226,8 @@ internal class ChunkMapScreen(
     private var totalChunks = 0
     private var totalBytes = 0L
     private var loading = false
+    @Volatile
+    private var loadProgress: Pair<Int, Int>? = null
     private var loadGen = 0
 
     private val selected = LongOpenHashSet()
@@ -906,6 +908,7 @@ internal class ChunkMapScreen(
     private fun loadDimension(dim: WorldDimension) {
         val generation = ++loadGen
         loading = true
+        loadProgress = null
         players = null
         entities.clear()
         entitiesLoading.clear()
@@ -924,7 +927,7 @@ internal class ChunkMapScreen(
         dropTextures()
         Constants.SCOPE.launch {
             val started = System.nanoTime()
-            val read = backend.regionList(dim).mapNotNull { (rx, rz) -> backend.index(dim, rx, rz) }
+            val read = backend.indexes(dim) { done, total -> if (generation == loadGen) loadProgress = done to total }
             // One chunk carries the dimension's build height
             val bounds = read.firstOrNull { it.count > 0 }?.let { backend.heightBounds(dim, firstChunk(it)) }
             Constants.LOG.info(
@@ -1724,7 +1727,8 @@ internal class ChunkMapScreen(
 
         val summary = when {
             dimension == null -> I18n.get("chunkeditor.map.no_regions")
-            loading -> I18n.get("chunkeditor.map.reading")
+            loading -> loadProgress?.let { (done, total) -> I18n.get("chunkeditor.map.reading_progress", done, total) }
+                ?: I18n.get("chunkeditor.map.reading")
             else -> I18n.get("chunkeditor.map.summary", indices.size, totalChunks, bytes(totalBytes))
         }
         graphics.text(font, summary, summaryX, secondY, -1)
@@ -2413,13 +2417,13 @@ internal class ChunkMapScreen(
 
         fun abgr(argb: Int): Int =
             (argb and -0x1000000) or (argb and 0xFF shl 16) or (argb and 0xFF00) or (argb ushr 16 and 0xFF)
-
-        fun bytes(value: Long): String = when {
-            value >= 1024L * 1024 * 1024 -> "%.1f GB".format(value / (1024.0 * 1024 * 1024))
-            value >= 1024 * 1024 -> "%.1f MB".format(value / (1024.0 * 1024))
-            else -> "%.0f KB".format(value / 1024.0)
-        }
     }
+}
+
+fun bytes(value: Long): String = when {
+    value >= 1024L * 1024 * 1024 -> "%.1f GB".format(value / (1024.0 * 1024 * 1024))
+    value >= 1024 * 1024 -> "%.1f MB".format(value / (1024.0 * 1024))
+    else -> "%.0f KB".format(value / 1024.0)
 }
 
 /** A chunk rectangle, both corners in it */

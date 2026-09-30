@@ -18,6 +18,8 @@ import de.miraculixx.chunkeditor.data.LevelFacts
 import de.miraculixx.chunkeditor.data.PlayerMarker
 import de.miraculixx.chunkeditor.data.RegionIndex
 import de.miraculixx.chunkeditor.data.RegionPixels
+import de.miraculixx.chunkeditor.data.REGION_SIZE
+import de.miraculixx.chunkeditor.data.TINT_CAP
 import de.miraculixx.chunkeditor.data.ScanResult
 import de.miraculixx.chunkeditor.data.ScanSource
 import de.miraculixx.chunkeditor.data.TintKey
@@ -179,13 +181,15 @@ object Bodies {
     fun readFacts(mask: Int): Set<ChunkFact> =
         ChunkFact.entries.filterTo(LinkedHashSet()) { mask and (1 shl it.ordinal) != 0 }
 
-    fun renderRequest(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?): ByteArray = write { buf ->
+    /** @param known the stamp of the render the client already holds, `0` for none */
+    fun renderRequest(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?, known: Long): ByteArray = write { buf ->
         buf.writeUtf(dimensionId(dimension))
         buf.writeInt(rx)
         buf.writeInt(rz)
         buf.writeVarInt(step)
         buf.writeBoolean(maxY != null)
         if (maxY != null) buf.writeInt(maxY)
+        buf.writeLong(known)
     }
 
     fun scanRequest(
@@ -291,16 +295,26 @@ object Bodies {
     // Results
     //
 
-    fun writeRegionList(regions: List<Pair<Int, Int>>): ByteArray = write { buf ->
-        buf.writeVarInt(regions.size)
-        regions.forEach {
-            buf.writeInt(it.first)
-            buf.writeInt(it.second)
+    fun writeIndexes(indexes: List<RegionIndex>): ByteArray = write { buf ->
+        buf.writeVarInt(indexes.size)
+        indexes.forEach {
+            buf.writeInt(it.rx)
+            buf.writeInt(it.rz)
+            buf.writeVarLong(it.bytes)
+            buf.writeLongArray(it.present.toLongArray())
         }
     }
 
-    fun readRegionList(bytes: ByteArray): List<Pair<Int, Int>> = read(bytes) { buf ->
-        (0 until buf.readVarInt()).map { buf.readInt() to buf.readInt() }
+    fun readIndexes(bytes: ByteArray): List<RegionIndex> = read(bytes) { buf ->
+        val count = buf.readVarInt()
+        // One region takes at least 11 bytes, a larger count is a lie
+        require(count in 0..buf.readableBytes() / 11) { "Index list claims $count regions" }
+        (0 until count).map {
+            val rx = buf.readInt()
+            val rz = buf.readInt()
+            val size = buf.readVarLong()
+            RegionIndex(rx, rz, BitSet.valueOf(buf.readLongArray()), size)
+        }
     }
 
     fun writeIndex(index: RegionIndex?): ByteArray = write { buf ->
@@ -404,14 +418,30 @@ object Bodies {
     fun readPixels(bytes: ByteArray): RegionPixels? = read(bytes) { buf ->
         if (!buf.readBoolean()) return@read null
         val size = buf.readVarInt()
+        require(size in 1..REGION_SIZE * 16) { "Render claims $size pixels" }
         val argb = IntArray(size * size) { buf.readInt() }
         val unreadable = HashSet<Long>()
-        repeat(buf.readVarInt()) { unreadable.add(buf.readLong()) }
-        val palette = (0 until buf.readVarInt()).map {
+        val broken = buf.readVarInt()
+        require(broken in 0..REGION_SIZE * REGION_SIZE) { "Render claims $broken unreadable chunks" }
+        repeat(broken) { unreadable.add(buf.readLong()) }
+        val paletteSize = buf.readVarInt()
+        require(paletteSize in 0..TINT_CAP) { "Render claims $paletteSize tints" }
+        val palette = (0 until paletteSize).map {
             TintKey(Identifier.parse(buf.readUtf()), buf.readUtf(), buf.readVarInt())
         }
         val tints = if (buf.readBoolean()) ShortArray(size * size) { buf.readShort() } else null
         RegionPixels(size, argb, unreadable, palette, tints)
+    }
+
+    /** @param packed the deflated [writePixels] body, `null` when the client copy still matches [stamp] */
+    fun writeRender(stamp: Long, packed: ByteArray?): ByteArray = write { buf ->
+        buf.writeLong(stamp)
+        buf.writeBoolean(packed != null)
+        packed?.let(buf::writeByteArray)
+    }
+
+    fun readRender(bytes: ByteArray): Pair<Long, ByteArray?> = read(bytes) { buf ->
+        buf.readLong() to if (buf.readBoolean()) buf.readByteArray(MAX_INFLATED) else null
     }
 
     fun writeScan(result: ScanResult): ByteArray = write { buf ->

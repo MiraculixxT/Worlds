@@ -30,7 +30,8 @@ class LocalBackend(
 
     override val writesAreQueued = false
 
-    override suspend fun regionList(dimension: WorldDimension) = ChunkRegions.listRegions(dimension)
+    override suspend fun indexes(dimension: WorldDimension, onProgress: (Int, Int) -> Unit) =
+        ChunkRegions.readIndexes(dimension, onProgress)
 
     override suspend fun index(dimension: WorldDimension, rx: Int, rz: Int) =
         ChunkRegions.readIndex(dimension, rx, rz)

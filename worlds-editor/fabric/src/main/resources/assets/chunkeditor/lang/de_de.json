@@ -37,6 +37,7 @@
   "chunkeditor.map.delete_warning": "„%s“ generiert diese Chunks beim nächsten Besuch neu. Alles Gebaute ist verloren, und Strukturen an Chunk-Grenzen bleiben bestehen",
   "chunkeditor.map.no_regions": "Keine Regionsdateien – altes Weltformat?",
   "chunkeditor.map.reading": "Regionen werden gelesen…",
+  "chunkeditor.map.reading_progress": "Regionen werden gelesen… %s / %s",
   "chunkeditor.map.summary": "%s Regionen · %s Chunks · %s",
   "chunkeditor.map.region": "Region",
   "chunkeditor.map.chunk": "Chunk",

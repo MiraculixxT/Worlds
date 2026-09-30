@@ -24,7 +24,8 @@ interface EditorBackend {
     /** Only for servers, where actions not instant */
     val writesAreQueued: Boolean
 
-    suspend fun regionList(dimension: WorldDimension): List<Pair<Int, Int>>
+    /** Every regions header of [dimension] in one pass */
+    suspend fun indexes(dimension: WorldDimension, onProgress: (done: Int, total: Int) -> Unit): List<RegionIndex>
 
     suspend fun index(dimension: WorldDimension, rx: Int, rz: Int): RegionIndex?
 

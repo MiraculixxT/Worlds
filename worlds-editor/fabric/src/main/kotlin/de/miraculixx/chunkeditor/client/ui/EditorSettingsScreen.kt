@@ -3,6 +3,9 @@ package de.miraculixx.chunkeditor.client.ui
 import de.miraculixx.chunkeditor.data.ChunkFact
 import de.miraculixx.chunkeditor.data.EditorConfig
 import de.miraculixx.chunkeditor.data.EditorSettings
+import de.miraculixx.chunkeditor.data.RenderStore
+import de.miraculixx.chunkeditor.Constants
+import kotlinx.coroutines.launch
 import de.miraculixx.common.client.ui.NativeDialogs
 import de.miraculixx.common.client.ui.SettingsCategory
 import de.miraculixx.common.client.ui.SettingsList
@@ -33,6 +36,10 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
 
     private var picking = false
 
+    /** `null` while measuring or purging */
+    @Volatile
+    private var cacheSize: Long? = null
+
     override fun init() {
         val listW = (width - 40).coerceAtMost(PANEL_W)
         val listX = (width - listW) / 2
@@ -40,6 +47,7 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
         list.updateSizeAndPosition(listW, height - 34 - LIST_TOP, listX, LIST_TOP)
         list.rebuild()
         addRenderableWidget(list)
+        if (cacheSize == null) measureCache()
 
         addRenderableWidget(
             Button.builder(Component.translatable("controls.reset")) { resetAll() }
@@ -63,6 +71,9 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
     private fun rowsFor(category: SettingsCategory): List<SettingsList.Row> = when (category) {
         general -> listOf(
             list.ToggleRow("Skip Opening Warnings", settings.skipOpenWarning) { settings.skipOpenWarning = it },
+            list.TextRow("Purge Cache", cacheSize?.let(::bytes) ?: "…", Component.literal("Purge")) {
+                if (cacheSize != null) purgeCache()
+            },
         )
 
         chunkInfo -> ChunkFact.entries.map { fact ->
@@ -79,6 +90,26 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
                 Blaze3D.openPath(EditorConfig.libraryDir())
             },
         )
+    }
+
+    private fun measureCache(purge: Boolean = false) {
+        cacheSize = null
+        Constants.SCOPE.launch {
+            val size = runCatching {
+                if (purge) RenderStore.delete()
+                RenderStore.size()
+            }.onFailure { Constants.LOG.warn("Render cache could not be {}: {}", if (purge) "purged" else "measured", it.message) }
+                .getOrDefault(0L)
+            minecraft.execute {
+                cacheSize = size
+                list.requestRebuild()
+            }
+        }
+    }
+
+    private fun purgeCache() {
+        measureCache(purge = true)
+        list.rebuild()
     }
 
     /**

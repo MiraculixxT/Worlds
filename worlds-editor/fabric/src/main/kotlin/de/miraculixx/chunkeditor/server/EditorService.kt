@@ -75,6 +75,7 @@ object EditorService {
     fun start(server: MinecraftServer) {
         this.server = server
         this.backend = null
+        backend()?.let { fresh -> Constants.SCOPE.launch { fresh.renders.prune(fresh.dimensions) } }
         // A loader that never delivered its registration event leaves no transport and no way to notice
         Constants.LOG.info(
             "Chunk editor service ready ({} job(s) queued, networking {})",
@@ -143,11 +144,17 @@ object EditorService {
         val backend = backend() ?: return fail(player, request, "chunkeditor.remote.error.unavailable")
         try {
             when (kind) {
-                C2S.REGION_LIST -> {
+                C2S.INDEXES -> {
                     val dimension = dimension(backend, body) ?: return fail(player, request, DIMENSION_GONE)
-                    onDimension(dimension) {
-                        reply(player, request, Bodies.writeRegionList(backend.regionList(dimension)))
+                    val started = System.nanoTime()
+                    val read = backend.indexes(dimension) { done, total ->
+                        Net.toClient(player, request, S2C.PROGRESS, Bodies.writeProgress(done, total))
                     }
+                    Constants.LOG.info(
+                        "{} region headers of {} read for {} in {} ms",
+                        read.size, Bodies.dimensionId(dimension), player.name.string, Constants.ms(started),
+                    )
+                    reply(player, request, Bodies.writeIndexes(read))
                 }
 
                 C2S.INDEX -> Bodies.read(body) { buf ->
@@ -178,14 +185,25 @@ object EditorService {
                     val rz = buf.readInt()
                     val step = buf.readVarInt()
                     val maxY = if (buf.readBoolean()) buf.readInt() else null
+                    val known = buf.readLong()
                     val key = "${Bodies.dimensionId(dimension)}|$rx|$rz|$step|$maxY"
                     val stamp = stampOf(dimension, rx, rz)
-                    renderCache[key, stamp]?.let { return@read reply(player, request, it) }
+                    if (stamp != 0L && known == stamp) return@read reply(player, request, Bodies.writeRender(stamp, null))
+                    fun cached(): ByteArray? = renderCache[key, stamp] ?: if (maxY != null || stamp == 0L) null else
+                        backend.renders.read(dimension, rx, rz, step)?.takeIf { it.first == stamp }?.second
+                            ?.also { renderCache.put(key, stamp, it) }
+                    cached()?.let { return@read reply(player, request, Bodies.writeRender(stamp, it)) }
                     session.renders.withPermit {
                         onDimension(dimension) {
-                            val encoded = Bodies.writePixels(backend.render(dimension, rx, rz, step, maxY))
-                            renderCache.put(key, stamp, encoded)
-                            reply(player, request, encoded)
+                            // Another session may have rendered it while this one waited for the dimension
+                            val packed = cached() ?: run {
+                                val pixels = backend.render(dimension, rx, rz, step, maxY)
+                                Bodies.deflate(Bodies.writePixels(pixels)).also {
+                                    renderCache.put(key, stamp, it)
+                                    if (pixels != null && maxY == null && stamp != 0L) backend.renders.write(dimension, rx, rz, step, stamp, it)
+                                }
+                            }
+                            reply(player, request, Bodies.writeRender(stamp, packed))
                         }
                     }
                 }

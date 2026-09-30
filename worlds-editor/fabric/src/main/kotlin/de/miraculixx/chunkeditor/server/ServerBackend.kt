@@ -24,6 +24,7 @@ import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.LevelFacts
 import de.miraculixx.chunkeditor.data.PlayerMarkers
 import de.miraculixx.chunkeditor.data.RegionIndex
+import de.miraculixx.chunkeditor.data.RenderStore
 import de.miraculixx.chunkeditor.data.ScanSource
 import de.miraculixx.chunkeditor.data.WorldDimension
 import net.minecraft.core.Registry
@@ -48,6 +49,9 @@ class ServerBackend(private val server: MinecraftServer, private val by: String)
     override var dimensions: List<WorldDimension> = ChunkRegions.dimensions(root)
         private set
 
+    /** Renders outlive the server, so the next open (by anyone) skips them */
+    val renders = RenderStore.world(root.fileName?.toString() ?: "world")
+
     @Volatile
     override var facts: LevelFacts = LevelFacts.read(root)
         private set
@@ -63,7 +67,8 @@ class ServerBackend(private val server: MinecraftServer, private val by: String)
 
     override val writesAreQueued = true
 
-    override suspend fun regionList(dimension: WorldDimension) = ChunkRegions.listRegions(dimension)
+    override suspend fun indexes(dimension: WorldDimension, onProgress: (Int, Int) -> Unit) =
+        ChunkRegions.readIndexes(dimension, onProgress)
 
     override suspend fun index(dimension: WorldDimension, rx: Int, rz: Int) =
         ChunkRegions.readIndex(dimension, rx, rz)

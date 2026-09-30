@@ -37,6 +37,7 @@
   "chunkeditor.map.delete_warning": "'%s' regenerates these chunks on the next visit. Anything built is gone, and features on chunk boarders stay",
   "chunkeditor.map.no_regions": "No region files - old world format?",
   "chunkeditor.map.reading": "Reading regions…",
+  "chunkeditor.map.reading_progress": "Reading regions… %s / %s",
   "chunkeditor.map.summary": "%s regions · %s chunks · %s",
   "chunkeditor.map.region": "Region",
   "chunkeditor.map.chunk": "Chunk",

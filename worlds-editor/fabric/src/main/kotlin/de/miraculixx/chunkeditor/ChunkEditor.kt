@@ -7,6 +7,7 @@ import de.miraculixx.chunkeditor.net.C2S
 import de.miraculixx.chunkeditor.client.net.RemoteBackend
 import de.miraculixx.chunkeditor.client.ui.ChunkMapScreen
 import de.miraculixx.chunkeditor.client.ui.SaveBiomes
+import de.miraculixx.chunkeditor.data.RenderStore
 import de.miraculixx.chunkeditor.data.EditorConfig
 import de.miraculixx.chunkeditor.data.LocalBackend
 import de.miraculixx.common.client.ui.NativeDialogs
@@ -119,7 +120,10 @@ object ChunkEditor {
             val fresh = runCatching { Bodies.readHello(ClientNet.request(C2S.OPEN, ByteArray(0))) }
                 .onFailure { Constants.LOG.warn("Chunk editor open failed, using join handshake: {}", it.message) }
                 .getOrDefault(hello)
-            minecraft.execute { minecraft.gui.setScreen(ChunkMapScreen(parent, RemoteBackend(fresh))) }
+            // The integrated server keeps its own cache on this disk already
+            val renders = if (local) null else RenderStore.server(where, fresh.worldName)
+            renders?.let { runCatching { it.prune(fresh.dimensions) } }
+            minecraft.execute { minecraft.gui.setScreen(ChunkMapScreen(parent, RemoteBackend(fresh, renders))) }
         }
     }
 
