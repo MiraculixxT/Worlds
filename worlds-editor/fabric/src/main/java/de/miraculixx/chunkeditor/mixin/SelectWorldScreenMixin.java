@@ -52,7 +52,6 @@ public abstract class SelectWorldScreenMixin extends Screen {
                 .width(CHUNKEDITOR_BUTTON_SIZE)
                 .sprite(CHUNKEDITOR_SPRITE, 16, 16)
                 .build();
-        button.active = this.renameButton != null && this.renameButton.active;
         addRenderableWidget(button);
         chunkeditor$button = button;
         chunkeditor$place();
@@ -65,7 +64,6 @@ public abstract class SelectWorldScreenMixin extends Screen {
     @Inject(method = "updateButtonStatus", at = @At("TAIL"))
     private void chunkeditor$updateStatus(LevelSummary summary, CallbackInfo ci) {
         chunkeditor$selected = summary == null ? null : summary.getLevelId();
-        if (chunkeditor$button != null && this.renameButton != null) chunkeditor$button.active = this.renameButton.active;
     }
 
     @Unique
@@ -80,5 +78,6 @@ public abstract class SelectWorldScreenMixin extends Screen {
     @Unique
     private void chunkeditor$open() {
         if (chunkeditor$selected != null) ChunkEditor.INSTANCE.openOwned(this, chunkeditor$selected);
+        else ChunkEditor.INSTANCE.openPicked(this);
     }
 }

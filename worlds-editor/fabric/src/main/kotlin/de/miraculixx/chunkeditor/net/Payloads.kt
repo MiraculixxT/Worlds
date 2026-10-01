@@ -6,7 +6,7 @@ import net.minecraft.network.codec.StreamCodec
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload
 import net.minecraft.resources.ResourceLocation
 
-const val PROTOCOL_VERSION = 8
+const val PROTOCOL_VERSION = 12
 
 /**
  * The one packet handling all communication to avoid having 100 registered packets
@@ -71,7 +71,8 @@ class EditorPacket(
 
 /** Serverbound kinds */
 object C2S {
-    const val REGION_LIST = 1
+    /** Every region header of one dimension, with progress */
+    const val INDEXES = 1
     const val INDEX = 2
     const val HEIGHT_BOUNDS = 3
     const val RENDER = 4
@@ -104,6 +105,8 @@ object C2S {
     const val CLIP_FILES = 27
     const val CLIP_DOWNLOAD = 28
     const val ENTITIES = 29
+    const val CHUNK_INFO = 30
+    const val GENERATE = 31
 }
 
 /** Clientbound kinds */
@@ -122,6 +125,10 @@ const val C2S_FRAGMENT = 24 * 1024
 
 /** File bytes per upload frame: the frame is a fragment minus its id, index and length varints */
 const val UPLOAD_PIECE = C2S_FRAGMENT - 16
+
+/** A pre-generation list the client sends, and the radius it may ask a shape to cover */
+const val MAX_GENERATE_CHUNKS = 1_000_000
+const val MAX_RADIUS_CHUNKS = 1_875_000
 
 /** Both sides refuse one that would not fit the reassembly budget */
 const val MAX_CLIP_FILE = 32 * 1024 * 1024

@@ -17,6 +17,7 @@ data class EditorSettings(
     @SerialName("library_dir") var libraryDir: String = "",
     /** Opens the remote editor without the live/local warning */
     @SerialName("skip_open_warning") var skipOpenWarning: Boolean = false,
+    @SerialName("chunk_info") var chunkInfo: List<String> = ChunkFact.DEFAULTS.map { it.name },
 )
 
 /**
@@ -34,6 +35,8 @@ object EditorConfig {
             .onFailure { if (it !is java.nio.file.NoSuchFileException) Constants.LOG.warn("Failed to read $file, using defaults", it) }
             .getOrDefault(EditorSettings())
     }
+
+    fun chunkFacts(): Set<ChunkFact> = ChunkFact.of(settings.chunkInfo)
 
     val defaultLibraryDir: Path get() = Loader.gameDir.resolve("chunkclips")
 

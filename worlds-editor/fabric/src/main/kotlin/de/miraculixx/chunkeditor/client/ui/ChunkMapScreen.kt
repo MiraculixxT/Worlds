@@ -5,9 +5,15 @@ import net.minecraft.ChatFormatting
 import net.minecraft.core.Registry
 import net.minecraft.world.level.biome.Biome
 import de.miraculixx.chunkeditor.Constants
+import de.miraculixx.chunkeditor.data.ChunkFact
+import de.miraculixx.chunkeditor.data.ChunkInfo
 import de.miraculixx.chunkeditor.data.ChunkMetric
+import de.miraculixx.chunkeditor.data.EditorConfig
 import de.miraculixx.chunkeditor.data.ChunkOverlay
 import de.miraculixx.chunkeditor.data.ChunkScan
+import de.miraculixx.chunkeditor.data.ChunkyFit
+import de.miraculixx.chunkeditor.data.ChunkyTask
+import de.miraculixx.chunkeditor.data.GenerateOutcome
 import de.miraculixx.chunkeditor.data.ChunkRegions
 import de.miraculixx.chunkeditor.data.ClipImportOptions
 import de.miraculixx.chunkeditor.data.ExistingChunks
@@ -31,6 +37,7 @@ import de.miraculixx.common.client.ui.MenuEntry
 import de.miraculixx.common.client.ui.SUBTEXT_COLOR
 import de.miraculixx.common.client.ui.clickSound
 import de.miraculixx.common.client.ui.drawBox
+import de.miraculixx.common.client.ui.overlay
 import de.miraculixx.chunkeditor.client.net.RemoteBackend
 import de.miraculixx.chunkeditor.data.ClipFootprint
 import de.miraculixx.chunkeditor.data.ClipExportResult
@@ -49,6 +56,7 @@ import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.PlayerFaceRenderer
 import net.minecraft.client.gui.components.Checkbox
 import net.minecraft.client.gui.components.EditBox
+import net.minecraft.client.gui.components.Tooltip
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.worldselection.EditWorldScreen
 import net.minecraft.client.resources.language.I18n
@@ -70,6 +78,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import java.util.EnumMap
 
 private const val HEADER_H = 32
 private const val MARGIN = 8
@@ -81,6 +90,11 @@ private val SETTINGS_SPRITE = ResourceLocation.fromNamespaceAndPath(Constants.MO
 /** The two-row info bar under the map: coordinates + zoom, then the world summary */
 private const val INFO_H = 30
 private const val INFO_ROW_H = 13
+
+/** The box one clicked chunk gets */
+private const val CHUNK_BOX_PAD = 6
+private const val CHUNK_BOX_GAP = 8
+private const val CHUNK_BOX_ROW_GAP = 2
 
 /** Widest value each coordinate field can ever hold, the last step of [COORD_TIERS] */
 private const val BLOCK_EXTREME = "-30000000"
@@ -144,6 +158,8 @@ private const val LEGEND_W = 40
 private const val PRESENT_COLOR = 0x70A8B4C8
 private const val UNREADABLE_COLOR = 0xB0C05050.toInt()
 private const val SELECTED_COLOR = 0x9033B5E5.toInt()
+private const val GHOST_SELECTED_COLOR = 0x5033B5E5
+private const val MAX_GHOST_SELECT = 500_000
 private const val GRID_COLOR = 0x30FFFFFF
 private const val REGION_LINE_COLOR = 0x80FFFFFF.toInt()
 
@@ -210,10 +226,24 @@ internal class ChunkMapScreen(
     private var totalChunks = 0
     private var totalBytes = 0L
     private var loading = false
+    @Volatile
+    private var loadProgress: Pair<Int, Int>? = null
     private var loadGen = 0
 
     private val selected = LongOpenHashSet()
+
+    /** Selected chunks that are not generated */
+    private val ghost = LongOpenHashSet()
+    private var includeUngenerated = false
     private val unreadable = LongOpenHashSet()
+
+    /** Chunk box */
+    private var infoChunk: ChunkPos? = null
+    private var infoX = 0
+    private var infoY = 0
+    private var infoFacts = EditorConfig.chunkFacts()
+    private val chunkInfos = HashMap<Long, ChunkInfo>()
+    private val infoLoading = LongOpenHashSet()
 
     /** Renders that landed before the biome colors */
     private val pendingTerrain = HashMap<Long, RegionPixels>()
@@ -364,6 +394,11 @@ internal class ChunkMapScreen(
         MenuEntry.Item(Component.translatable("chunkeditor.map.clear"), SC_CLEAR.label) { clearSelection() },
         MenuEntry.Separator,
         MenuEntry.Item(Component.translatable("chunkeditor.map.trim"), SC_TRIM.label) { openTrim() },
+        MenuEntry.Separator,
+        MenuEntry.Item(
+            Component.translatable("chunkeditor.map.include_ungenerated"),
+            checked = { includeUngenerated },
+        ) { toggleUngenerated() },
     )
 
     /** Things to edit selected chunks */
@@ -404,10 +439,79 @@ internal class ChunkMapScreen(
                 enabled = { selected.isNotEmpty() },
             ) { confirmDelete() },
         )
+        add(
+            MenuEntry.Item(
+                Component.translatable("chunkeditor.pregen.title"),
+                enabled = { selected.isNotEmpty() || ghost.isNotEmpty() },
+            ) { openPregen() },
+        )
 
         if (backend is RemoteBackend) {
             add(MenuEntry.Separator)
             add(MenuEntry.Item(Component.translatable("chunkeditor.jobs.title"), SC_JOBS.label) { openJobs() })
+        }
+    }
+
+    //
+    // Pre-generation
+    //
+
+    /** Chunky runs on a live server, so a local save can only ever look at what it would cost */
+    private fun openPregen() {
+        val dim = dimension ?: return
+        val remote = backend as? RemoteBackend
+        val union = LongOpenHashSet(selected)
+        union.addAll(ghost)
+        val fit = ChunkyFit.best(union) ?: return
+        // Only the ungenerated chunks go in a csv
+        val exactTask = ChunkyFit.boundingSquare(ghost) ?: fit
+        val plan = PregenPlan(
+            dim.name, union.size, ghost.size.toLong(), exactTask, fit,
+            fit.covered - existingInside(fit), fit.covered - union.size,
+            when {
+                remote == null -> "chunkeditor.pregen.error.local"
+                !remote.chunkyAvailable -> "chunkeditor.pregen.error.missing"
+                else -> null
+            },
+        )
+        minecraft.setScreen(
+            PregenScreen(this, plan, ::applyFit) { task, exact ->
+                remote?.let { runGenerate(dim, it, task, exact) }
+            },
+        )
+    }
+
+    private fun existingInside(task: ChunkyTask): Long {
+        var count = 0L
+        indices.values.forEach { index ->
+            ChunkRegions.forEachChunk(index) { pos -> if (task.covers(pos.x, pos.z)) count++ }
+        }
+        return count
+    }
+
+    private fun applyFit(task: ChunkyTask) {
+        minecraft.setScreen(this)
+        includeUngenerated = true
+        selected.clear()
+        ghost.clear()
+        task.forEachChunk { x, z ->
+            val pos = ChunkPos(x, z)
+            if (exists(pos)) selected.add(pos.toLong()) else ghost.add(pos.toLong())
+        }
+        onSelectionChanged()
+    }
+
+    private fun runGenerate(dim: WorldDimension, remote: RemoteBackend, task: ChunkyTask, exact: Boolean) {
+        minecraft.setScreen(this)
+        val chunks = if (exact) ghost.toLongArray().map { ChunkPos(it) } else null
+        Constants.SCOPE.launch {
+            val outcome = remote.generate(dim, task, chunks)
+            minecraft.execute {
+                clipMessage = when (outcome) {
+                    is GenerateOutcome.Started -> I18n.get("chunkeditor.pregen.started", outcome.chunks)
+                    is GenerateOutcome.Failed -> I18n.get(outcome.key)
+                }
+            }
         }
     }
 
@@ -628,6 +732,7 @@ internal class ChunkMapScreen(
                     return@execute
                 }
                 selected.clear()
+                ghost.clear()
                 indices.values.forEach { region ->
                     ChunkRegions.forEachChunk(region) { pos ->
                         val listed = parsed.chunks.contains(pos.toLong())
@@ -772,6 +877,7 @@ internal class ChunkMapScreen(
                 totalChunks = indices.values.sumOf { it.count }
                 totalBytes = indices.values.sumOf { it.bytes }
                 selected.clear()
+                ghost.clear()
                 if (result is ImportResult.Success) {
                     footprint.chunks.forEach {
                         selected.add(
@@ -795,6 +901,7 @@ internal class ChunkMapScreen(
     private fun switchDimension(value: WorldDimension) {
         dimension = value
         selected.clear()
+        ghost.clear()
         centerX = 0.0
         centerZ = 0.0
         loadDimension(value)
@@ -804,6 +911,7 @@ internal class ChunkMapScreen(
     private fun loadDimension(dim: WorldDimension) {
         val generation = ++loadGen
         loading = true
+        loadProgress = null
         players = null
         entities.clear()
         entitiesLoading.clear()
@@ -816,12 +924,13 @@ internal class ChunkMapScreen(
         yCut = DEFAULT_Y_MAX
         indices.clear()
         unreadable.clear()
+        clearChunkInfo()
         rendering.clear()
         coarseRendering.clear()
         dropTextures()
         Constants.SCOPE.launch {
             val started = System.nanoTime()
-            val read = backend.regionList(dim).mapNotNull { (rx, rz) -> backend.index(dim, rx, rz) }
+            val read = backend.indexes(dim) { done, total -> if (generation == loadGen) loadProgress = done to total }
             // One chunk carries the dimension's build height
             val bounds = read.firstOrNull { it.count > 0 }?.let { backend.heightBounds(dim, firstChunk(it)) }
             Constants.LOG.info(
@@ -905,6 +1014,7 @@ internal class ChunkMapScreen(
 
     private fun selectAll() {
         indices.values.forEach { ChunkRegions.forEachChunk(it) { pos -> selected.add(pos.toLong()) } }
+        fillGhost { true }
         onSelectionChanged()
     }
 
@@ -917,12 +1027,60 @@ internal class ChunkMapScreen(
         }
         selected.clear()
         selected.addAll(inverted)
+        val wasGhost = if (ghost.isEmpty()) null else LongOpenHashSet(ghost)
+        ghost.clear()
+        fillGhost { wasGhost?.contains(it.toLong()) != true }
         onSelectionChanged()
     }
 
     private fun clearSelection() {
         selected.clear()
+        ghost.clear()
         onSelectionChanged()
+    }
+
+    private fun toggleUngenerated() {
+        includeUngenerated = !includeUngenerated
+        if (includeUngenerated || ghost.isEmpty()) return
+        ghost.clear()
+        onSelectionChanged()
+    }
+
+    /** Every chunk in [bounds] that [matches] but doesnt exist */
+    private fun fillGhost(bounds: ChunkBounds? = null, matches: (ChunkPos) -> Boolean) {
+        if (!includeUngenerated) return
+        val box = bounds ?: generatedBounds() ?: return
+        var capped = false
+        rows@ for (z in box.minZ..box.maxZ) {
+            for (x in box.minX..box.maxX) {
+                val pos = ChunkPos(x, z)
+                if (exists(pos) || !matches(pos)) continue
+                if (ghost.size >= MAX_GHOST_SELECT) {
+                    capped = true
+                    break@rows
+                }
+                ghost.add(pos.toLong())
+            }
+        }
+        if (capped) clipMessage = I18n.get("chunkeditor.map.ungenerated_capped", MAX_GHOST_SELECT)
+    }
+
+    /** The generated chunks bounding box, what an op with no reach of its own is held to */
+    private fun generatedBounds(): ChunkBounds? {
+        if (indices.isEmpty()) return null
+        var minX = Int.MAX_VALUE
+        var minZ = Int.MAX_VALUE
+        var maxX = Int.MIN_VALUE
+        var maxZ = Int.MIN_VALUE
+        indices.values.forEach { region ->
+            ChunkRegions.forEachChunk(region) { pos ->
+                minX = min(minX, pos.x)
+                minZ = min(minZ, pos.z)
+                maxX = max(maxX, pos.x)
+                maxZ = max(maxZ, pos.z)
+            }
+        }
+        return if (minX > maxX) null else ChunkBounds(minX, minZ, maxX, maxZ)
     }
 
     /** Refresh from disk, or ask the server to save before refreshing */
@@ -1066,6 +1224,7 @@ internal class ChunkMapScreen(
     private fun invalidateScan() {
         cancelScan()
         scan.clear()
+        clearChunkInfo()
         overlayReady = false
         overlayTextures.releaseAll()
         if (overlayVisible) ensureOverlay()
@@ -1075,17 +1234,23 @@ internal class ChunkMapScreen(
         val spawnChunk = ChunkPos(spawn.x shr 4, spawn.z shr 4)
         indices.values.forEach { region ->
             ChunkRegions.forEachChunk(region) { pos ->
-                val packed = pos.toLong()
-                val hit = (criteria.minSpawnDistance == null ||
-                    pos.getChessboardDistance(spawnChunk) > criteria.minSpawnDistance) &&
-                    (criteria.maxInhabitedTicks == null ||
-                        (scan.value(ChunkMetric.INHABITED_TIME, packed) ?: 0L) < criteria.maxInhabitedTicks) &&
-                    (criteria.olderThanTicks == null ||
-                        worldTime - (scan.value(ChunkMetric.LAST_UPDATE, packed) ?: 0L) > criteria.olderThanTicks)
-                if (hit) selected.add(packed)
+                if (matches(criteria, pos, spawnChunk)) selected.add(pos.toLong())
             }
         }
+        // A closed range carries its own reach, so it fills past the last real chunk
+        fillGhost(criteria.spawnDistance?.max?.let { around(spawnChunk, it) }) {
+            matches(criteria, it, spawnChunk)
+        }
         onSelectionChanged()
+    }
+
+    private fun matches(criteria: TrimCriteria, pos: ChunkPos, spawnChunk: ChunkPos): Boolean {
+        val packed = pos.toLong()
+        return (criteria.spawnDistance?.contains(pos, spawnChunk) != false) &&
+            (criteria.maxInhabitedTicks == null ||
+                (scan.value(ChunkMetric.INHABITED_TIME, packed) ?: 0L) < criteria.maxInhabitedTicks) &&
+            (criteria.olderThanTicks == null ||
+                worldTime - (scan.value(ChunkMetric.LAST_UPDATE, packed) ?: 0L) > criteria.olderThanTicks)
     }
 
     private fun onSelectionChanged() {
@@ -1156,6 +1321,7 @@ internal class ChunkMapScreen(
                 totalChunks = indices.values.sumOf { it.count }
                 totalBytes = indices.values.sumOf { it.bytes }
                 selected.clear()
+                ghost.clear()
                 unreadable.clear()
                 dropTextures()
                 // A render started before the delete would land with the deleted chunks still on it.
@@ -1228,6 +1394,7 @@ internal class ChunkMapScreen(
         // every frame would rebuild the evicted ones
         val perChunk = visible.size <= OVERLAY_CACHE
         visible.forEach { region -> drawRegion(graphics, region, withTerrain, perChunk) }
+        if (perChunk) drawGhostRegions(graphics)
         pumpCoarse(visible)
         drawGrid(graphics, visible)
         drawPlayers(graphics)
@@ -1238,19 +1405,41 @@ internal class ChunkMapScreen(
 
         drawHeightBar(graphics, mouseX, mouseY)
         drawInfo(graphics, mouseX, mouseY)
+        // Entity markers are items at z 150, the box has to sit above them
+        overlay(graphics) { drawChunkInfo(graphics) }
 
         dimensionPicker.renderOverlay(graphics, font, mouseX, mouseY)
         menus.forEach { it.renderOverlay(graphics, font, mouseX, mouseY) }
     }
 
-    private fun visibleRegions(): List<RegionIndex> {
-        if (indices.isEmpty()) return emptyList()
+    /**
+     * Ungenerated chunks can sit in regions with no file at all, which [drawRegion] never reaches
+     */
+    private fun drawGhostRegions(graphics: GuiGraphics) {
+        if (ghost.isEmpty()) return
+        forEachVisibleRegion { rx, rz ->
+            if (indices.containsKey(key(rx, rz))) return@forEachVisibleRegion
+            val id = selectionTexture(rx, rz) ?: return@forEachVisibleRegion
+            val x = screenX(rx.toDouble() * REGION_BLOCKS).roundToInt()
+            val y = screenY(rz.toDouble() * REGION_BLOCKS).roundToInt()
+            val w = screenX((rx + 1).toDouble() * REGION_BLOCKS).roundToInt() - x
+            val h = screenY((rz + 1).toDouble() * REGION_BLOCKS).roundToInt() - y
+            if (w > 0 && h > 0) blit(graphics, id, x, y, w, h, REGION_SIZE)
+        }
+    }
+
+    private inline fun forEachVisibleRegion(action: (Int, Int) -> Unit) {
         val minRx = floor(blockX(mapLeft().toDouble()) / REGION_BLOCKS).toInt()
         val maxRx = floor(blockX(mapRight().toDouble()) / REGION_BLOCKS).toInt()
         val minRz = floor(blockZ(mapTop().toDouble()) / REGION_BLOCKS).toInt()
         val maxRz = floor(blockZ(mapBottom().toDouble()) / REGION_BLOCKS).toInt()
+        for (rz in minRz..maxRz) for (rx in minRx..maxRx) action(rx, rz)
+    }
+
+    private fun visibleRegions(): List<RegionIndex> {
+        if (indices.isEmpty()) return emptyList()
         val found = ArrayList<RegionIndex>()
-        for (rz in minRz..maxRz) for (rx in minRx..maxRx) indices[key(rx, rz)]?.let { found.add(it) }
+        forEachVisibleRegion { rx, rz -> indices[key(rx, rz)]?.let { found.add(it) } }
         return found
     }
 
@@ -1286,7 +1475,7 @@ internal class ChunkMapScreen(
         }
         if (perChunk) {
             if (overlayVisible) overlayTexture(region)?.let { blit(graphics, it, x, y, w, h, REGION_SIZE) }
-            selectionTexture(region)?.let { blit(graphics, it, x, y, w, h, REGION_SIZE) }
+            selectionTexture(region.rx, region.rz)?.let { blit(graphics, it, x, y, w, h, REGION_SIZE) }
         }
     }
 
@@ -1540,12 +1729,20 @@ internal class ChunkMapScreen(
         val selectedLabel = "${I18n.get("chunkeditor.map.selected")}:"
         graphics.drawString(font, selectedLabel, MARGIN + 6, secondY, SUBTEXT_COLOR)
         val countX = MARGIN + 6 + font.width(selectedLabel) + 4
-        graphics.drawString(font, selected.size.toString(), countX, secondY, -1)
-        val summaryX = countX + font.width(reservedCount(selected.size)) + 14
+        val count = if (ghost.isEmpty()) selected.size.toString() else "${selected.size} (+${ghost.size})"
+        graphics.drawString(font, count, countX, secondY, -1)
+        val summaryX = countX + max(font.width(reservedCount(selected.size)), font.width(count)) + 14
 
         val summary = when {
             dimension == null -> I18n.get("chunkeditor.map.no_regions")
-            loading -> I18n.get("chunkeditor.map.reading")
+            loading -> {
+                val progress = loadProgress
+                when {
+                    progress == null -> I18n.get("chunkeditor.map.reading")
+                    progress.second == 0 -> I18n.get("chunkeditor.map.waiting_save")
+                    else -> I18n.get("chunkeditor.map.reading_progress", progress.first, progress.second)
+                }
+            }
             else -> I18n.get("chunkeditor.map.summary", indices.size, totalChunks, bytes(totalBytes))
         }
         graphics.drawString(font, summary, summaryX, secondY, -1)
@@ -1570,7 +1767,7 @@ internal class ChunkMapScreen(
         }
     }
 
-    /** `<overlay>: <min> gradient <max>` right aligned */
+    /** `<overlay>: <min> gradient <max> (<hovered chunk>)` right aligned */
     private fun drawOverlayLegend(
         graphics: GuiGraphics, right: Int, y: Int, minX: Int, hovered: Long?,
     ): Boolean {
@@ -1580,7 +1777,9 @@ internal class ChunkMapScreen(
         val name = "${mode.label}:"
         val low = mode.format(overlayMin)
         val high = mode.format(overlayMax)
-        var x = right - (font.width(name) + font.width(low) + font.width(high) + LEGEND_W + 12)
+        val current = hovered?.let { scan.value(mode.metric, it) }
+            ?.let { "(${mode.format(mode.value(it, worldTime, overlayNow))})" } ?: "(–)"
+        var x = right - (font.width(name) + font.width(low) + font.width(high) + font.width(current) + LEGEND_W + 16)
         if (x < minX) return false
         graphics.drawString(font, name, x, y, SUBTEXT_COLOR)
         x += font.width(name) + 4
@@ -1592,6 +1791,7 @@ internal class ChunkMapScreen(
         }
         x += LEGEND_W + 4
         graphics.drawString(font, high, x, y, -1)
+        graphics.drawString(font, current, x + font.width(high) + 4, y, SUBTEXT_COLOR)
         return true
     }
 
@@ -1609,6 +1809,99 @@ internal class ChunkMapScreen(
         x += font.width(name) + 4
         graphics.drawString(font, label, x, y, -1)
         return true
+    }
+
+    /** What a clicked chunk holds, pinned beside the click on whichever side has room */
+    private fun drawChunkInfo(graphics: GuiGraphics) {
+        val pos = infoChunk ?: return
+        val info = chunkInfos[pos.toLong()]
+        val now = System.currentTimeMillis() / 1000
+        val header = "${I18n.get("chunkeditor.map.chunk")} ${pos.x}, ${pos.z} " +
+                "(${pos.regionX}, ${pos.regionZ})"
+        val rows = infoFacts.map { fact -> fact.label to infoValue(info) { factValue(fact, it, now) } }
+        val labelW = rows.maxOfOrNull { font.width("${it.first}:") } ?: 0
+        val valueW = rows.maxOfOrNull { font.width(it.second) } ?: 0
+        val lines = rows.size + 1
+        val boxW = CHUNK_BOX_PAD * 2 + max(font.width(header), labelW + 6 + valueW)
+        val boxH = CHUNK_BOX_PAD * 2 + lines * font.lineHeight + (lines - 1) * CHUNK_BOX_ROW_GAP
+        val left = place(infoX, boxW, mapLeft() + 1, mapRight() - 1)
+        val top = place(infoY, boxH, mapTop() + 1, mapBottom() - 1)
+        drawBox(graphics, left, top, left + boxW, top + boxH)
+        var y = top + CHUNK_BOX_PAD
+        graphics.drawString(font, header, left + CHUNK_BOX_PAD, y, -1)
+        y += font.lineHeight + CHUNK_BOX_ROW_GAP
+        rows.forEach { (label, value) ->
+            graphics.drawString(font, "$label:", left + CHUNK_BOX_PAD, y, SUBTEXT_COLOR)
+            graphics.drawString(font, value, left + CHUNK_BOX_PAD + labelW + 6, y, -1)
+            y += font.lineHeight + CHUNK_BOX_ROW_GAP
+        }
+    }
+
+    private fun place(anchor: Int, size: Int, from: Int, to: Int): Int {
+        val behind = anchor + CHUNK_BOX_GAP
+        val start = if (behind + size <= to) behind else anchor - CHUNK_BOX_GAP - size
+        return start.coerceIn(from, (to - size).coerceAtLeast(from))
+    }
+
+    private fun infoValue(info: ChunkInfo?, pick: (ChunkInfo) -> String?): String =
+        if (info == null) "…" else pick(info) ?: "–"
+
+    private fun factValue(fact: ChunkFact, info: ChunkInfo, now: Long): String? =
+        if (fact == ChunkFact.BIOME) info.biome?.let { OverlayColors.categoryName(it) }
+        else info.numbers[fact]?.let { fact.overlay.format(fact.overlay.value(it, worldTime, now)) }
+
+    private fun openChunkInfo(pos: ChunkPos, x: Double, y: Double) {
+        if (!exists(pos)) {
+            infoChunk = null
+            return
+        }
+        infoChunk = pos
+        infoX = x.roundToInt()
+        infoY = y.roundToInt()
+        // Whatever was cached answered another question once the settings changed
+        val facts = EditorConfig.chunkFacts()
+        if (facts != infoFacts) {
+            infoFacts = facts
+            chunkInfos.clear()
+            infoLoading.clear()
+        }
+        val packed = pos.toLong()
+        if (chunkInfos.containsKey(packed)) return
+        fromScan(pos, facts)?.let {
+            chunkInfos[packed] = it
+            return
+        }
+        val dim = dimension ?: return
+        if (!infoLoading.add(packed)) return
+        val generation = loadGen
+        Constants.SCOPE.launch {
+            val read = runCatching { backend.chunkInfo(dim, pos, facts, yMin) }
+                .onFailure { Constants.LOG.warn("Failed to read chunk {}: {}", pos, it.message) }
+                .getOrNull()
+            minecraft.execute {
+                infoLoading.remove(packed)
+                if (generation == loadGen && facts == infoFacts && read != null) chunkInfos[packed] = read
+            }
+        }
+    }
+
+    /** A pass over the whole dimension already holds every value the box wants */
+    private fun fromScan(pos: ChunkPos, facts: Set<ChunkFact>): ChunkInfo? {
+        if (facts.any { !scan.has(it.metric.source) }) return null
+        val packed = pos.toLong()
+        val numbers = EnumMap<ChunkFact, Long>(ChunkFact::class.java)
+        var biome: String? = null
+        facts.forEach { fact ->
+            val value = scan.value(fact.metric, packed) ?: return@forEach
+            if (fact == ChunkFact.BIOME) biome = scan.labels.getOrNull(value.toInt()) else numbers[fact] = value
+        }
+        return ChunkInfo(pos, numbers, biome)
+    }
+
+    private fun clearChunkInfo() {
+        infoChunk = null
+        chunkInfos.clear()
+        infoLoading.clear()
     }
 
     private fun drawZoomSlider(graphics: GuiGraphics, mouseX: Int, mouseY: Int) {
@@ -1682,25 +1975,29 @@ internal class ChunkMapScreen(
     }
 
     /** Null when nothing in the region is selected, so the common case costs no blit at all. */
-    private fun selectionTexture(region: RegionIndex): ResourceLocation? {
-        if (selected.isEmpty()) return null
-        val regionKey = key(region.rx, region.rz)
+    private fun selectionTexture(rx: Int, rz: Int): ResourceLocation? {
+        if (selected.isEmpty() && ghost.isEmpty()) return null
+        val regionKey = key(rx, rz)
         selection[regionKey]?.let { return it }
         var any = false
         val image = NativeImage(NativeImage.Format.RGBA, REGION_SIZE, REGION_SIZE, false)
         for (z in 0 until REGION_SIZE) {
             for (x in 0 until REGION_SIZE) {
-                val pos = ChunkPos(region.rx * REGION_SIZE + x, region.rz * REGION_SIZE + z)
-                val on = selected.contains(pos.toLong())
-                if (on) any = true
-                image.setPixelRGBA(x, z, if (on) abgr(SELECTED_COLOR) else 0)
+                val packed = ChunkPos.asLong(rx * REGION_SIZE + x, rz * REGION_SIZE + z)
+                val color = when {
+                    selected.contains(packed) -> SELECTED_COLOR
+                    ghost.contains(packed) -> GHOST_SELECTED_COLOR
+                    else -> 0
+                }
+                if (color != 0) any = true
+                image.setPixelRGBA(x, z, abgr(color))
             }
         }
         if (!any) {
             image.close()
             return null
         }
-        return register("chunkmap/selection/${region.rx}_${region.rz}", image).also { selection[regionKey] = it }
+        return register("chunkmap/selection/${rx}_${rz}", image).also { selection[regionKey] = it }
     }
 
     /** The heatmap of a region, a pixel per chunk. Null until the scan and its range are in */
@@ -1913,6 +2210,7 @@ internal class ChunkMapScreen(
     override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
         val x = mouseX
         val y = mouseY
+        infoChunk = null
         if (dimensionPicker.mouseClicked(x, y)) return true
         if (menus.any { it.mouseClicked(x, y) }) return true
         if (pasteClip != null) {
@@ -1991,7 +2289,9 @@ internal class ChunkMapScreen(
         if (panning) {
             panning = false
             // A press that never moved is a click on one chunk, not a pan.
-            if (!moved && inMap(mouseX, mouseY)) toggle(chunkAt(mouseX, mouseY))
+            if (!moved && inMap(mouseX, mouseY)) {
+                openChunkInfo(chunkAt(mouseX, mouseY), mouseX, mouseY)
+            }
             return true
         }
         val from = dragFrom
@@ -2010,6 +2310,10 @@ internal class ChunkMapScreen(
         if (menus.any { it.keyPressed(keyCode) }) return true
         if (pasteClip != null && keyCode == InputConstants.KEY_ESCAPE) {
             cancelPaste()
+            return true
+        }
+        if (infoChunk != null && keyCode == InputConstants.KEY_ESCAPE) {
+            infoChunk = null
             return true
         }
         // Same guards the menu items carry
@@ -2044,6 +2348,7 @@ internal class ChunkMapScreen(
             return true
         }
         if (!inMap(mouseX, mouseY)) return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY)
+        infoChunk = null
         val anchorX = blockX(mouseX)
         val anchorZ = blockZ(mouseY)
         scale = zoom(scale, scrollY)
@@ -2054,8 +2359,8 @@ internal class ChunkMapScreen(
     }
 
     private fun toggle(pos: ChunkPos) {
-        if (!exists(pos)) return
-        if (!selected.remove(pos.toLong())) selected.add(pos.toLong())
+        val set = setFor(pos) ?: return
+        if (!set.remove(pos.toLong())) set.add(pos.toLong())
         onSelectionChanged()
     }
 
@@ -2063,11 +2368,18 @@ internal class ChunkMapScreen(
         for (z in min(from.z, to.z)..max(from.z, to.z)) {
             for (x in min(from.x, to.x)..max(from.x, to.x)) {
                 val pos = ChunkPos(x, z)
-                if (!exists(pos)) continue
-                if (dragRemoves) selected.remove(pos.toLong()) else selected.add(pos.toLong())
+                val set = setFor(pos) ?: continue
+                if (dragRemoves) set.remove(pos.toLong()) else set.add(pos.toLong())
             }
         }
         onSelectionChanged()
+    }
+
+    /** Which of the two sets a clicked chunk belongs in, null when it may not be selected at all */
+    private fun setFor(pos: ChunkPos): LongOpenHashSet? = when {
+        exists(pos) -> selected
+        includeUngenerated -> ghost
+        else -> null
     }
 
     private fun exists(pos: ChunkPos) = indices[key(pos.regionX, pos.regionZ)]?.contains(pos) == true
@@ -2121,23 +2433,75 @@ internal class ChunkMapScreen(
 
         fun abgr(argb: Int): Int =
             (argb and -0x1000000) or (argb and 0xFF shl 16) or (argb and 0xFF00) or (argb ushr 16 and 0xFF)
-
-        fun bytes(value: Long): String = when {
-            value >= 1024L * 1024 * 1024 -> "%.1f GB".format(value / (1024.0 * 1024 * 1024))
-            value >= 1024 * 1024 -> "%.1f MB".format(value / (1024.0 * 1024))
-            else -> "%.0f KB".format(value / 1024.0)
-        }
     }
 }
+
+fun bytes(value: Long): String = when {
+    value >= 1024L * 1024 * 1024 -> "%.1f GB".format(value / (1024.0 * 1024 * 1024))
+    value >= 1024 * 1024 -> "%.1f MB".format(value / (1024.0 * 1024))
+    else -> "%.0f KB".format(value / 1024.0)
+}
+
+/** A chunk rectangle, both corners in it */
+class ChunkBounds(val minX: Int, val minZ: Int, val maxX: Int, val maxZ: Int)
+
+/** The box [radius] chunks around [center], clamped so the corners stay in Int */
+fun around(center: ChunkPos, radius: Int) = ChunkBounds(
+    (center.x.toLong() - radius).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt(),
+    (center.z.toLong() - radius).coerceAtLeast(Int.MIN_VALUE.toLong()).toInt(),
+    (center.x.toLong() + radius).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+    (center.z.toLong() + radius).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+)
 
 data class TrimCriteria(
     val maxInhabitedTicks: Long?,
     val olderThanTicks: Long?,
-    val minSpawnDistance: Int?,
+    val spawnDistance: SpawnRange?,
 ) {
-    val isEmpty get() = maxInhabitedTicks == null && olderThanTicks == null && minSpawnDistance == null
+    val isEmpty get() = maxInhabitedTicks == null && olderThanTicks == null && spawnDistance == null
     val needsScan get() = maxInhabitedTicks != null || olderThanTicks != null
 }
+
+enum class DistanceShape { SQUARE, CIRCULAR }
+
+/**
+ * Parsed from `min`, `min:max` or `min:` / `min:inf` / `min:*`, a blank min being 0.
+ */
+data class SpawnRange(val min: Int, val max: Int?, val shape: DistanceShape) {
+
+    fun contains(pos: ChunkPos, spawn: ChunkPos): Boolean = when (shape) {
+        DistanceShape.SQUARE -> {
+            val distance = pos.getChessboardDistance(spawn)
+            distance >= min && (max == null || distance <= max)
+        }
+
+        DistanceShape.CIRCULAR -> {
+            val dx = (pos.x - spawn.x).toLong()
+            val dz = (pos.z - spawn.z).toLong()
+            val squared = dx * dx + dz * dz
+            squared >= min.toLong() * min && (max == null || squared <= max.toLong() * max)
+        }
+    }
+
+    companion object {
+        private val OPEN = setOf("", "inf", "infinity", "*")
+
+        fun parse(input: String, shape: DistanceShape): SpawnRange? {
+            val parts = input.trim().split(':')
+            if (parts.size > 2) return null
+            val min = parts[0].trim().let { if (it.isEmpty()) 0 else it.toIntOrNull() ?: return null }
+            val raw = parts.getOrNull(1)?.trim()?.lowercase()
+            val max = if (raw == null || raw in OPEN) null else raw.toIntOrNull() ?: return null
+            if (min < 0 || (max != null && max < min)) return null
+            return SpawnRange(min, max, shape)
+        }
+    }
+}
+
+private val SHAPE_SPRITES = mapOf(
+    DistanceShape.SQUARE to ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "form/square"),
+    DistanceShape.CIRCULAR to ResourceLocation.fromNamespaceAndPath(Constants.MOD_ID, "form/circle"),
+)
 
 /**
  * The criteria popup. Each row is a checkbox plus a number
@@ -2157,6 +2521,8 @@ internal class ChunkTrimScreen(
     private lateinit var staleValue: EditBox
     private lateinit var distanceBox: Checkbox
     private lateinit var distanceValue: EditBox
+    private lateinit var shapeButton: IconButton
+    private var shape = DistanceShape.SQUARE
 
     /** 1.21's `Screen.minecraft` is nullable */
     private val minecraft: Minecraft get() = Minecraft.getInstance()
@@ -2184,9 +2550,14 @@ internal class ChunkTrimScreen(
         val stale = row("chunkeditor.trim.stale", "60") {}
         staleBox = stale.first
         staleValue = stale.second
+        val distanceY = y
         val distance = row("chunkeditor.trim.distance", "32") {}
         distanceBox = distance.first
         distanceValue = distance.second
+        shapeButton = addRenderableWidget(
+            IconButton(fieldX - 24, distanceY, 20, 20, shapeName(), { SHAPE_SPRITES.getValue(shape) }) { cycleShape() }
+        )
+        applyShapeTooltip()
 
         panelBottom = y + 40
         addRenderableWidget(
@@ -2204,12 +2575,26 @@ internal class ChunkTrimScreen(
             TrimCriteria(
                 if (inhabitedBox.selected()) minutes(inhabitedValue) else null,
                 if (staleBox.selected()) minutes(staleValue) else null,
-                if (distanceBox.selected()) distanceValue.value.trim().toIntOrNull() else null,
+                if (distanceBox.selected()) SpawnRange.parse(distanceValue.value, shape) else null,
             )
         )
     }
 
     private fun minutes(field: EditBox): Long? = field.value.trim().toLongOrNull()?.times(TICKS_PER_MINUTE)
+
+    private fun cycleShape() {
+        shape = DistanceShape.entries[(shape.ordinal + 1) % DistanceShape.entries.size]
+        shapeButton.message = shapeName()
+        applyShapeTooltip()
+    }
+
+    private fun shapeName() = Component.translatable("chunkeditor.trim.shape.${shape.name.lowercase()}")
+
+    private fun applyShapeTooltip() = shapeButton.setTooltip(
+        Tooltip.create(shapeName().copy().append(CommonComponents.NEW_LINE).append(
+            Component.translatable("chunkeditor.trim.range.hint").withColor(SUBTEXT_COLOR)
+        ))
+    )
 
     override fun renderBackground(graphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         super.renderBackground(graphics, mouseX, mouseY, partialTick)

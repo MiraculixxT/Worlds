@@ -8,6 +8,10 @@ version = property("chunkEditorVersion") as String
 base.archivesName = "chunk-editor-fabric"
 
 
+repositories {
+    maven("https://repo.codemc.io/repository/maven-public/") { name = "CodeMC" }
+}
+
 dependencies {
     implementation(project(path = ":common:common-fabric", configuration = "namedElements"))
     include(project(":common:common-fabric"))
@@ -19,6 +23,8 @@ dependencies {
     "modImplementation"(fabricApi.module("fabric-lifecycle-events-v1", fapiVersion))
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.+")
+
+    compileOnly("org.popcraft:chunky-common:$CHUNKY_VERSION")
 }
 
 modPublish {
@@ -34,5 +40,6 @@ modPublish {
 modrinth {
     dependencies {
         optional.project(property("worldsModrinthId") as String)
+        optional.project("chunky")
     }
 }

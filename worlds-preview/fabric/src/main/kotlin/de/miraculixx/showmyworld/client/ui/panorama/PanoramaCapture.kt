@@ -4,6 +4,7 @@ import de.miraculixx.showmyworld.Constants
 import de.miraculixx.showmyworld.client.PreviewConfig
 import java.nio.file.Files
 import java.nio.file.Path
+import net.minecraft.client.CameraType
 import net.minecraft.client.Minecraft
 import net.minecraft.world.level.storage.LevelResource
 
@@ -48,7 +49,14 @@ object PanoramaCapture {
             Constants.LOG.warn("Could not create {}: {}", dir, e.message)
             return
         }
-        val result = minecraft.grabPanoramixScreenshot(dir.toFile(), CAPTURE_SIZE, CAPTURE_SIZE)
+        // Force reset camera for a clean capture
+        val cameraType = minecraft.options.cameraType
+        minecraft.options.cameraType = CameraType.FIRST_PERSON
+        val result = try {
+            minecraft.grabPanoramixScreenshot(dir.toFile(), CAPTURE_SIZE, CAPTURE_SIZE)
+        } finally {
+            minecraft.options.cameraType = cameraType
+        }
         // The PNGs are written async, so the folder is not readable yet
         WorldPanorama.awaitCapture(root)
         Constants.LOG.info("Panorama for {}: {}", root.fileName, result.string)

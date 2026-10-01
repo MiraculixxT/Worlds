@@ -4,6 +4,8 @@ import de.miraculixx.chunkeditor.Constants
 import de.miraculixx.chunkeditor.data.CLIP_FILE
 import de.miraculixx.chunkeditor.data.ChunkClips
 import de.miraculixx.chunkeditor.data.ClipImportOptions
+import de.miraculixx.chunkeditor.data.ChunkFact
+import de.miraculixx.chunkeditor.data.ChunkInfo
 import de.miraculixx.chunkeditor.data.ClipInfo
 import de.miraculixx.chunkeditor.data.EditorBackend
 import de.miraculixx.chunkeditor.data.EntityMarker
@@ -12,12 +14,15 @@ import de.miraculixx.chunkeditor.data.LevelFacts
 import de.miraculixx.chunkeditor.data.PlayerMarker
 import de.miraculixx.chunkeditor.data.RegionIndex
 import de.miraculixx.chunkeditor.data.RegionPixels
+import de.miraculixx.chunkeditor.data.RenderStore
 import de.miraculixx.chunkeditor.data.ScanResult
 import de.miraculixx.chunkeditor.data.ScanSource
 import de.miraculixx.chunkeditor.data.WorldDimension
 import de.miraculixx.chunkeditor.data.ClipExportResult
 import de.miraculixx.chunkeditor.data.ClipFootprint
 import de.miraculixx.chunkeditor.data.ClipLibrary
+import de.miraculixx.chunkeditor.data.ChunkyTask
+import de.miraculixx.chunkeditor.data.GenerateOutcome
 import de.miraculixx.chunkeditor.net.Bodies
 import de.miraculixx.chunkeditor.net.LibraryBodies
 import de.miraculixx.chunkeditor.net.C2S
@@ -43,8 +48,9 @@ private const val UPLOAD_WINDOW = 32
 
 /**
  * The editor over a remote world, working like normal, just that the server does all
+ * @param renders where uncut renders are kept between opens, `null` to always fetch
  */
-class RemoteBackend(hello: Hello) : EditorBackend {
+class RemoteBackend(hello: Hello, private val renders: RenderStore?) : EditorBackend {
 
     override val dimensions: List<WorldDimension> = hello.dimensions
 
@@ -59,17 +65,40 @@ class RemoteBackend(hello: Hello) : EditorBackend {
 
     val worldName: String = hello.worldName
 
-    override suspend fun regionList(dimension: WorldDimension): List<Pair<Int, Int>> =
-        Bodies.readRegionList(ClientNet.request(C2S.REGION_LIST, Bodies.dimensionRequest(dimension)))
+    val chunkyAvailable: Boolean = hello.chunky
+
+    override suspend fun indexes(dimension: WorldDimension, onProgress: (Int, Int) -> Unit): List<RegionIndex> =
+        Bodies.readIndexes(ClientNet.request(C2S.INDEXES, Bodies.dimensionRequest(dimension), onProgress))
 
     override suspend fun index(dimension: WorldDimension, rx: Int, rz: Int): RegionIndex? =
         Bodies.readIndex(ClientNet.request(C2S.INDEX, Bodies.indexRequest(dimension, rx, rz)))
 
     override suspend fun heightBounds(dimension: WorldDimension, pos: ChunkPos): IntRange? =
-        Bodies.readRange(ClientNet.request(C2S.HEIGHT_BOUNDS, Bodies.heightRequest(dimension, pos)))
+        Bodies.readRange(ClientNet.request(C2S.HEIGHT_BOUNDS, Bodies.chunkRequest(dimension, pos)))
 
+    override suspend fun chunkInfo(dimension: WorldDimension, pos: ChunkPos, facts: Set<ChunkFact>, minY: Int): ChunkInfo =
+        Bodies.readChunkInfo(
+            ClientNet.request(C2S.CHUNK_INFO, Bodies.chunkInfoRequest(dimension, pos, facts, minY)), pos,
+        )
+
+    /** Sends the stamp of the stored render along, the server only answers pixels when the region changed */
     override suspend fun render(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?): RegionPixels? =
-        Bodies.readPixels(ClientNet.request(C2S.RENDER, Bodies.renderRequest(dimension, rx, rz, step, maxY)))
+        withContext(Dispatchers.IO) {
+            val store = renders?.takeIf { maxY == null }
+            // A stored copy that does not decode is not offered, so the server sends it new
+            val held = store?.read(dimension, rx, rz, step)?.let { (stamp, packed) ->
+                runCatching { Bodies.readPixels(Bodies.inflate(packed)) }.getOrNull()?.let { stamp to it }
+            }
+            val (stamp, packed) = Bodies.readRender(
+                ClientNet.request(C2S.RENDER, Bodies.renderRequest(dimension, rx, rz, step, maxY, held?.first ?: 0L)),
+            )
+            if (packed == null) return@withContext held?.second
+            val pixels = Bodies.readPixels(Bodies.inflate(packed))
+            if (store != null && pixels != null && pixels.unreadable.isEmpty() && stamp != 0L) {
+                store.write(dimension, rx, rz, step, stamp, packed)
+            }
+            pixels
+        }
 
     override suspend fun scan(
         dimension: WorldDimension,
@@ -137,6 +166,15 @@ class RemoteBackend(hello: Hello) : EditorBackend {
         )
         return ImportResult.Success(queued, 0, 0)
     }
+
+    /** @param chunks the exact list for a csv run, `null` runs [task] as the shape it is */
+    suspend fun generate(
+        dimension: WorldDimension,
+        task: ChunkyTask,
+        chunks: Collection<ChunkPos>?,
+    ): GenerateOutcome = Bodies.readGenerate(
+        ClientNet.request(C2S.GENERATE, Bodies.generateRequest(dimension, task, chunks)),
+    )
 
     suspend fun jobs(): JobQueue = Bodies.readJobQueue(ClientNet.request(C2S.JOB_LIST, ByteArray(0)))
 

@@ -29,7 +29,7 @@ object ChunkClipExport {
 
         return try {
             CHUNK_SUBS.forEach { sub ->
-                val source = ChunkRegions.storage(dimension, sub) ?: return@forEach
+                val source = ChunkRegions.reader(dimension, sub) ?: return@forEach
                 source.use { from ->
                     // Created only for a folder the save actually has, so an empty poi/ in a clip means the source had none.
                     ChunkClips.storage(dir, sub, dimension.key, true)!!.use { to ->

@@ -1,8 +1,11 @@
 package de.miraculixx.chunkeditor.client.ui
 
-import de.miraculixx.chunkeditor.Constants
+import de.miraculixx.chunkeditor.data.ChunkFact
 import de.miraculixx.chunkeditor.data.EditorConfig
 import de.miraculixx.chunkeditor.data.EditorSettings
+import de.miraculixx.chunkeditor.data.RenderStore
+import de.miraculixx.chunkeditor.Constants
+import kotlinx.coroutines.launch
 import de.miraculixx.common.client.ui.NativeDialogs
 import de.miraculixx.common.client.ui.SettingsCategory
 import de.miraculixx.common.client.ui.SettingsList
@@ -24,8 +27,9 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
 
     private val general = SettingsCategory("General").apply { expanded = true }
     private val library = SettingsCategory("Clip Library").apply { expanded = true }
+    private val chunkInfo = SettingsCategory("Chunk Info")
 
-    private val categories = listOf(general, library)
+    private val categories = listOf(general, chunkInfo, library)
 
     private lateinit var list: SettingsList
 
@@ -37,6 +41,10 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
     /** 1.21's `Screen.minecraft` is nullable */
     private val minecraft: Minecraft get() = Minecraft.getInstance()
 
+    /** `null` while measuring or purging */
+    @Volatile
+    private var cacheSize: Long? = null
+
     override fun init() {
         val listW = (width - 40).coerceAtMost(PANEL_W)
         val listX = (width - listW) / 2
@@ -44,6 +52,7 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
         list.place(listW, height - 34 - LIST_TOP, listX, LIST_TOP)
         list.rebuild()
         addRenderableWidget(list)
+        if (cacheSize == null) measureCache()
 
         addRenderableWidget(
             Button.builder(Component.translatable("controls.reset")) { resetAll() }
@@ -60,13 +69,23 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
         val defaults = EditorSettings()
         settings.libraryDir = defaults.libraryDir
         settings.skipOpenWarning = defaults.skipOpenWarning
+        settings.chunkInfo = defaults.chunkInfo
         list.rebuild()
     }
 
     private fun rowsFor(category: SettingsCategory): List<SettingsList.Row> = when (category) {
         general -> listOf(
             list.ToggleRow("Skip Opening Warnings", settings.skipOpenWarning) { settings.skipOpenWarning = it },
+            list.TextRow("Purge Cache", cacheSize?.let(::bytes) ?: "…", Component.literal("Purge")) {
+                if (cacheSize != null) purgeCache()
+            },
         )
+
+        chunkInfo -> ChunkFact.entries.map { fact ->
+            list.CheckRow(fact.title, fact.name in settings.chunkInfo) { shown ->
+                settings.chunkInfo = if (shown) settings.chunkInfo + fact.name else settings.chunkInfo - fact.name
+            }
+        }
 
         else -> listOf(
             list.TextRow("Change Folder", shorten(EditorConfig.libraryDir().toString()), Component.literal("Select")) {
@@ -82,6 +101,26 @@ class EditorSettingsScreen(private val parent: Screen?) : Screen(Component.trans
         runCatching { Files.createDirectories(dir) }
             .onFailure { Constants.LOG.warn("Could not create the clip library {}: {}", dir, it.message) }
         Util.getPlatform().openPath(dir)
+    }
+
+    private fun measureCache(purge: Boolean = false) {
+        cacheSize = null
+        Constants.SCOPE.launch {
+            val size = runCatching {
+                if (purge) RenderStore.delete()
+                RenderStore.size()
+            }.onFailure { Constants.LOG.warn("Render cache could not be {}: {}", if (purge) "purged" else "measured", it.message) }
+                .getOrDefault(0L)
+            minecraft.execute {
+                cacheSize = size
+                list.requestRebuild()
+            }
+        }
+    }
+
+    private fun purgeCache() {
+        measureCache(purge = true)
+        list.rebuild()
     }
 
     /**
