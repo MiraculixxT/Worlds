@@ -171,7 +171,7 @@ object ChunkScans {
                 FieldSelector(LongTag.TYPE, "LastUpdate"),
                 FieldSelector(IntTag.TYPE, "DataVersion"),
             )
-            store.scanChunk(pos, collector)
+            store.scan(pos, collector)
             val tag = collector.result as? CompoundTag ?: return@eachChunk
             val packed = pos.toLong()
             tag.getLong("InhabitedTime").ifPresent { inhabited[packed] = it }
@@ -280,9 +280,9 @@ object ChunkScans {
 
     private inline fun eachChunk(
         dimension: WorldDimension, sub: String, regions: Collection<RegionIndex>,
-        onProgress: (Int, Int) -> Unit, action: (RegionStore, ChunkPos) -> Unit,
+        onProgress: (Int, Int) -> Unit, action: (RegionReader, ChunkPos) -> Unit,
     ) {
-        ChunkRegions.storage(dimension, sub)?.use { store ->
+        ChunkRegions.reader(dimension, sub)?.use { store ->
             regions.forEachIndexed { done, region ->
                 ChunkRegions.forEachChunk(region) { pos ->
                     try {
@@ -299,7 +299,7 @@ object ChunkScans {
     /**
      * The mean surface height of a chunk using `Heightmaps.MOTION_BLOCKING`
      */
-    private fun avgHeight(tag: CompoundTag, minY: Int): Long? {
+    internal fun avgHeight(tag: CompoundTag, minY: Int): Long? {
         val heightmap = Heightmap.of(tag) ?: return null
         var sum = 0L
         var counted = 0
@@ -315,7 +315,7 @@ object ChunkScans {
     /**
      * Picks biome of chunk centers, up-most block
      */
-    private fun surfaceBiome(tag: CompoundTag, minY: Int): String? {
+    internal fun surfaceBiome(tag: CompoundTag, minY: Int): String? {
         val height = Heightmap.of(tag)?.at(CENTER_COLUMN)?.takeIf { it > 0L } ?: return null
         val y = (minY + height - 1).toInt()
         val section = tag.getListOrEmpty("sections").firstOrNull { entry ->

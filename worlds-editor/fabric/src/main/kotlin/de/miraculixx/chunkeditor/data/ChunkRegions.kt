@@ -4,6 +4,9 @@ package de.miraculixx.chunkeditor.data
 
 import de.miraculixx.chunkeditor.Constants
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import net.minecraft.core.registries.Registries
 import net.minecraft.nbt.CompoundTag
@@ -50,6 +53,8 @@ const val SUB_POI = "poi"
 
 val CHUNK_SUBS = listOf(SUB_REGION, SUB_ENTITIES, SUB_POI)
 private const val HEADER_BYTES = 4096
+private const val INDEX_READERS = 8
+private const val INDEX_BATCH = 64
 
 private val REGION_NAME = Regex("""r\.(-?\d+)\.(-?\d+)\.mca""")
 
@@ -110,6 +115,23 @@ object ChunkRegions {
     }
 
     /**
+     * Every regions header in one pass, [INDEX_READERS] files at a time
+     */
+    suspend fun readIndexes(dimension: WorldDimension, onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): List<RegionIndex> {
+        val regions = withContext(Dispatchers.IO) { listRegions(dimension) }
+        val readers = Dispatchers.IO.limitedParallelism(INDEX_READERS)
+        val done = java.util.concurrent.atomic.AtomicInteger()
+        return coroutineScope {
+            regions.chunked(INDEX_BATCH).map { batch ->
+                async(readers) {
+                    batch.mapNotNull { (rx, rz) -> readIndex(dimension, rx, rz) }
+                        .also { onProgress(done.addAndGet(batch.size), regions.size) }
+                }
+            }.awaitAll().flatten()
+        }
+    }
+
+    /**
      * The region's chunk bitmap. Only the first 4 KiB are read
      */
     fun readIndex(dimension: WorldDimension, rx: Int, rz: Int): RegionIndex? =
@@ -147,7 +169,7 @@ object ChunkRegions {
      * Read a chunks max & min world height
      */
     suspend fun heightBounds(dimension: WorldDimension, pos: ChunkPos): IntRange? = withContext(Dispatchers.IO) {
-        val store = storage(dimension, SUB_REGION) ?: return@withContext null
+        val store = reader(dimension, SUB_REGION) ?: return@withContext null
         try {
             val tag = store.read(pos) ?: return@withContext null
             val sections = tag.getListOrEmpty("sections")
@@ -224,6 +246,12 @@ object ChunkRegions {
             action(ChunkPos(region.rx * REGION_SIZE + i % REGION_SIZE, region.rz * REGION_SIZE + i / REGION_SIZE))
             i = region.present.nextSetBit(i + 1)
         }
+    }
+
+    /** Read-only access to one of the saves chunk folders */
+    internal fun reader(dimension: WorldDimension, sub: String): RegionReader? {
+        val dir = dimension.dir.resolve(sub)
+        return if (Files.isDirectory(dir)) RegionReader(dir, "${dimension.key.identifier()}/$sub") else null
     }
 
     /**

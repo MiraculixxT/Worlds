@@ -1,6 +1,11 @@
 package de.miraculixx.chunkeditor.net
 
+import de.miraculixx.chunkeditor.data.ChunkFact
+import de.miraculixx.chunkeditor.data.ChunkInfo
 import de.miraculixx.chunkeditor.data.ChunkMetric
+import de.miraculixx.chunkeditor.data.ChunkyTask
+import de.miraculixx.chunkeditor.data.FitShape
+import de.miraculixx.chunkeditor.data.GenerateOutcome
 import de.miraculixx.chunkeditor.data.ClipEntry
 import de.miraculixx.chunkeditor.data.ClipExportResult
 import de.miraculixx.chunkeditor.data.ClipFootprint
@@ -13,6 +18,8 @@ import de.miraculixx.chunkeditor.data.LevelFacts
 import de.miraculixx.chunkeditor.data.PlayerMarker
 import de.miraculixx.chunkeditor.data.RegionIndex
 import de.miraculixx.chunkeditor.data.RegionPixels
+import de.miraculixx.chunkeditor.data.REGION_SIZE
+import de.miraculixx.chunkeditor.data.TINT_CAP
 import de.miraculixx.chunkeditor.data.ScanResult
 import de.miraculixx.chunkeditor.data.ScanSource
 import de.miraculixx.chunkeditor.data.TintKey
@@ -33,6 +40,7 @@ import java.util.BitSet
 import java.util.UUID
 import java.util.zip.Deflater
 import java.util.zip.Inflater
+import java.util.EnumMap
 
 /** What the server tells a joining client about itself, before any screen exists. */
 class Hello(
@@ -43,6 +51,7 @@ class Hello(
     val dimensions: List<WorldDimension>,
     val facts: LevelFacts,
     val pendingJobs: Int,
+    val chunky: Boolean,
 )
 
 /** A queued [de.miraculixx.chunkeditor.server.Job] without its chunk list */
@@ -103,6 +112,7 @@ object Bodies {
         }
         writeFacts(buf, hello.facts)
         buf.writeVarInt(hello.pendingJobs)
+        buf.writeBoolean(hello.chunky)
     }
 
     fun readHello(bytes: ByteArray): Hello = read(bytes) { buf ->
@@ -115,7 +125,7 @@ object Bodies {
             val labelKey = buf.readUtf()
             remoteDimension(id, labelKey)
         }
-        Hello(protocol, canRead, canWrite, world, dimensions, readFacts(buf), buf.readVarInt())
+        Hello(protocol, canRead, canWrite, world, dimensions, readFacts(buf), buf.readVarInt(), buf.readBoolean())
     }
 
     /**
@@ -152,19 +162,34 @@ object Bodies {
         buf.writeInt(rz)
     }
 
-    fun heightRequest(dimension: WorldDimension, pos: ChunkPos): ByteArray = write { buf ->
+    fun chunkRequest(dimension: WorldDimension, pos: ChunkPos): ByteArray = write { buf ->
         buf.writeUtf(dimensionId(dimension))
         buf.writeInt(pos.x)
         buf.writeInt(pos.z)
     }
 
-    fun renderRequest(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?): ByteArray = write { buf ->
+    fun chunkInfoRequest(
+        dimension: WorldDimension, pos: ChunkPos, facts: Set<ChunkFact>, minY: Int,
+    ): ByteArray = write { buf ->
+        buf.writeUtf(dimensionId(dimension))
+        buf.writeInt(pos.x)
+        buf.writeInt(pos.z)
+        buf.writeInt(minY)
+        buf.writeVarInt(facts.fold(0) { mask, fact -> mask or (1 shl fact.ordinal) })
+    }
+
+    fun readFacts(mask: Int): Set<ChunkFact> =
+        ChunkFact.entries.filterTo(LinkedHashSet()) { mask and (1 shl it.ordinal) != 0 }
+
+    /** @param known the stamp of the render the client already holds, `0` for none */
+    fun renderRequest(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?, known: Long): ByteArray = write { buf ->
         buf.writeUtf(dimensionId(dimension))
         buf.writeInt(rx)
         buf.writeInt(rz)
         buf.writeVarInt(step)
         buf.writeBoolean(maxY != null)
         if (maxY != null) buf.writeInt(maxY)
+        buf.writeLong(known)
     }
 
     fun scanRequest(
@@ -215,20 +240,81 @@ object Bodies {
             chunks.forEach { buf.writeLong(it.toLong()) }
         }
 
+    /** @param chunks the exact list for a csv run, `null` lets the shape itself pick the chunks */
+    fun generateRequest(dimension: WorldDimension, task: ChunkyTask, chunks: Collection<ChunkPos>?): ByteArray =
+        write { buf ->
+            buf.writeUtf(dimensionId(dimension))
+            buf.writeVarInt(task.shape.ordinal)
+            buf.writeInt(task.centerChunkX)
+            buf.writeInt(task.centerChunkZ)
+            buf.writeVarInt(task.radiusChunksX)
+            buf.writeVarInt(task.radiusChunksZ)
+            buf.writeBoolean(chunks != null)
+            chunks?.let {
+                buf.writeVarInt(it.size)
+                it.forEach { pos -> buf.writeLong(pos.toLong()) }
+            }
+        }
+
+    /** Capped before task starts */
+    fun readGenerateTask(buf: FriendlyByteBuf): ChunkyTask {
+        val shape = FitShape.entries[buf.readVarInt().coerceIn(0, FitShape.entries.lastIndex)]
+        val centerX = buf.readInt()
+        val centerZ = buf.readInt()
+        val radiusX = buf.readVarInt().coerceIn(0, MAX_RADIUS_CHUNKS)
+        val radiusZ = buf.readVarInt().coerceIn(0, MAX_RADIUS_CHUNKS)
+        return ChunkyTask(shape, centerX, centerZ, radiusX, radiusZ)
+    }
+
+    fun readGenerateChunks(buf: FriendlyByteBuf): List<ChunkPos>? {
+        if (!buf.readBoolean()) return null
+        val count = buf.readVarInt()
+        require(count in 0..MAX_GENERATE_CHUNKS) { "Pre-generation list of $count chunks" }
+        return (0 until count).map { ChunkPos(buf.readLong()) }
+    }
+
+    fun writeGenerate(outcome: GenerateOutcome): ByteArray = write { buf ->
+        when (outcome) {
+            is GenerateOutcome.Started -> {
+                buf.writeBoolean(true)
+                buf.writeVarLong(outcome.chunks)
+            }
+
+            is GenerateOutcome.Failed -> {
+                buf.writeBoolean(false)
+                buf.writeUtf(outcome.key)
+            }
+        }
+    }
+
+    fun readGenerate(bytes: ByteArray): GenerateOutcome = read(bytes) { buf ->
+        if (buf.readBoolean()) GenerateOutcome.Started(buf.readVarLong()) else GenerateOutcome.Failed(buf.readUtf())
+    }
+
     //
     // Results
     //
 
-    fun writeRegionList(regions: List<Pair<Int, Int>>): ByteArray = write { buf ->
-        buf.writeVarInt(regions.size)
-        regions.forEach {
-            buf.writeInt(it.first)
-            buf.writeInt(it.second)
+    fun writeIndexes(indexes: List<RegionIndex>): ByteArray = write { buf ->
+        buf.writeVarInt(indexes.size)
+        indexes.forEach {
+            buf.writeInt(it.rx)
+            buf.writeInt(it.rz)
+            buf.writeVarLong(it.bytes)
+            buf.writeLongArray(it.present.toLongArray())
         }
     }
 
-    fun readRegionList(bytes: ByteArray): List<Pair<Int, Int>> = read(bytes) { buf ->
-        (0 until buf.readVarInt()).map { buf.readInt() to buf.readInt() }
+    fun readIndexes(bytes: ByteArray): List<RegionIndex> = read(bytes) { buf ->
+        val count = buf.readVarInt()
+        // One region takes at least 11 bytes, a larger count is a lie
+        require(count in 0..buf.readableBytes() / 11) { "Index list claims $count regions" }
+        (0 until count).map {
+            val rx = buf.readInt()
+            val rz = buf.readInt()
+            val size = buf.readVarLong()
+            RegionIndex(rx, rz, BitSet.valueOf(buf.readLongArray()), size)
+        }
     }
 
     fun writeIndex(index: RegionIndex?): ByteArray = write { buf ->
@@ -246,6 +332,27 @@ object Bodies {
         val rz = buf.readInt()
         val size = buf.readLong()
         RegionIndex(rx, rz, BitSet.valueOf(buf.readLongArray()), size)
+    }
+
+    fun writeChunkInfo(info: ChunkInfo): ByteArray = write { buf ->
+        buf.writeVarInt(info.numbers.size)
+        info.numbers.forEach { (fact, value) ->
+            buf.writeByte(fact.ordinal)
+            buf.writeLong(value)
+        }
+        buf.writeBoolean(info.biome != null)
+        info.biome?.let { buf.writeUtf(it) }
+    }
+
+    /** @param pos what was asked for, the answer only carries the values */
+    fun readChunkInfo(bytes: ByteArray, pos: ChunkPos): ChunkInfo = read(bytes) { buf ->
+        val numbers = EnumMap<ChunkFact, Long>(ChunkFact::class.java)
+        repeat(buf.readVarInt().coerceAtMost(ChunkFact.entries.size)) {
+            val fact = ChunkFact.entries.getOrNull(buf.readByte().toInt())
+            val value = buf.readLong()
+            if (fact != null) numbers[fact] = value
+        }
+        ChunkInfo(pos, numbers, if (buf.readBoolean()) buf.readUtf() else null)
     }
 
     fun writeRange(range: IntRange?): ByteArray = write { buf ->
@@ -311,14 +418,30 @@ object Bodies {
     fun readPixels(bytes: ByteArray): RegionPixels? = read(bytes) { buf ->
         if (!buf.readBoolean()) return@read null
         val size = buf.readVarInt()
+        require(size in 1..REGION_SIZE * 16) { "Render claims $size pixels" }
         val argb = IntArray(size * size) { buf.readInt() }
         val unreadable = HashSet<Long>()
-        repeat(buf.readVarInt()) { unreadable.add(buf.readLong()) }
-        val palette = (0 until buf.readVarInt()).map {
+        val broken = buf.readVarInt()
+        require(broken in 0..REGION_SIZE * REGION_SIZE) { "Render claims $broken unreadable chunks" }
+        repeat(broken) { unreadable.add(buf.readLong()) }
+        val paletteSize = buf.readVarInt()
+        require(paletteSize in 0..TINT_CAP) { "Render claims $paletteSize tints" }
+        val palette = (0 until paletteSize).map {
             TintKey(Identifier.parse(buf.readUtf()), buf.readUtf(), buf.readVarInt())
         }
         val tints = if (buf.readBoolean()) ShortArray(size * size) { buf.readShort() } else null
         RegionPixels(size, argb, unreadable, palette, tints)
+    }
+
+    /** @param packed the deflated [writePixels] body, `null` when the client copy still matches [stamp] */
+    fun writeRender(stamp: Long, packed: ByteArray?): ByteArray = write { buf ->
+        buf.writeLong(stamp)
+        buf.writeBoolean(packed != null)
+        packed?.let(buf::writeByteArray)
+    }
+
+    fun readRender(bytes: ByteArray): Pair<Long, ByteArray?> = read(bytes) { buf ->
+        buf.readLong() to if (buf.readBoolean()) buf.readByteArray(MAX_INFLATED) else null
     }
 
     fun writeScan(result: ScanResult): ByteArray = write { buf ->

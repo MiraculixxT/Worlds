@@ -7,8 +7,10 @@ import de.miraculixx.chunkeditor.net.C2S
 import de.miraculixx.chunkeditor.client.net.RemoteBackend
 import de.miraculixx.chunkeditor.client.ui.ChunkMapScreen
 import de.miraculixx.chunkeditor.client.ui.SaveBiomes
+import de.miraculixx.chunkeditor.data.RenderStore
 import de.miraculixx.chunkeditor.data.EditorConfig
 import de.miraculixx.chunkeditor.data.LocalBackend
+import de.miraculixx.common.client.ui.NativeDialogs
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.components.toasts.SystemToast
 import net.minecraft.client.gui.screens.ConfirmScreen
@@ -17,6 +19,8 @@ import net.minecraft.network.chat.CommonComponents
 import net.minecraft.network.chat.Component
 import net.minecraft.world.level.storage.LevelStorageSource
 import kotlinx.coroutines.launch
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * Quick access for other mods
@@ -39,6 +43,39 @@ object ChunkEditor {
             return
         }
         Constants.LOG.info("editor opened: local world {}", access.levelId)
+        val backend = LocalBackend(access, minecraft.user.profileId) { SaveBiomes.load(access) }
+        minecraft.setScreen(ChunkMapScreen(parent, backend) { access.safeClose() })
+    }
+
+    /** Lets the user pick any world folder, also outside of `saves` */
+    fun openPicked(parent: Screen) {
+        val minecraft = Minecraft.getInstance()
+        NativeDialogs.pickFolder("Select a world folder", minecraft.levelSource.baseDir) { folder ->
+            if (folder != null) openFolder(parent, folder)
+        }
+    }
+
+    private fun openFolder(parent: Screen, folder: Path) {
+        val minecraft = Minecraft.getInstance()
+        val root = folder.toAbsolutePath().normalize()
+        val name = root.fileName?.toString()
+        val base = root.parent
+        if (name == null || base == null || !Files.isRegularFile(root.resolve("level.dat"))) {
+            Constants.LOG.warn("Not a world folder: {}", root)
+            SystemToast.add(
+                minecraft.toastManager, SystemToast.SystemToastId.WORLD_ACCESS_FAILURE,
+                Component.translatable("chunkeditor.open.invalid"), Component.literal(root.toString()),
+            )
+            return
+        }
+        val access = try {
+            LevelStorageSource.createDefault(base).validateAndCreateAccess(name)
+        } catch (e: Exception) {
+            Constants.LOG.error("Failed to access level {}", root, e)
+            SystemToast.onWorldAccessFailure(minecraft, name)
+            return
+        }
+        Constants.LOG.info("editor opened: external world {}", root)
         val backend = LocalBackend(access, minecraft.user.profileId) { SaveBiomes.load(access) }
         minecraft.setScreen(ChunkMapScreen(parent, backend) { access.safeClose() })
     }
@@ -71,8 +108,13 @@ object ChunkEditor {
         )
     }
 
+    @Volatile
+    private var opening = false
+
     /** Asks the server for a fresh [Hello] (dimensions/facts) and opens the map */
     private fun openConfirmed(parent: Screen, hello: Hello, local: Boolean) {
+        if (opening) return
+        opening = true
         val minecraft = Minecraft.getInstance()
         val where = if (local) "integrated server" else minecraft.currentServer?.ip ?: "server"
         Constants.LOG.info(
@@ -83,7 +125,13 @@ object ChunkEditor {
             val fresh = runCatching { Bodies.readHello(ClientNet.request(C2S.OPEN, ByteArray(0))) }
                 .onFailure { Constants.LOG.warn("Chunk editor open failed, using join handshake: {}", it.message) }
                 .getOrDefault(hello)
-            minecraft.execute { minecraft.setScreen(ChunkMapScreen(parent, RemoteBackend(fresh))) }
+            // The integrated server keeps its own cache on this disk already
+            val renders = if (local) null else RenderStore.server(where, fresh.worldName)
+            renders?.let { runCatching { it.prune(fresh.dimensions) } }
+            minecraft.execute {
+                opening = false
+                minecraft.setScreen(ChunkMapScreen(parent, RemoteBackend(fresh, renders)))
+            }
         }
     }
 

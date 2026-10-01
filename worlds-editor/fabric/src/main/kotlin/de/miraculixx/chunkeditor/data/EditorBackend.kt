@@ -24,11 +24,15 @@ interface EditorBackend {
     /** Only for servers, where actions not instant */
     val writesAreQueued: Boolean
 
-    suspend fun regionList(dimension: WorldDimension): List<Pair<Int, Int>>
+    /** Every regions header of [dimension] in one pass */
+    suspend fun indexes(dimension: WorldDimension, onProgress: (done: Int, total: Int) -> Unit): List<RegionIndex>
 
     suspend fun index(dimension: WorldDimension, rx: Int, rz: Int): RegionIndex?
 
     suspend fun heightBounds(dimension: WorldDimension, pos: ChunkPos): IntRange?
+
+    /** Whatever of [facts] one clicked chunk holds */
+    suspend fun chunkInfo(dimension: WorldDimension, pos: ChunkPos, facts: Set<ChunkFact>, minY: Int): ChunkInfo
 
     suspend fun render(dimension: WorldDimension, rx: Int, rz: Int, step: Int, maxY: Int?): RegionPixels?
 
