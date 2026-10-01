@@ -6,10 +6,12 @@ import de.miraculixx.chunkeditor.data.ChunkClips
 import de.miraculixx.chunkeditor.data.ClipFootprint
 import de.miraculixx.chunkeditor.data.ClipImportOptions
 import de.miraculixx.chunkeditor.data.ExistingChunks
+import de.miraculixx.chunkeditor.data.GenerateOutcome
 import de.miraculixx.chunkeditor.data.ScanSource
 import de.miraculixx.chunkeditor.data.WorldDimension
 import de.miraculixx.chunkeditor.data.ImportResult
 import de.miraculixx.chunkeditor.data.LocalLibrary
+import de.miraculixx.chunkeditor.data.RenderStore
 import de.miraculixx.chunkeditor.net.Bodies
 import de.miraculixx.chunkeditor.net.LibraryBodies
 import de.miraculixx.chunkeditor.net.C2S
@@ -74,6 +76,7 @@ object EditorService {
     fun start(server: MinecraftServer) {
         this.server = server
         this.backend = null
+        backend()?.let { fresh -> Constants.SCOPE.launch { fresh.renders.prune(fresh.dimensions) } }
         // A loader that never delivered its registration event leaves no transport and no way to notice
         Constants.LOG.info(
             "Chunk editor service ready ({} job(s) queued, networking {})",
@@ -105,7 +108,7 @@ object EditorService {
     private fun hello(backend: ServerBackend, canRead: Boolean, canWrite: Boolean) = Bodies.writeHello(
         Hello(
             PROTOCOL_VERSION, canRead, canWrite, backend.root.fileName?.toString() ?: "world",
-            backend.dimensions, backend.facts, ServerJobs.list().size,
+            backend.dimensions, backend.facts, ServerJobs.list().size, ChunkyBridge.available,
         ),
     )
 
@@ -142,11 +145,20 @@ object EditorService {
         val backend = backend() ?: return fail(player, request, "chunkeditor.remote.error.unavailable")
         try {
             when (kind) {
-                C2S.REGION_LIST -> {
+                C2S.INDEXES -> {
                     val dimension = dimension(backend, body) ?: return fail(player, request, DIMENSION_GONE)
-                    onDimension(dimension) {
-                        reply(player, request, Bodies.writeRegionList(backend.regionList(dimension)))
+                    // Progress 0/0 means "waiting for the save"
+                    Net.toClient(player, request, S2C.PROGRESS, Bodies.writeProgress(0, 0))
+                    backend.awaitWrites()
+                    val started = System.nanoTime()
+                    val read = backend.indexes(dimension) { done, total ->
+                        Net.toClient(player, request, S2C.PROGRESS, Bodies.writeProgress(done, total))
                     }
+                    Constants.LOG.info(
+                        "{} region headers of {} read for {} in {} ms",
+                        read.size, Bodies.dimensionId(dimension), player.name.string, Constants.ms(started),
+                    )
+                    reply(player, request, Bodies.writeIndexes(read))
                 }
 
                 C2S.INDEX -> Bodies.read(body) { buf ->
@@ -154,7 +166,7 @@ object EditorService {
                     val rx = buf.readInt()
                     val rz = buf.readInt()
                     val key = "${Bodies.dimensionId(dimension)}|$rx|$rz"
-                    val stamp = stampOf(dimension, rx, rz)
+                    val stamp = RenderStore.stamp(dimension, rx, rz)
                     indexCache[key, stamp]?.let { return@read reply(player, request, it) }
                     onDimension(dimension) {
                         val encoded = Bodies.writeIndex(backend.index(dimension, rx, rz))
@@ -177,14 +189,28 @@ object EditorService {
                     val rz = buf.readInt()
                     val step = buf.readVarInt()
                     val maxY = if (buf.readBoolean()) buf.readInt() else null
+                    val known = buf.readLong()
                     val key = "${Bodies.dimensionId(dimension)}|$rx|$rz|$step|$maxY"
-                    val stamp = stampOf(dimension, rx, rz)
-                    renderCache[key, stamp]?.let { return@read reply(player, request, it) }
+                    val stamp = RenderStore.stamp(dimension, rx, rz)
+                    if (stamp != 0L && known == stamp) return@read reply(player, request, Bodies.writeRender(stamp, null))
+                    fun cached(): ByteArray? = renderCache[key, stamp] ?: if (maxY != null || stamp == 0L) null else
+                        backend.renders.read(dimension, rx, rz, step)?.takeIf { it.first == stamp }?.second
+                            ?.also { renderCache.put(key, stamp, it) }
+                    cached()?.let { return@read reply(player, request, Bodies.writeRender(stamp, it)) }
                     session.renders.withPermit {
                         onDimension(dimension) {
-                            val encoded = Bodies.writePixels(backend.render(dimension, rx, rz, step, maxY))
-                            renderCache.put(key, stamp, encoded)
-                            reply(player, request, encoded)
+                            // Another session may have rendered it while this one waited for the dimension
+                            val packed = cached() ?: run {
+                                val pixels = backend.render(dimension, rx, rz, step, maxY)
+                                Bodies.deflate(Bodies.writePixels(pixels)).also {
+                                    renderCache.put(key, stamp, it)
+                                    // A chunk that failed may just have been mid-write
+                                    if (pixels != null && pixels.unreadable.isEmpty() && maxY == null && stamp != 0L) {
+                                        backend.renders.write(dimension, rx, rz, step, stamp, it)
+                                    }
+                                }
+                            }
+                            reply(player, request, Bodies.writeRender(stamp, packed))
                         }
                     }
                 }
@@ -206,6 +232,16 @@ object EditorService {
                     val rz = buf.readInt()
                     onDimension(dimension) {
                         reply(player, request, Bodies.writeEntities(backend.entities(dimension, rx, rz)))
+                    }
+                }
+
+                C2S.CHUNK_INFO -> Bodies.read(body) { buf ->
+                    val dimension = backend.dimension(buf.readUtf()) ?: return@read fail(player, request, DIMENSION_GONE)
+                    val pos = ChunkPos(buf.readInt(), buf.readInt())
+                    val minY = buf.readInt()
+                    val facts = Bodies.readFacts(buf.readVarInt())
+                    onDimension(dimension) {
+                        reply(player, request, Bodies.writeChunkInfo(backend.chunkInfo(dimension, pos, facts, minY)))
                     }
                 }
 
@@ -351,6 +387,22 @@ object EditorService {
                     reply(player, request, hello(backend, true, canWrite))
                 }
 
+                C2S.GENERATE -> Bodies.read(body) { buf ->
+                    val dimension = backend.dimension(buf.readUtf()) ?: return@read fail(player, request, DIMENSION_GONE)
+                    val task = Bodies.readGenerateTask(buf)
+                    val chunks = Bodies.readGenerateChunks(buf)
+                    val running = server ?: return@read fail(player, request, "chunkeditor.remote.error.unavailable")
+                    val world = Bodies.dimensionId(dimension)
+                    val outcome = ChunkyBridge.start(running, world, task, chunks)
+                    if (outcome is GenerateOutcome.Started) {
+                        Constants.LOG.info(
+                            "pregen of {} chunk(s) in {} requested by {}",
+                            outcome.chunks, world, player.name.string,
+                        )
+                    }
+                    reply(player, request, Bodies.writeGenerate(outcome))
+                }
+
                 C2S.FORCE_SAVE -> {
                     backend.forceSave(player.name.string)
                     invalidate()
@@ -375,7 +427,7 @@ object EditorService {
     ) {
         val regions = wanted.mapNotNull { (rx, rz) -> backend.index(dimension, rx, rz) }
         val key = "${Bodies.dimensionId(dimension)}|${source.ordinal}|$argument|$minY|${wanted.size}|${wanted.hashCode()}"
-        val stamp = regions.sumOf { stampOf(dimension, it.rx, it.rz) }
+        val stamp = regions.sumOf { RenderStore.stamp(dimension, it.rx, it.rz) }
         scanCache[key, stamp]?.let { return reply(player, request, it) }
         onDimension(dimension) {
             val result = backend.scan(dimension, regions, source, argument, minY) { done, total ->
@@ -420,14 +472,6 @@ object EditorService {
         scanCache.clear()
     }
 
-    private fun stampOf(dimension: WorldDimension, rx: Int, rz: Int): Long = try {
-        val file = dimension.regionDir.resolve("r.$rx.$rz.mca")
-        val attributes = Files.readAttributes(file, java.nio.file.attribute.BasicFileAttributes::class.java)
-        attributes.lastModifiedTime().toMillis() * 31 + attributes.size()
-    } catch (_: Exception) {
-        0L
-    }
-
     private fun queue(): JobQueue {
         val jobs = ServerJobs.list()
         return JobQueue(
@@ -441,7 +485,7 @@ object EditorService {
 
     /** Everything that changes the world, queue or lib */
     private val WRITE_KINDS = setOf(
-        C2S.JOB_DELETE, C2S.JOB_PASTE, C2S.FORCE_SAVE,
+        C2S.JOB_DELETE, C2S.JOB_PASTE, C2S.FORCE_SAVE, C2S.GENERATE,
         C2S.CLIP_UPLOAD_OPEN, C2S.CLIP_UPLOAD, C2S.CLIP_UPLOAD_END, C2S.CLIP_EXPORT, C2S.SELECTION_EXPORT,
         C2S.CLIP_DELETE, C2S.SELECTION_DELETE, C2S.JOB_LIST, C2S.JOB_CANCEL, C2S.JOB_BACKUP,
         C2S.CLIP_FILES, C2S.CLIP_DOWNLOAD,

@@ -180,7 +180,7 @@ object ChunkClipImport {
      * The target's section range, probed off a chunk it already holds
      */
     private fun sectionRange(target: WorldDimension): Pair<Int, Int> {
-        val store = ChunkRegions.storage(target, SUB_REGION) ?: return WIDE_OPEN
+        val store = ChunkRegions.reader(target, SUB_REGION) ?: return WIDE_OPEN
         store.use { source ->
             ChunkRegions.listRegions(target).forEach { (rx, rz) ->
                 val index = ChunkRegions.readIndex(target, rx, rz) ?: return@forEach

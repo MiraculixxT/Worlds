@@ -57,7 +57,7 @@ object ChunkMapRenderer {
         dimension: WorldDimension, rx: Int, rz: Int, step: Int = 1, maxY: Int? = null,
     ): RegionPixels? =
         withContext(Dispatchers.IO) {
-            val store = ChunkRegions.storage(dimension, "region") ?: return@withContext null
+            val store = ChunkRegions.reader(dimension, SUB_REGION) ?: return@withContext null
             val pixels = REGION_BLOCKS / step
             val perChunk = 16 / step
             val colors = IntArray(pixels * pixels) { NO_COLOR }
@@ -85,8 +85,9 @@ object ChunkMapRenderer {
                     }
                 }
             } finally {
-                runCatching { store.close() }
+                store.close()
             }
+            unreadable.addAll(store.failed)
             RegionPixels(
                 pixels, shade(colors, heights, depths, pixels, step), unreadable,
                 palette.keys.toList(), if (palette.isEmpty()) null else tints,

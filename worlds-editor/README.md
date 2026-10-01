@@ -2,11 +2,15 @@
 
 An MCA-Selector like chunk map, in game.
 
+### 🔻 Download: **[Modrinth](https://modrinth.com/mod/mca-selector)** & [CurseForge](https://www.curseforge.com/minecraft/mc-mods/mca-selector)
+
 Adds a **Chunk Editor** button to Minecraft's world edit screen (`World Menu -> Edit -> Chunk Editor`).
 View the whole map & select chunks by hand or by criteria (playtime, staleness, distance from spawn), and delete them so
 the game regenerates them on the next visit.
 
-![preview](https://cdn.modrinth.com/data/xO4qs4xy/images/23f3356b074d5a95666b457e456133cf612a2751.webp)
+[![YouTube Video](https://github.com/user-attachments/assets/91ba00d0-91d1-4d28-881d-65c74a60b317)](https://www.youtube.com/watch?v=50ZBXUq0quk)
+
+---
 
 * Terrain rendering straight off the region files
   * Respects data driven properties (biome tint, blocks, ...)
@@ -16,8 +20,10 @@ the game regenerates them on the next visit.
   * Markers (e.g. player markers)
 * Every dimension the save has, including custom dimensions
 * Deletes `region/`, `entities/` and `poi/` together (after backup)
+* Server / live-world viewing & editing
+* Chunky integration
 
-![fun with zoom](https://i.postimg.cc/4yyfMz5x/MCA.webp)
+![fun with zoom](https://cdn.modrinth.com/data/xO4qs4xy/images/23f3356b074d5a95666b457e456133cf612a2751.webp)
 
 ---
 
@@ -72,7 +78,7 @@ Those can be used to display everything that can be mapped to a numeric value.
 **Block Count**: Input takes either ` ` (count all blocks), a block id `minecraft:spawner` or a block tag `#minecraft:logs` (tags resolve against installed datapacks)
 
 **NBT Path**: Point at any NBT value from `region/*.mca` files. Arrays/Lists get resolved to their size.
-Paths can be walked down with `.` & lists picked with `[n]` like `sections[0].Y`. 
+Paths can be walked down with `.` & lists picked with `[n]` like `sections[0].Y`.
 Read more about available data here: https://minecraft.wiki/w/Chunk_format
 
 </details>
