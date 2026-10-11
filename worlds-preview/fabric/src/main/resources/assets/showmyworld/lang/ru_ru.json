@@ -1,0 +1,12 @@
+{
+  "modmenu.descriptionTranslation.showmyworld": "Перед тем как играть, посмотрите на свой мир прямо в списке миров и серверов! Панорама адаптируется под ваше последнее местоположение.",
+  "showmyworld.settings.title": "Show My World",
+  "showmyworld.settings.panorama": "Панорама",
+  "showmyworld.settings.show": "Показать панораму мира",
+  "showmyworld.settings.auto_create": "Автозахват",
+  "showmyworld.settings.fade": "Затухание (мс)",
+  "showmyworld.settings.default": "Панорама по умолчанию",
+  "showmyworld.settings.default.vanilla": "Ванильная",
+  "showmyworld.settings.default.last_played": "Последняя",
+  "showmyworld.settings.default.random": "Случайная"
+}
